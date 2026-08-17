@@ -14,8 +14,19 @@ The daemon still owns process supervision, HTTP routes, local model runners, pla
 ## Build
 
 ```sh
+./make.sh
+```
+
+That configures CMake, builds `libholder`, and runs CTest. There are no standalone
+core tests yet, so CTest may report that no tests were found until tests move into
+this repository.
+
+The raw CMake commands are:
+
+```sh
 cmake -S . -B build
-cmake --build build
+cmake --build build --target holder
+ctest --test-dir build --output-on-failure
 ```
 
 Required dependencies are intentionally core dependencies, not optional plugins:

@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.22)
 project(holder VERSION 0.1.0 LANGUAGES CXX)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
+include(CTest)
 
 option(HOLDER_CORE_WARNINGS_AS_ERRORS "Treat Holder core warnings as errors" OFF)
 
@@ -193,6 +194,10 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   if(HOLDER_CORE_WARNINGS_AS_ERRORS)
     target_compile_options(holder PRIVATE -Werror)
   endif()
+endif()
+
+if(BUILD_TESTING)
+  add_subdirectory(tests)
 endif()
 
 install(TARGETS holder
