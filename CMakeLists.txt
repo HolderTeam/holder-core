@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(holder_core VERSION 0.1.0 LANGUAGES CXX)
+project(holder VERSION 0.1.0 LANGUAGES CXX)
 include(GNUInstallDirs)
 
 option(HOLDER_CORE_WARNINGS_AS_ERRORS "Treat Holder core warnings as errors" OFF)
@@ -104,7 +104,7 @@ else()
   set(HOLDER_CORE_HAVE_WINDOWS_CREDENTIAL_MANAGER 0)
 endif()
 
-add_library(holder_core STATIC
+add_library(holder STATIC
   src/ai/AiMessageFrontMatter.cpp
   src/ai/AiMessagePaths.cpp
   src/ai/AiMessageRepo.cpp
@@ -139,27 +139,27 @@ add_library(holder_core STATIC
   src/resource/ResourceRepo.cpp
   src/sync/ProjectSyncPolicy.cpp
 )
-add_library(Holder::Core ALIAS holder_core)
+add_library(Holder::Core ALIAS holder)
 
-target_include_directories(holder_core PUBLIC
+target_include_directories(holder PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
-  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/holder-core>
+  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/holder>
 )
 
-target_compile_definitions(holder_core PUBLIC
+target_compile_definitions(holder PUBLIC
   CARD_SERVER_HAVE_LIBGIT2=1
   HOLDER_HAVE_MACOS_KEYCHAIN=${HOLDER_CORE_HAVE_MACOS_KEYCHAIN}
   HOLDER_HAVE_WINDOWS_CREDENTIAL_MANAGER=${HOLDER_CORE_HAVE_WINDOWS_CREDENTIAL_MANAGER}
 )
 
 if(LIBSECRET_FOUND)
-  target_link_libraries(holder_core PUBLIC PkgConfig::LIBSECRET)
-  target_compile_definitions(holder_core PUBLIC HOLDER_HAVE_LIBSECRET=1)
+  target_link_libraries(holder PUBLIC PkgConfig::LIBSECRET)
+  target_compile_definitions(holder PUBLIC HOLDER_HAVE_LIBSECRET=1)
 else()
-  target_compile_definitions(holder_core PUBLIC HOLDER_HAVE_LIBSECRET=0)
+  target_compile_definitions(holder PUBLIC HOLDER_HAVE_LIBSECRET=0)
 endif()
 
-target_link_libraries(holder_core PUBLIC
+target_link_libraries(holder PUBLIC
   OpenSSL::SSL
   OpenSSL::Crypto
   ${HOLDER_CORE_SQLITE3_TARGET}
@@ -172,34 +172,34 @@ target_link_libraries(holder_core PUBLIC
 )
 
 if(HOLDER_CORE_HAVE_MACOS_KEYCHAIN)
-  target_link_libraries(holder_core PUBLIC
+  target_link_libraries(holder PUBLIC
     "${HOLDER_CORE_SECURITY_FRAMEWORK}"
     "${HOLDER_CORE_COREFOUNDATION_FRAMEWORK}"
   )
 endif()
 
 if(HOLDER_CORE_HAVE_WINDOWS_CREDENTIAL_MANAGER)
-  target_link_libraries(holder_core PUBLIC Advapi32)
+  target_link_libraries(holder PUBLIC Advapi32)
 endif()
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-  target_compile_options(holder_core PRIVATE
+  target_compile_options(holder PRIVATE
     -Wall -Wextra -Wpedantic
     -Wshadow -Wconversion -Wsign-conversion
     -Wno-unknown-pragmas
   )
   if(HOLDER_CORE_WARNINGS_AS_ERRORS)
-    target_compile_options(holder_core PRIVATE -Werror)
+    target_compile_options(holder PRIVATE -Werror)
   endif()
 endif()
 
-install(TARGETS holder_core
-  EXPORT holder_coreTargets
+install(TARGETS holder
+  EXPORT holderTargets
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 install(DIRECTORY src/
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/holder-core
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/holder
   FILES_MATCHING PATTERN "*.h"
 )
