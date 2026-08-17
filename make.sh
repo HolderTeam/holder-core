@@ -14,12 +14,14 @@ Usage:
 Commands:
   test      Configure, build libholder, and run CTest
   build     Configure and build libholder
+  coverage  Build, run tests, and generate coverage reports
   install   Build and install libholder into out/install/local
   clean     Remove local build and install output
   help      Show this help
 
 Examples:
   ./make.sh
+  ./make.sh coverage
   ./make.sh build Debug
   INSTALL_PREFIX=/tmp/holder-core ./make.sh install
 EOF
@@ -75,6 +77,63 @@ run_tests() {
   ctest --test-dir "${BUILD_DIR}" --output-on-failure
 }
 
+coverage_all() {
+  local build_dir="build-coverage"
+  local report_dir="${build_dir}/coverage"
+  local info_base="${build_dir}/coverage-base.info"
+  local info_tests="${build_dir}/coverage-tests.info"
+  local info_total="${build_dir}/coverage.info"
+  local coverage_json="${report_dir}/coverage.json"
+  local gcov_executable="gcov"
+
+  if command -v gcov-13 >/dev/null 2>&1; then
+    gcov_executable="gcov-13"
+  fi
+
+  cmake -S . -B "${build_dir}" -G Ninja \
+    -DCMAKE_BUILD_TYPE=Debug \
+    -DCMAKE_CXX_FLAGS="--coverage -O0 -g"
+
+  cmake --build "${build_dir}" --parallel "$(jobs)"
+
+  lcov --directory "${build_dir}" --zerocounters
+  lcov --capture --initial --directory "${build_dir}" --output-file "${info_base}" \
+    --ignore-errors gcov,gcov \
+    --rc geninfo_unexecuted_blocks=1
+  ctest --test-dir "${build_dir}" --output-on-failure
+  lcov --capture --directory "${build_dir}" --output-file "${info_tests}" \
+    --ignore-errors gcov,gcov \
+    --rc geninfo_unexecuted_blocks=1
+  lcov --add-tracefile "${info_base}" --add-tracefile "${info_tests}" --output-file "${info_total}"
+  lcov --remove "${info_total}" \
+    '/usr/*' \
+    '*/tests/*' \
+    '*/CMakeFiles/*/CompilerIdCXX/*' \
+    --output-file "${info_total}"
+
+  genhtml "${info_total}" --output-directory "${report_dir}" --title "holder core coverage"
+
+  if command -v gcovr >/dev/null 2>&1; then
+    gcovr \
+      --root . \
+      --object-directory "${build_dir}" \
+      --filter 'src/' \
+      --exclude 'tests/' \
+      --gcov-executable "${gcov_executable}" \
+      --gcov-ignore-errors all \
+      --exclude-pattern-prefix LCOV \
+      --exclude-unreachable-branches \
+      --exclude-throw-branches \
+      --exclude-function-lines \
+      --json-pretty \
+      --output "${coverage_json}"
+    echo "Coverage JSON:   ${coverage_json}"
+  else
+    echo "Coverage JSON:   skipped (gcovr not found)" >&2
+  fi
+  echo "Coverage report: ${report_dir}/index.html"
+}
+
 install_core() {
   build
   cmake --install "${BUILD_DIR}" --prefix "${INSTALL_PREFIX}"
@@ -86,6 +145,9 @@ case "${MODE}" in
     ;;
   build)
     build
+    ;;
+  coverage)
+    coverage_all
     ;;
   install)
     install_core
