@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 
 project(holder VERSION 0.1.0 LANGUAGES CXX)
 include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
 
 option(HOLDER_CORE_WARNINGS_AS_ERRORS "Treat Holder core warnings as errors" OFF)
 
@@ -140,6 +141,7 @@ add_library(holder STATIC
   src/sync/ProjectSyncPolicy.cpp
 )
 add_library(Holder::Core ALIAS holder)
+set_target_properties(holder PROPERTIES EXPORT_NAME Core)
 
 target_include_directories(holder PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
@@ -202,4 +204,24 @@ install(TARGETS holder
 install(DIRECTORY src/
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/holder
   FILES_MATCHING PATTERN "*.h"
+)
+install(EXPORT holderTargets
+  NAMESPACE Holder::
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/holder
+)
+
+configure_package_config_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/cmake/holderConfig.cmake.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/holderConfig.cmake"
+  INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/holder
+)
+write_basic_package_version_file(
+  "${CMAKE_CURRENT_BINARY_DIR}/holderConfigVersion.cmake"
+  VERSION ${PROJECT_VERSION}
+  COMPATIBILITY SameMajorVersion
+)
+install(FILES
+  "${CMAKE_CURRENT_BINARY_DIR}/holderConfig.cmake"
+  "${CMAKE_CURRENT_BINARY_DIR}/holderConfigVersion.cmake"
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/holder
 )

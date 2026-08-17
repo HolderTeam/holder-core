@@ -1,0 +1,20 @@
+{
+  "name": "holder-core",
+  "version-string": "0.1.0",
+  "builtin-baseline": "9e593bb18ea69cc5095e012465dcd675a822ed0d",
+  "dependencies": [
+    "libgit2",
+    "libsodium",
+    "nlohmann-json",
+    "openssl",
+    "spdlog",
+    {
+      "name": "sqlite3",
+      "features": [
+        "fts5",
+        "json1"
+      ]
+    },
+    "yaml-cpp"
+  ]
+}

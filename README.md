@@ -29,3 +29,17 @@ Required dependencies are intentionally core dependencies, not optional plugins:
 - spdlog
 
 On Linux and macOS, CMake currently finds SQLite, libgit2, and libsodium via `pkg-config`. On Windows, use the vcpkg packages that `holder-daemon` already uses.
+
+## Consumption model
+
+For now, Holder consumers should build this repository from source and link `libholder` statically. The exported CMake target is:
+
+```cmake
+Holder::Core
+```
+
+The first supported consumer is `holder-daemon`, which can use `third_party/holder-core` as a submodule or a sibling checkout during local development.
+
+This repository can install headers, `libholder`, and CMake package files for smoke testing, but the project is not promising a stable C++ ABI yet. Do not ship a separate runtime `libholder` package until there is a real external native consumer.
+
+Future non-C++ consumers, such as a C# frontend, should use a separate thin C ABI wrapper rather than binding directly to the C++ API.

@@ -1,0 +1,31 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+find_dependency(OpenSSL)
+find_dependency(Threads)
+find_dependency(nlohmann_json 3.6.0)
+find_dependency(yaml-cpp)
+find_dependency(spdlog)
+
+if(WIN32)
+  find_dependency(unofficial-sodium CONFIG)
+
+  find_package(unofficial-sqlite3 CONFIG QUIET)
+  if(NOT TARGET unofficial::sqlite3::sqlite3)
+    find_dependency(SQLite3)
+  endif()
+
+  find_package(unofficial-libgit2 CONFIG QUIET)
+  find_package(libgit2 CONFIG QUIET)
+else()
+  find_dependency(PkgConfig)
+  pkg_check_modules(SQLITE3 REQUIRED IMPORTED_TARGET sqlite3)
+  pkg_check_modules(SODIUM REQUIRED IMPORTED_TARGET libsodium)
+  pkg_check_modules(LIBGIT2 REQUIRED IMPORTED_TARGET libgit2)
+  if(NOT APPLE)
+    pkg_check_modules(LIBSECRET IMPORTED_TARGET libsecret-1)
+  endif()
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/holderTargets.cmake")
