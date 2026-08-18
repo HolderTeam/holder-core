@@ -18,10 +18,22 @@ jobs:
       - name: Check out holder-core
         uses: actions/checkout@v4
 
+      - name: Restore apt package cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .apt-cache
+          key: apt-${{ runner.os }}-${{ hashFiles('.github/workflows/core.yml') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            apt-${{ runner.os }}-${{ hashFiles('.github/workflows/core.yml') }}-
+            apt-${{ runner.os }}-
+
       - name: Install dependencies
         run: |
+          mkdir -p "${PWD}/.apt-cache/archives/partial"
           sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get \
+            -o Dir::Cache::Archives="${PWD}/.apt-cache/archives" \
+            install -y \
             cmake \
             catch2 \
             ninja-build \
@@ -36,6 +48,13 @@ jobs:
             libsecret-1-dev \
             lcov \
             gcovr
+
+      - name: Save apt package cache
+        if: success() && github.event_name != 'pull_request'
+        uses: actions/cache/save@v4
+        with:
+          path: .apt-cache
+          key: apt-${{ runner.os }}-${{ hashFiles('.github/workflows/core.yml') }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
