@@ -1,5 +1,6 @@
 #include "holder/holder.h"
 
+#include "card/CardRepo.h"
 #include "platform/Db.h"
 #include "project/ProjectRepo.h"
 
@@ -83,6 +84,26 @@ nlohmann::json project_to_json(const holder::model::Project& project) {
   return body;
 }
 
+nlohmann::json card_to_json(const holder::model::Card& card) {
+  nlohmann::json body = {
+      {"card_id", card.card_id},
+      {"project_id", card.project_id},
+      {"title", card.title},
+      {"rel_path", card.rel_path},
+      {"sort_key", card.sort_key},
+      {"created_at", card.created_at},
+      {"updated_at", card.updated_at},
+  };
+
+  body["parent_card_id"] = card.parent_card_id.has_value()
+                               ? nlohmann::json(*card.parent_card_id)
+                               : nlohmann::json(nullptr);
+  body["deleted_at"] = card.deleted_at.has_value()
+                           ? nlohmann::json(*card.deleted_at)
+                           : nlohmann::json(nullptr);
+  return body;
+}
+
 } // namespace
 
 int holder_context_open(
@@ -142,6 +163,48 @@ int holder_project_list(holder_context* context, char** out_json, holder_error**
     nlohmann::json body = nlohmann::json::array();
     for (const auto& project : repo.list()) {
       body.push_back(project_to_json(project));
+    }
+
+    auto* out = duplicate_string(body.dump());
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    }
+
+    *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);
+  }
+}
+
+int holder_card_list(
+    holder_context* context,
+    const char* project_id,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (project_id == nullptr || project_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "project_id must not be empty");
+  }
+
+  try {
+    holder::card::CardRepo repo(context->db);
+    nlohmann::json body = nlohmann::json::array();
+    for (const auto& card : repo.list_all(project_id)) {
+      body.push_back(card_to_json(card));
     }
 
     auto* out = duplicate_string(body.dump());

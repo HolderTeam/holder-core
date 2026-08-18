@@ -21,7 +21,7 @@ if(WIN32)
   )
 endif()
 
-if(WIN32)
+if(WIN32 OR ANDROID)
   set(HOLDER_CORE_USE_PKG_CONFIG_DEPS OFF)
 else()
   set(HOLDER_CORE_USE_PKG_CONFIG_DEPS ON)
@@ -43,7 +43,7 @@ else()
   set(HOLDER_CORE_YAML_CPP_TARGET yaml-cpp)
 endif()
 
-if(WIN32)
+if(WIN32 OR ANDROID)
   find_package(unofficial-sqlite3 CONFIG QUIET)
   if(TARGET unofficial::sqlite3::sqlite3)
     set(HOLDER_CORE_SQLITE3_TARGET unofficial::sqlite3::sqlite3)
@@ -146,7 +146,10 @@ add_library(holder STATIC
   src/sync/ProjectSyncPolicy.cpp
 )
 add_library(Holder::Core ALIAS holder)
-set_target_properties(holder PROPERTIES EXPORT_NAME Core)
+set_target_properties(holder PROPERTIES
+  EXPORT_NAME Core
+  POSITION_INDEPENDENT_CODE ON
+)
 
 target_include_directories(holder PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

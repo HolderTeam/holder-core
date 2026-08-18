@@ -28,6 +28,13 @@ void holder_context_destroy(holder_context* context);
 
 int holder_project_list(holder_context* context, char** out_json, holder_error** out_error);
 
+int holder_card_list(
+    holder_context* context,
+    const char* project_id,
+    char** out_json,
+    holder_error** out_error
+);
+
 void holder_string_free(char* value);
 
 const char* holder_error_message(const holder_error* error);
