@@ -239,6 +239,7 @@ TEST_CASE("AiRunRepo throws when table missing for prepare paths", "[db]") {
   run.updated_at = 1;
 
   REQUIRE_THROWS(repo.create(run));
+  REQUIRE_THROWS(repo.get("run-prepare"));
   REQUIRE_THROWS(repo.list_by_thread("thread-1"));
   REQUIRE_THROWS(repo.list_by_project("proj-1"));
   REQUIRE_THROWS(repo.update_status(

@@ -619,6 +619,36 @@ TEST_CASE("Rebuilder rejects short derived card_id from filename", "[rebuild]") 
   REQUIRE_THROWS(rebuilder.rebuild_project(project));
 }
 
+TEST_CASE("Rebuilder rejects short derived ai message id from filename", "[rebuild]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+
+  const std::string project_id = "proj-1";
+  const auto root = dir / "repo";
+  std::filesystem::create_directories(root);
+  create_project(db, project_id, root.string());
+
+  const auto card_rel = holder::core::card_rel_path("abcd1234");
+  write_file(root / card_rel, "# ok\n");
+
+  const auto short_message_path = root / "ai_messages" / "xy.md";
+  write_file(short_message_path, "body\n");
+
+  holder::index::FtsIndexer fts(db);
+  holder::store::Rebuilder rebuilder(db, &fts);
+
+  holder::model::Project project;
+  project.project_id = project_id;
+  project.name = "Project";
+  project.root_path = root.string();
+  project.created_at = 1;
+  project.updated_at = 1;
+
+  REQUIRE_THROWS(rebuilder.rebuild_project(project));
+}
+
 TEST_CASE("Rebuilder rejects invalid ai message front matter", "[rebuild]") {
   const auto dir = make_temp_dir();
   holder::platform::Db db;

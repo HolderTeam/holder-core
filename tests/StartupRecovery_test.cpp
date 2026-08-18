@@ -12,6 +12,7 @@
 #include "model/Card.h"
 #include "model/Project.h"
 #include "privacy/ProjectPrivacy.h"
+#include "project/Rebuilder.h"
 #include "project/ProjectRepo.h"
 #include "project/StartupRecovery.h"
 
@@ -38,6 +39,90 @@ std::string join_lines3_sr(const std::vector<std::string>& lines) {
 }
 
 } // namespace
+
+TEST_CASE("Startup recovery returns empty when projects root is missing", "[startup][recovery]") {
+  const auto dir = holder::test::make_temp_dir();
+  const auto recovered_db_path = dir / "recovered.db";
+  const auto projects_root = dir / "does-not-exist";
+
+  auto recovered_db = holder::test::open_db_with_schema(recovered_db_path);
+  holder::index::FtsIndexer recovered_fts(recovered_db);
+  const auto recovered = holder::project::recover_projects_from_disk(
+      recovered_db,
+      &recovered_fts,
+      projects_root,
+      []() {
+        return std::string("unused");
+      }
+  );
+
+  REQUIRE(recovered.empty());
+}
+
+TEST_CASE("Rebuilder throws when project root is missing", "[startup][recovery]") {
+  const auto dir = holder::test::make_temp_dir();
+  auto db = holder::test::open_db_with_schema(dir / "holder.db");
+  holder::store::Rebuilder rebuilder(db, nullptr, nullptr, false);
+
+  holder::model::Project project;
+  project.project_id = "proj-missing-root";
+  project.name = "Missing";
+  project.root_path = (dir / "missing").string();
+  project.created_at = 1;
+  project.updated_at = 1;
+
+  REQUIRE_THROWS(rebuilder.rebuild_project(project));
+}
+
+TEST_CASE("Rebuilder rejects card front matter without card id", "[startup][recovery]") {
+  const auto dir = holder::test::make_temp_dir();
+  const auto root = dir / "project";
+  std::filesystem::create_directories(root / "cards" / "ab" / "cd");
+  {
+    std::ofstream out(
+        root / "cards" / "ab" / "cd" / "abcd1234.md",
+        std::ios::binary | std::ios::trunc
+    );
+    REQUIRE(out.is_open());
+    out << "---\ntitle: Missing Id\n---\n# Missing Id\n";
+  }
+
+  auto db = holder::test::open_db_with_schema(dir / "holder.db");
+  holder::store::Rebuilder rebuilder(db, nullptr, nullptr, false);
+  holder::model::Project project;
+  project.project_id = "proj-card-missing-id";
+  project.name = "Missing Card Id";
+  project.root_path = root.string();
+  project.created_at = 1;
+  project.updated_at = 1;
+
+  REQUIRE_THROWS(rebuilder.rebuild_project(project));
+}
+
+TEST_CASE("Rebuilder rejects ai message front matter without message id", "[startup][recovery]") {
+  const auto dir = holder::test::make_temp_dir();
+  const auto root = dir / "project";
+  std::filesystem::create_directories(root / "ai_messages" / "ab" / "cd");
+  {
+    std::ofstream out(
+        root / "ai_messages" / "ab" / "cd" / "abcd1234.md",
+        std::ios::binary | std::ios::trunc
+    );
+    REQUIRE(out.is_open());
+    out << "---\nthread_id: thread-1\nrole: assistant\nsource: manual\n---\nhello\n";
+  }
+
+  auto db = holder::test::open_db_with_schema(dir / "holder.db");
+  holder::store::Rebuilder rebuilder(db, nullptr, nullptr, false);
+  holder::model::Project project;
+  project.project_id = "proj-message-missing-id";
+  project.name = "Missing Message Id";
+  project.root_path = root.string();
+  project.created_at = 1;
+  project.updated_at = 1;
+
+  REQUIRE_THROWS(rebuilder.rebuild_project(project));
+}
 
 TEST_CASE(
     "Startup recovery rebuilds projects and cards from existing project roots",

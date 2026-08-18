@@ -190,6 +190,148 @@ TEST_CASE("ensure_encrypted_project_ready stores 32-byte privacy key material", 
   REQUIRE(decoded.size() == holder::privacy::kPrivacyKeyBytes);
 }
 
+TEST_CASE("ensure_project_key_material reuses existing project key id", "[privacy]") {
+  const auto dir = holder::test::make_temp_dir();
+  const auto db_path = dir / "holder.db";
+  holder::test::EnvGuard keystore_env("HOLDER_TEST_KEYSTORE_DIR", (dir / "keystore").string());
+  auto db = holder::test::open_db_with_schema(db_path);
+  holder::project::ProjectRepo repo(db);
+
+  holder::model::Project project;
+  project.project_id = "proj-existing-key";
+  project.name = "Project";
+  project.root_path = (dir / "repo").string();
+  project.privacy_mode = "encrypted_git";
+  project.project_key_id = std::string("existing-key");
+  project.created_at = 1;
+  project.updated_at = 1;
+  repo.create(project);
+
+  const auto key_id = holder::privacy::ensure_project_key_material(
+      repo,
+      project.project_id,
+      project.project_key_id,
+      2,
+      []() {
+        return std::string("new-key");
+      }
+  );
+
+  REQUIRE(key_id == "existing-key");
+  REQUIRE_FALSE(std::filesystem::exists(dir / "keystore" / "new-key.key"));
+}
+
+TEST_CASE("recovery token metadata and import preserve project key and remote", "[privacy]") {
+  const auto dir = holder::test::make_temp_dir();
+  const auto db_path = dir / "holder.db";
+  holder::test::EnvGuard keystore_env("HOLDER_TEST_KEYSTORE_DIR", (dir / "keystore").string());
+  auto db = holder::test::open_db_with_schema(db_path);
+  holder::project::ProjectRepo repo(db);
+
+  holder::model::Project project;
+  project.project_id = "proj-token-metadata";
+  project.name = "Home";
+  project.root_path = (dir / "repo").string();
+  project.privacy_mode = "encrypted_git";
+  project.created_at = 1;
+  project.updated_at = 1;
+  repo.create(project);
+
+  holder::git::RealGitOps git;
+  holder::privacy::ensure_encrypted_project_ready(
+      git,
+      repo,
+      project.project_id,
+      project.root_path,
+      std::nullopt,
+      2,
+      []() {
+        return std::string("key-token-metadata");
+      }
+  );
+
+  const auto fetched = repo.get(project.project_id);
+  REQUIRE(fetched.has_value());
+  REQUIRE(fetched->project_key_id.has_value());
+  const auto key_id = fetched->project_key_id.value();
+  const std::string remote = "git@example.com:org/repo.git";
+  const auto token = holder::privacy::export_recovery_token(
+      project.project_id,
+      key_id,
+      "1234",
+      std::optional<std::string>("Home"),
+      std::optional<std::string>(remote)
+  );
+
+  const auto metadata = holder::privacy::inspect_recovery_token("1234", token);
+  REQUIRE(metadata.project_id == project.project_id);
+  REQUIRE(metadata.project_key_id == key_id);
+  REQUIRE(metadata.project_name == std::optional<std::string>("Home"));
+  REQUIRE(metadata.git_remote_url == std::optional<std::string>(remote));
+
+  repo.update_project_key_id(project.project_id, std::optional<std::string>("old-key"), 3);
+  repo.update_git_remote(project.project_id, std::nullopt, 3);
+
+  REQUIRE_NOTHROW(holder::privacy::import_recovery_token(
+      repo,
+      project.project_id,
+      "1234",
+      token,
+      4
+  ));
+
+  const auto imported = repo.get(project.project_id);
+  REQUIRE(imported.has_value());
+  REQUIRE(imported->project_key_id == std::optional<std::string>(key_id));
+  REQUIRE(imported->git_remote_url == std::optional<std::string>(remote));
+}
+
+TEST_CASE("recovery token import maps project id mismatch to RecoveryTokenInvalid", "[privacy]") {
+  const auto dir = holder::test::make_temp_dir();
+  const auto db_path = dir / "holder.db";
+  holder::test::EnvGuard keystore_env("HOLDER_TEST_KEYSTORE_DIR", (dir / "keystore").string());
+  auto db = holder::test::open_db_with_schema(db_path);
+  holder::project::ProjectRepo repo(db);
+
+  holder::model::Project project;
+  project.project_id = "proj-token-mismatch";
+  project.name = "Project";
+  project.root_path = (dir / "repo").string();
+  project.privacy_mode = "encrypted_git";
+  project.created_at = 1;
+  project.updated_at = 1;
+  repo.create(project);
+
+  holder::git::RealGitOps git;
+  holder::privacy::ensure_encrypted_project_ready(
+      git,
+      repo,
+      project.project_id,
+      project.root_path,
+      std::nullopt,
+      2,
+      []() {
+        return std::string("key-token-mismatch");
+      }
+  );
+
+  const auto fetched = repo.get(project.project_id);
+  REQUIRE(fetched.has_value());
+  REQUIRE(fetched->project_key_id.has_value());
+  const auto token = holder::privacy::export_recovery_token(
+      project.project_id,
+      fetched->project_key_id.value(),
+      "1234"
+  );
+
+  try {
+    holder::privacy::import_recovery_token(repo, "different-project", "1234", token, 3);
+    FAIL("Expected recovery token mismatch");
+  } catch (const holder::privacy::PrivacyError& ex) {
+    REQUIRE(ex.code() == holder::privacy::PrivacyErrorCode::RecoveryTokenInvalid);
+  }
+}
+
 TEST_CASE("staged card blob fails index safety check without explicit encryption", "[privacy]") {
   const auto dir = holder::test::make_temp_dir();
   const auto db_path = dir / "holder.db";

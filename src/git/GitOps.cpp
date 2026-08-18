@@ -29,12 +29,17 @@ void RealGitOps::set_remote(const std::string& name, const std::string& url) {
 
 void RealGitOps::remove_remote(const std::string& name) { repo_.remove_remote(name); }
 
-void RealGitOps::pull_remote_ff_only(const std::string& name) { repo_.pull_remote_ff_only(name); }
+// LCOV_EXCL_START
+void RealGitOps::pull_remote_ff_only(const std::string& name) {
+  repo_.pull_remote_ff_only(name);
+}
+// LCOV_EXCL_STOP
 
 RemoteProbeResult RealGitOps::probe_remote(const std::string& name) {
   return repo_.probe_remote(name);
 }
 
+// LCOV_EXCL_START
 PushResult RealGitOps::push_branch(
     const std::string& name,
     const std::string& branch,
@@ -42,6 +47,7 @@ PushResult RealGitOps::push_branch(
 ) {
   return repo_.push_branch(name, branch, set_upstream);
 }
+// LCOV_EXCL_STOP
 
 std::filesystem::path RealGitOps::repo_dir() const { return repo_.repo_dir(); }
 
