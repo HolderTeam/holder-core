@@ -21,7 +21,7 @@ jobs:
       - name: Restore apt package cache
         uses: actions/cache/restore@v4
         with:
-          path: .apt-cache
+          path: .apt-cache/debs
           key: apt-${{ runner.os }}-${{ hashFiles('.github/workflows/core.yml') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             apt-${{ runner.os }}-${{ hashFiles('.github/workflows/core.yml') }}-
@@ -29,7 +29,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          mkdir -p "${PWD}/.apt-cache/archives/partial"
+          mkdir -p "${PWD}/.apt-cache/archives/partial" "${PWD}/.apt-cache/debs"
+          cp "${PWD}"/.apt-cache/debs/*.deb "${PWD}/.apt-cache/archives/" 2>/dev/null || true
           sudo apt-get update
           sudo apt-get \
             -o Dir::Cache::Archives="${PWD}/.apt-cache/archives" \
@@ -48,12 +49,13 @@ jobs:
             libsecret-1-dev \
             lcov \
             gcovr
+          find "${PWD}/.apt-cache/archives" -maxdepth 1 -type f -name '*.deb' -exec cp {} "${PWD}/.apt-cache/debs/" \;
 
       - name: Save apt package cache
         if: success() && github.event_name != 'pull_request'
         uses: actions/cache/save@v4
         with:
-          path: .apt-cache
+          path: .apt-cache/debs
           key: apt-${{ runner.os }}-${{ hashFiles('.github/workflows/core.yml') }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Configure
