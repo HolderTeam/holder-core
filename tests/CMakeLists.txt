@@ -8,18 +8,50 @@ if(TARGET Catch2::Catch2)
 endif()
 
 add_executable(holder_core_tests
+  AiMessageRepo_test.cpp
   AiMessageFrontMatter_test.cpp
   AiMessagePaths_test.cpp
+  AiProviderCredentialRepo_test.cpp
+  AiProviderSettingRepo_test.cpp
+  AiRunRepo_test.cpp
+  AiRunnerRepo_test.cpp
+  AiThreadRepo_test.cpp
   CardFrontMatter_test.cpp
   CardPaths_test.cpp
+  CardRepo_test.cpp
+  CardStore_test.cpp
+  CardStoreFsFailure_test.cpp
+  Cascade_test.cpp
+  Db_test.cpp
+  FsAdapterFailure_test.cpp
+  FtsIndexer_test.cpp
+  GitAdapterFailure_test.cpp
+  GitOps_test.cpp
+  GitRepo_test.cpp
+  LinkRepo_test.cpp
+  Migrations_test.cpp
   PrivacyCryptoService_test.cpp
   PrivacyError_test.cpp
+  ProjectPrivacy_test.cpp
+  ProjectRepo_test.cpp
+  ProjectSyncPolicy_test.cpp
+  ProjectSyncRepo_test.cpp
   PushResult_test.cpp
+  RealFs_test.cpp
+  Reindexer_test.cpp
   RemoteProbe_test.cpp
+  RepoSyncMetrics_test.cpp
+  ResourceRepo_test.cpp
+  SecretStore_test.cpp
+  StartupRecovery_test.cpp
 )
 
 target_link_libraries(holder_core_tests PRIVATE
   Holder::Core
+)
+
+target_compile_definitions(holder_core_tests PRIVATE
+  SCHEMA_SQL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../schema/schema.sql"
 )
 
 if(TARGET Catch2::Catch2)
