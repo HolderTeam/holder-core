@@ -25,6 +25,8 @@
 
 namespace {
 
+using holder::test::EnvUnsetGuard;
+
 std::filesystem::path make_temp_dir_local() {
   const auto base = std::filesystem::temp_directory_path();
   const auto suffix = std::to_string(
@@ -41,32 +43,6 @@ void write_file(const std::filesystem::path& path, const std::string& text) {
   REQUIRE(out.is_open());
   out << text;
 }
-
-class EnvUnsetGuard {
- public:
-  explicit EnvUnsetGuard(const char* key)
-      : key_(key) {
-    const char* current = std::getenv(key_);
-    if (current != nullptr) {
-      had_old_ = true;
-      old_ = current;
-    }
-    unsetenv(key_);
-  }
-
-  ~EnvUnsetGuard() {
-    if (had_old_) {
-      setenv(key_, old_.c_str(), 1);
-    } else {
-      unsetenv(key_);
-    }
-  }
-
- private:
-  const char* key_;
-  bool had_old_ = false;
-  std::string old_;
-};
 
 class PlatformKeyringStoreHookGuard {
  public:

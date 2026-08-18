@@ -58,6 +58,32 @@ class EnvGuard {
   std::string old_;
 };
 
+class EnvUnsetGuard {
+ public:
+  explicit EnvUnsetGuard(const char* key)
+      : key_(key) {
+    const char* current = std::getenv(key_);
+    if (current != nullptr) {
+      had_old_ = true;
+      old_ = current;
+    }
+    unset_env_var(key_);
+  }
+
+  ~EnvUnsetGuard() {
+    if (had_old_) {
+      set_env_var(key_, old_);
+    } else {
+      unset_env_var(key_);
+    }
+  }
+
+ private:
+  const char* key_;
+  bool had_old_ = false;
+  std::string old_;
+};
+
 inline std::filesystem::path make_temp_dir() {
   const auto base = std::filesystem::temp_directory_path();
   const auto suffix = std::to_string(

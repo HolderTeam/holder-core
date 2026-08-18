@@ -5,6 +5,7 @@
 #endif
 
 #include "git/GitRepo.h"
+#include "core_test_helpers.h"
 #include <git2.h>
 
 #include <chrono>
@@ -14,6 +15,8 @@
 #include <sstream>
 
 namespace {
+
+using holder::test::EnvGuard;
 
 std::filesystem::path make_temp_dir() {
   const auto base = std::filesystem::temp_directory_path();
@@ -43,32 +46,6 @@ void init_bare_repo(const std::filesystem::path& repo_path) {
   git_repository_free(repo);
   git_libgit2_shutdown();
 }
-
-class EnvGuard {
- public:
-  EnvGuard(const char* key, const std::string& value)
-      : key_(key) {
-    const char* current = std::getenv(key_);
-    if (current != nullptr) {
-      had_old_ = true;
-      old_ = current;
-    }
-    setenv(key_, value.c_str(), 1);
-  }
-
-  ~EnvGuard() {
-    if (had_old_) {
-      setenv(key_, old_.c_str(), 1);
-    } else {
-      unsetenv(key_);
-    }
-  }
-
- private:
-  const char* key_;
-  bool had_old_ = false;
-  std::string old_;
-};
 
 void detach_head_to_current_commit(const std::filesystem::path& repo_path) {
   git_libgit2_init();
