@@ -26,3 +26,19 @@ TEST_CASE("RealGitOps probe_remote delegates to repo after open", "[git]") {
   REQUIRE(result.status == holder::git::RemoteProbeStatus::RemoteUnset);
   REQUIRE(result.remote_has_head == false);
 }
+
+TEST_CASE("RealGitOps delegates remote mutation and pull methods", "[git]") {
+  const auto dir = holder::test::make_temp_dir();
+  holder::git::RealGitOps ops;
+  ops.open_or_init(dir / "repo");
+
+  ops.set_remote("origin", "https://example.invalid/holder.git");
+  const auto configured = ops.probe_remote("origin");
+  REQUIRE(configured.status != holder::git::RemoteProbeStatus::RemoteUnset);
+
+  REQUIRE_THROWS(ops.pull_remote_ff_only("origin"));
+
+  ops.remove_remote("origin");
+  const auto removed = ops.probe_remote("origin");
+  REQUIRE(removed.status == holder::git::RemoteProbeStatus::RemoteUnset);
+}

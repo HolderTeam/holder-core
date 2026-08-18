@@ -5,7 +5,9 @@
 #endif
 
 #include "ai/AiThreadRepo.h"
+#include "card/CardRepo.h"
 #include "model/AiThread.h"
+#include "model/Card.h"
 #include "model/Project.h"
 #include "platform/Db.h"
 #include "project/ProjectRepo.h"
@@ -60,6 +62,23 @@ void create_project(holder::platform::Db& db, const std::string& project_id) {
   repo.create(project);
 }
 
+void create_card(
+    holder::platform::Db& db,
+    const std::string& card_id,
+    const std::string& project_id
+) {
+  holder::card::CardRepo repo(db);
+  holder::model::Card card;
+  card.card_id = card_id;
+  card.project_id = project_id;
+  card.title = card_id;
+  card.rel_path = "cards/" + card_id + ".md";
+  card.sort_key = 0.0;
+  card.created_at = 1;
+  card.updated_at = 1;
+  repo.create(card);
+}
+
 } // namespace
 
 TEST_CASE("AiThreadRepo CRUD", "[aithreaddrepo]") {
@@ -87,6 +106,17 @@ TEST_CASE("AiThreadRepo CRUD", "[aithreaddrepo]") {
   REQUIRE(fetched.has_value());
   REQUIRE(fetched->title == "First");
   REQUIRE(fetched->card_id.has_value() == false);
+
+  create_card(db, "card-1", "proj-1");
+  repo.update_card_id("thread-1", std::optional<std::string>("card-1"));
+  const auto card_attached = repo.get("thread-1");
+  REQUIRE(card_attached.has_value());
+  REQUIRE(card_attached->card_id == std::optional<std::string>("card-1"));
+
+  repo.update_card_id("thread-1", std::nullopt);
+  const auto card_cleared = repo.get("thread-1");
+  REQUIRE(card_cleared.has_value());
+  REQUIRE_FALSE(card_cleared->card_id.has_value());
 
   auto list = repo.list("proj-1");
   REQUIRE(list.size() == 1);

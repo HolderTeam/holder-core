@@ -33,6 +33,8 @@ TEST_CASE("AiRunRepo create/get/update", "[db]") {
           "VALUES('msg-1', 'thread-1', 'assistant', 'local', 'hi', 1);");
 
   holder::ai::AiRunRepo repo(db);
+  REQUIRE_FALSE(repo.get("missing-run").has_value());
+
   holder::model::AiRun run;
   run.run_id = "run-1";
   run.project_id = "proj-1";
@@ -65,6 +67,23 @@ TEST_CASE("AiRunRepo create/get/update", "[db]") {
   REQUIRE(updated->message_id.value() == "msg-1");
   REQUIRE(updated->chosen_model.value() == "model-1");
   REQUIRE(updated->policy_trace_json.has_value());
+
+  repo.update_status(
+      "run-1",
+      "queued",
+      std::nullopt,
+      std::nullopt,
+      std::nullopt,
+      std::nullopt,
+      std::nullopt,
+      3
+  );
+  const auto cleared = repo.get("run-1");
+  REQUIRE(cleared.has_value());
+  REQUIRE(cleared->status == "queued");
+  REQUIRE_FALSE(cleared->message_id.has_value());
+  REQUIRE_FALSE(cleared->chosen_model.has_value());
+  REQUIRE_FALSE(cleared->policy_trace_json.has_value());
 }
 
 TEST_CASE("AiRunRepo create covers nullable and optional insert fields", "[db]") {
@@ -95,6 +114,11 @@ TEST_CASE("AiRunRepo create covers nullable and optional insert fields", "[db]")
   run.message_id = std::optional<std::string>("msg-x");
   run.mode = "manual";
   run.prompt = "hello";
+  run.context_json = std::optional<std::string>(R"({"cards":[]})");
+  run.router_model = std::optional<std::string>("router-model");
+  run.ranked_json = std::optional<std::string>(R"([{"model":"local"}])");
+  run.policy_trace_json = std::optional<std::string>(R"({"policy":"prefer-local"})");
+  run.chosen_model = std::optional<std::string>("local-model");
   run.status = "failed";
   run.error = std::optional<std::string>("boom");
   run.created_at = 10;
@@ -106,6 +130,11 @@ TEST_CASE("AiRunRepo create covers nullable and optional insert fields", "[db]")
   REQUIRE_FALSE(fetched->project_id.has_value());
   REQUIRE_FALSE(fetched->thread_id.has_value());
   REQUIRE(fetched->message_id.has_value());
+  REQUIRE(fetched->context_json == std::optional<std::string>(R"({"cards":[]})"));
+  REQUIRE(fetched->router_model == std::optional<std::string>("router-model"));
+  REQUIRE(fetched->ranked_json == std::optional<std::string>(R"([{"model":"local"}])"));
+  REQUIRE(fetched->policy_trace_json == std::optional<std::string>(R"({"policy":"prefer-local"})"));
+  REQUIRE(fetched->chosen_model == std::optional<std::string>("local-model"));
   REQUIRE(fetched->error.has_value());
 }
 

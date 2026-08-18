@@ -68,7 +68,10 @@ TEST_CASE("AiProviderCredentialRepo throws when upsert prepare fails", "[db]") {
   db.exec("DROP TABLE ai_provider_credentials;");
 
   holder::ai::AiProviderCredentialRepo repo(db);
+  REQUIRE_THROWS(repo.list());
+  REQUIRE_THROWS(repo.get("openai"));
   REQUIRE_THROWS(repo.upsert("openai", "k", 1, 1));
+  REQUIRE_THROWS(repo.remove("openai"));
 }
 
 TEST_CASE("AiProviderCredentialRepo throws when upsert step fails", "[db]") {

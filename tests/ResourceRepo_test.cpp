@@ -99,6 +99,16 @@ TEST_CASE("ResourceRepo add/list/remove", "[resourcerepo]") {
   REQUIRE(fetched.has_value());
   REQUIRE(fetched->uri == "https://example.com");
 
+  resource.label = "Updated Example";
+  resource.desc = std::nullopt;
+  resource.updated_at = 20;
+  repo.update(resource);
+
+  const auto updated = repo.get("res-1");
+  REQUIRE(updated.has_value());
+  REQUIRE(updated->label == "Updated Example");
+  REQUIRE_FALSE(updated->desc.has_value());
+
   repo.remove("res-1");
   list = repo.list("proj-1");
   REQUIRE(list.empty());

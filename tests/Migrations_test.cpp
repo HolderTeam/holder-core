@@ -85,6 +85,19 @@ TEST_CASE("ensure_schema fails when schema file is missing", "[migrations]") {
   );
 }
 
+TEST_CASE("ensure_schema skips schema file when tables already exist", "[migrations]") {
+  const auto dir = make_temp_dir();
+  const auto db_path = dir / "holder.db";
+
+  holder::platform::Db db;
+  db.open(db_path);
+  db.exec("CREATE TABLE existing_table(id INTEGER NOT NULL);");
+
+  const auto missing_schema = dir / "missing-schema.sql";
+  REQUIRE_FALSE(std::filesystem::exists(missing_schema));
+  REQUIRE_NOTHROW(holder::platform::Migrations::ensure_schema(db, missing_schema));
+}
+
 TEST_CASE("ensure_schema throws when sqlite prepare fails", "[migrations]") {
   const auto dir = make_temp_dir();
   const auto db_path = dir / "holder.db";

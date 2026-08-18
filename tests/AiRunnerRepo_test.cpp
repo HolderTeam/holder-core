@@ -5,6 +5,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <optional>
 
 TEST_CASE("AiRunnerRepo stores and removes manual runners", "[db]") {
   const auto dir = std::filesystem::temp_directory_path() / "holder_ai_runner_repo";
@@ -33,6 +34,25 @@ TEST_CASE("AiRunnerRepo stores and removes manual runners", "[db]") {
   };
 
   repo.upsert(runner);
+
+  holder::model::AiRunner earlier{
+      .runner_id = "manual-empty-base-url",
+      .name = "Empty Base URL",
+      .kind = "openai-compatible",
+      .base_url = std::nullopt,
+      .source = "manual",
+      .enabled = true,
+      .created_at = 5,
+      .updated_at = 5,
+  };
+  repo.upsert(earlier);
+
+  const auto rows = repo.list();
+  REQUIRE(rows.size() == 2);
+  REQUIRE(rows[0].runner_id == "manual-empty-base-url");
+  REQUIRE_FALSE(rows[0].base_url.has_value());
+  REQUIRE(rows[1].runner_id == "manual-test");
+
   auto stored = repo.get("manual-test");
   REQUIRE(stored.has_value());
   REQUIRE(stored->name == "Test Runner");

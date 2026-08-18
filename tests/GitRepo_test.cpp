@@ -165,6 +165,7 @@ TEST_CASE("GitRepo pull_remote_ff_only pulls from local remote", "[git]") {
   local_repo.open_or_init(local_dir);
   local_repo.set_remote("origin", remote_dir.string());
   local_repo.pull_remote_ff_only("origin");
+  REQUIRE_NOTHROW(local_repo.pull_remote_ff_only("origin"));
 
   std::ifstream in(local_dir / "cards" / "a.md", std::ios::binary);
   REQUIRE(in.is_open());
@@ -179,6 +180,26 @@ TEST_CASE("GitRepo remove_remote ignores missing remote", "[git]") {
   repo.open_or_init(dir);
 
   REQUIRE_NOTHROW(repo.remove_remote("origin"));
+}
+
+TEST_CASE("GitRepo set_remote updates existing remote URL", "[git]") {
+  const auto dir = make_temp_dir();
+  const auto remote_one = dir / "remote-one";
+  const auto remote_two = dir / "remote-two";
+  const auto local_dir = dir / "local";
+
+  holder::git::GitRepo first_remote;
+  first_remote.open_or_init(remote_one);
+  holder::git::GitRepo second_remote;
+  second_remote.open_or_init(remote_two);
+
+  holder::git::GitRepo repo;
+  repo.open_or_init(local_dir);
+  repo.set_remote("origin", remote_one.string());
+  repo.set_remote("origin", remote_two.string());
+
+  const auto result = repo.probe_remote("origin");
+  REQUIRE(result.status == holder::git::RemoteProbeStatus::Reachable);
 }
 
 TEST_CASE("GitRepo remove_path is idempotent for untracked paths", "[git]") {

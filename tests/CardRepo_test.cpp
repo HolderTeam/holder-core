@@ -205,7 +205,20 @@ TEST_CASE("CardRepo counts children and handles deleted_at on create", "[cardrep
   child_deleted.deleted_at = 99; // exercises bind_int64_optional(value.has_value())
   repo.create(child_deleted);
 
+  REQUIRE(repo.count_all_not_deleted("proj-1") == 2);
+  REQUIRE(repo.count_roots_not_deleted("proj-1") == 1);
   REQUIRE(repo.count_children_not_deleted("proj-1", parent.card_id) == 1);
+
+  repo.restore("child-2", 100);
+  const auto restored = repo.get("child-2");
+  REQUIRE(restored.has_value());
+  REQUIRE_FALSE(restored->deleted_at.has_value());
+  REQUIRE(restored->updated_at == 100);
+  REQUIRE(repo.count_children_not_deleted("proj-1", parent.card_id) == 2);
+
+  repo.remove("child-2");
+  REQUIRE_FALSE(repo.get("child-2").has_value());
+  REQUIRE(repo.count_all_not_deleted("proj-1") == 2);
 }
 
 TEST_CASE("CardRepo throws sqlite error when DB handle is invalid", "[cardrepo]") {

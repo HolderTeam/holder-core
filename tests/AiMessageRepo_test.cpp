@@ -344,10 +344,12 @@ TEST_CASE("AiMessageRepo trash restore and remove live file", "[aimessagerepo]")
   apply_schema(db);
   const auto project_root = dir / "project_repo";
   create_project(db, "proj-1", project_root.string());
+  update_project_remote(db, "proj-1", "git@example.com:repo.git", 3);
   create_thread(db, "thread-1", "proj-1");
 
   TrackingGitOps git;
-  holder::ai::AiMessageRepo repo(db, nullptr, nullptr, &git);
+  holder::index::FtsIndexer fts(db);
+  holder::ai::AiMessageRepo repo(db, &fts, nullptr, &git);
 
   holder::model::AiMessage msg;
   msg.message_id = "msg-trash";
@@ -377,6 +379,28 @@ TEST_CASE("AiMessageRepo trash restore and remove live file", "[aimessagerepo]")
       std::find(git.removed_paths.begin(), git.removed_paths.end(), live_rel) !=
       git.removed_paths.end()
   );
+
+  holder::model::AiMessage deleted_msg;
+  deleted_msg.message_id = "msg-trash-remove";
+  deleted_msg.thread_id = "thread-1";
+  deleted_msg.role = "assistant";
+  deleted_msg.source = "manual";
+  deleted_msg.content = "deleted content";
+  deleted_msg.created_at = 13;
+  repo.append(deleted_msg);
+  repo.trash(deleted_msg.message_id, 110);
+
+  const auto trash_rel = holder::core::ai_message_trash_rel_path(deleted_msg.message_id);
+  const auto trash_path = project_root / trash_rel;
+  REQUIRE(std::filesystem::exists(trash_path));
+
+  repo.remove(deleted_msg.message_id);
+  REQUIRE(!std::filesystem::exists(trash_path));
+  REQUIRE(
+      std::find(git.removed_paths.begin(), git.removed_paths.end(), trash_rel) !=
+      git.removed_paths.end()
+  );
+  REQUIRE(git.set_remote_calls >= 6);
 }
 
 TEST_CASE("AiMessageRepo trash throws for missing message and missing content", "[aimessagerepo]") {
@@ -441,6 +465,8 @@ TEST_CASE("AiMessageRepo restore throws when message is not deleted", "[aimessag
   create_thread(db, "thread-1", "proj-1");
 
   holder::ai::AiMessageRepo repo(db, nullptr);
+  REQUIRE_THROWS(repo.restore("missing-message"));
+
   holder::model::AiMessage msg;
   msg.message_id = "msg-restore";
   msg.thread_id = "thread-1";

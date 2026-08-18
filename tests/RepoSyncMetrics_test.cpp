@@ -47,6 +47,15 @@ TEST_CASE("RepoSyncMetrics ignores .holder/privacy.json in uncommitted count", "
   REQUIRE(metrics.uncommitted_changes_count == 1);
 }
 
+TEST_CASE("RepoSyncMetrics returns zero metrics when repo is missing", "[git][sync]") {
+  const auto dir = make_temp_dir();
+  const auto missing = dir / "missing";
+
+  const auto metrics = holder::git::inspect_repo_sync_metrics(missing);
+  REQUIRE(metrics.uncommitted_changes_count == 0);
+  REQUIRE(metrics.unpushed_commits_count == 0);
+}
+
 TEST_CASE(
     "RepoSyncMetrics returns zero unpushed when remote-tracking ref is missing",
     "[git][sync]"
@@ -76,6 +85,29 @@ TEST_CASE("RepoSyncMetrics counts staged index changes via head_to_index path", 
 
   const auto metrics = holder::git::inspect_repo_sync_metrics(dir);
   REQUIRE(metrics.uncommitted_changes_count == 1);
+}
+
+TEST_CASE("RepoSyncMetrics counts commits ahead of remote tracking branch", "[git][sync]") {
+  const auto dir = make_temp_dir();
+  const auto remote_dir = dir / "remote";
+  const auto local_dir = dir / "local";
+
+  holder::git::GitRepo remote_repo;
+  remote_repo.open_or_init(remote_dir);
+  remote_repo.write_file("cards/a.md", "hello");
+  remote_repo.stage_path("cards/a.md");
+  remote_repo.commit("seed");
+
+  holder::git::GitRepo local_repo;
+  local_repo.open_or_init(local_dir);
+  local_repo.set_remote("origin", remote_dir.string());
+  local_repo.pull_remote_ff_only("origin");
+  local_repo.write_file("cards/b.md", "local");
+  local_repo.stage_path("cards/b.md");
+  local_repo.commit("local change");
+
+  const auto metrics = holder::git::inspect_repo_sync_metrics(local_dir, "origin");
+  REQUIRE(metrics.unpushed_commits_count == 1);
 }
 
 TEST_CASE("RepoSyncMetrics throws for invalid remote name lookup", "[git][sync]") {

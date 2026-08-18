@@ -1245,6 +1245,34 @@ TEST_CASE("CardStore trash/restore/hard_delete and get_content guards", "[cardst
   REQUIRE_THROWS(store.restore(active.card_id, 2));
   REQUIRE_THROWS(store.hard_delete(active.card_id));
 
+  holder::model::Card removable;
+  removable.card_id = "trashok1";
+  removable.project_id = "proj-1";
+  removable.title = "Trash OK";
+  removable.created_at = 1;
+  removable.updated_at = 1;
+  store.create(removable, "restorable body");
+
+  const auto live_rel = holder::core::card_rel_path(removable.card_id);
+  const auto trash_rel = holder::core::card_trash_rel_path(removable.card_id);
+
+  store.trash(removable.card_id, 20);
+  REQUIRE_FALSE(std::filesystem::exists(project_root / live_rel));
+  REQUIRE(std::filesystem::exists(project_root / trash_rel));
+
+  store.restore(removable.card_id, 21);
+  const auto restored = store.get(removable.card_id);
+  REQUIRE(restored.has_value());
+  REQUIRE_FALSE(restored->deleted_at.has_value());
+  REQUIRE(std::filesystem::exists(project_root / live_rel));
+  REQUIRE_FALSE(std::filesystem::exists(project_root / trash_rel));
+
+  store.trash(removable.card_id, 22);
+  store.hard_delete(removable.card_id);
+  REQUIRE_FALSE(store.get(removable.card_id).has_value());
+  REQUIRE_FALSE(std::filesystem::exists(project_root / live_rel));
+  REQUIRE_FALSE(std::filesystem::exists(project_root / trash_rel));
+
   holder::model::Card bad_rel;
   bad_rel.card_id = "trashb01";
   bad_rel.project_id = "proj-1";

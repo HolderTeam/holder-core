@@ -66,7 +66,10 @@ TEST_CASE("AiProviderSettingRepo throws when get prepare fails", "[db]") {
   db.exec("DROP TABLE ai_provider_settings;");
 
   holder::ai::AiProviderSettingRepo repo(db);
+  REQUIRE_THROWS(repo.list());
   REQUIRE_THROWS(repo.get("switchyard"));
+  REQUIRE_THROWS(repo.upsert("switchyard", true, 1));
+  REQUIRE_THROWS(repo.remove("switchyard"));
 }
 
 TEST_CASE("AiProviderSettingRepo throws when upsert step fails", "[db]") {
