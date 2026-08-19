@@ -6,16 +6,19 @@
 
 #include "card/CardRepo.h"
 #include "core_test_helpers.h"
+#include "git/GitRepo.h"
 #include "model/Card.h"
 #include "model/Project.h"
 #include "platform/Db.h"
 #include "project/ProjectRepo.h"
 
+#include <git2.h>
 #include <holder/holder.h>
 #include <nlohmann/json.hpp>
 
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <string>
 
 namespace {
@@ -75,6 +78,47 @@ void seed_project_with_cards(const std::filesystem::path& data_dir) {
   holder::card::CardRepo repo(db);
   repo.create(root);
   repo.create(child);
+}
+
+// Seeds a project whose root_path is a real, writable directory (unlike
+// seed_project's placeholder /tmp/home), for tests that need to actually
+// perform git operations against it.
+void seed_git_project(
+    const std::filesystem::path& data_dir,
+    const std::string& project_id,
+    const std::filesystem::path& root_path,
+    const std::optional<std::string>& remote_url
+) {
+  const auto db_path = data_dir / "server" / "holder.db";
+  std::filesystem::create_directories(db_path.parent_path());
+  holder::platform::Db db;
+  db.open(db_path);
+  db.exec(read_schema_sql());
+
+  holder::model::Project project;
+  project.project_id = project_id;
+  project.name = "Git Project";
+  project.root_path = root_path.string();
+  project.git_remote_url = remote_url;
+  project.created_at = 10;
+  project.updated_at = 20;
+
+  holder::project::ProjectRepo repo(db);
+  repo.create(project);
+}
+
+// A bare repo, unlike GitRepo::open_or_init, accepts a non-force push to its
+// currently checked-out branch -- git refuses that against a working-tree repo.
+void init_bare_repo(const std::filesystem::path& repo_path) {
+  git_libgit2_init();
+  std::filesystem::create_directories(repo_path.parent_path());
+  git_repository* repo = nullptr;
+  git_repository_init_options opts{};
+  REQUIRE(git_repository_init_options_init(&opts, GIT_REPOSITORY_INIT_OPTIONS_VERSION) == 0);
+  opts.flags = GIT_REPOSITORY_INIT_BARE | GIT_REPOSITORY_INIT_MKPATH;
+  REQUIRE(git_repository_init_ext(&repo, repo_path.string().c_str(), &opts) == 0);
+  git_repository_free(repo);
+  git_libgit2_shutdown();
 }
 
 } // namespace
@@ -861,4 +905,257 @@ TEST_CASE("C API lists projects as JSON", "[capi]") {
 
   holder_string_free(json);
   holder_context_destroy(context);
+}
+
+TEST_CASE("C API updates a project's git remote URL, including clearing it", "[capi][git]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_project_update_git_remote(context, "project-1", "git@example.com:a/b.git", &json, &error) ==
+      HOLDER_OK
+  );
+  REQUIRE(nlohmann::json::parse(json)["git_remote_url"] == "git@example.com:a/b.git");
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(holder_project_update_git_remote(context, "project-1", nullptr, &json, &error) == HOLDER_OK);
+  REQUIRE(nlohmann::json::parse(json)["git_remote_url"].is_null());
+  holder_string_free(json);
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API git_test_remote reports remote_unset when unconfigured", "[capi][git]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(holder_git_test_remote(context, "project-1", nullptr, &json, &error) == HOLDER_OK);
+  const auto body = nlohmann::json::parse(json);
+  REQUIRE(body["status"] == "remote_unset");
+  REQUIRE(body["remote_has_head"] == false);
+  REQUIRE_FALSE(body["error_message"].is_null());
+
+  holder_string_free(json);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API git_test_remote reports reachable for a local remote with commits", "[capi][git]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto remote_dir = data_dir / "remote";
+
+  holder::git::GitRepo remote_repo;
+  remote_repo.open_or_init(remote_dir);
+  remote_repo.write_file("cards/a.md", "seed");
+  remote_repo.stage_path("cards/a.md");
+  remote_repo.commit("seed");
+
+  seed_git_project(data_dir, "project-1", data_dir / "repo", remote_dir.string());
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(holder_git_test_remote(context, "project-1", nullptr, &json, &error) == HOLDER_OK);
+  const auto body = nlohmann::json::parse(json);
+  REQUIRE(body["status"] == "reachable");
+  REQUIRE(body["remote_has_head"] == true);
+  REQUIRE(body["error_message"].is_null());
+
+  holder_string_free(json);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API git_push reports remote_unset and records it in sync status", "[capi][git]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(holder_git_push(context, "project-1", nullptr, 1, &json, &error) == HOLDER_OK);
+  auto body = nlohmann::json::parse(json);
+  REQUIRE(body["status"] == "remote_unset");
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(holder_git_sync_status(context, "project-1", &json, &error) == HOLDER_OK);
+  body = nlohmann::json::parse(json);
+  REQUIRE(body["sync"]["last_push_status"] == "remote_unset");
+
+  holder_string_free(json);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API git_push and git_pull round-trip through a local remote", "[capi][git]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto remote_dir = data_dir / "remote";
+  init_bare_repo(remote_dir);
+
+  const auto local_dir = data_dir / "repo";
+  holder::git::GitRepo local_repo;
+  local_repo.open_or_init(local_dir);
+  local_repo.write_file("cards/a.md", "v1");
+  local_repo.stage_path("cards/a.md");
+  local_repo.commit("seed");
+
+  seed_git_project(data_dir, "project-1", local_dir, remote_dir.string());
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(holder_git_push(context, "project-1", nullptr, 1, &json, &error) == HOLDER_OK);
+  auto body = nlohmann::json::parse(json);
+  REQUIRE(body["status"] == "pushed");
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(holder_git_pull(context, "project-1", &json, &error) == HOLDER_OK);
+  body = nlohmann::json::parse(json);
+  REQUIRE(body["status"] == "succeeded");
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(holder_git_sync_status(context, "project-1", &json, &error) == HOLDER_OK);
+  body = nlohmann::json::parse(json);
+  REQUIRE(body["sync"]["last_push_status"] == "pushed");
+  REQUIRE(body["sync"]["last_pull_status"] == "succeeded");
+  REQUIRE(body["sync"]["unpushed_commits_count"] == 0);
+
+  holder_string_free(json);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API git_sync_status reports a null sync object before any activity", "[capi][git]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(holder_git_sync_status(context, "project-1", &json, &error) == HOLDER_OK);
+  const auto body = nlohmann::json::parse(json);
+  REQUIRE(body["sync"]["last_push_status"].is_null());
+  REQUIRE(body["sync"]["uncommitted_changes_count"] == 0);
+
+  holder_string_free(json);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API git_set_homedir validates its argument and applies process-wide", "[capi][git]") {
+  holder_error* error = nullptr;
+  REQUIRE(holder_git_set_homedir("", &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+
+  error = nullptr;
+  const auto dir = holder::test::make_temp_dir();
+  REQUIRE(holder_git_set_homedir(dir.string().c_str(), &error) == HOLDER_OK);
+  REQUIRE(error == nullptr);
+}
+
+namespace {
+
+int fake_sign_ok(void*, const unsigned char*, size_t, unsigned char** out_der_sig, size_t* out_der_sig_len) {
+  auto* buf = static_cast<unsigned char*>(std::malloc(1));
+  buf[0] = 0x00;
+  *out_der_sig = buf;
+  *out_der_sig_len = 1;
+  return 0;
+}
+
+} // namespace
+
+TEST_CASE("C API git_set_ssh_signer validates arguments and destroys user_data exactly once on replace/destroy", "[capi][git]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  const unsigned char pubkey[] = {0x01, 0x02, 0x03};
+
+  SECTION("rejects a null sign_fn") {
+    REQUIRE(
+        holder_git_set_ssh_signer(context, "git", pubkey, sizeof(pubkey), nullptr, nullptr, nullptr, &error) ==
+        HOLDER_ERROR_INVALID_ARGUMENT
+    );
+  }
+
+  SECTION("destroy_user_data fires once when replaced, and once more for the replacement at context destroy") {
+    int first_destroy_count = 0;
+    int second_destroy_count = 0;
+
+    auto destroy_first = [](void* user_data) {
+      *static_cast<int*>(user_data) += 1;
+    };
+    auto destroy_second = [](void* user_data) {
+      *static_cast<int*>(user_data) += 1;
+    };
+
+    REQUIRE(
+        holder_git_set_ssh_signer(
+            context,
+            "git",
+            pubkey,
+            sizeof(pubkey),
+            fake_sign_ok,
+            &first_destroy_count,
+            destroy_first,
+            &error
+        ) == HOLDER_OK
+    );
+    REQUIRE(first_destroy_count == 0);
+
+    // Installing a second signer drops the last reference to the first,
+    // running its destroy_user_data exactly once.
+    REQUIRE(
+        holder_git_set_ssh_signer(
+            context,
+            "git",
+            pubkey,
+            sizeof(pubkey),
+            fake_sign_ok,
+            &second_destroy_count,
+            destroy_second,
+            &error
+        ) == HOLDER_OK
+    );
+    REQUIRE(first_destroy_count == 1);
+    REQUIRE(second_destroy_count == 0);
+
+    holder_context_destroy(context);
+    context = nullptr;
+    REQUIRE(second_destroy_count == 1);
+    REQUIRE(first_destroy_count == 1); // unchanged
+  }
+
+  if (context != nullptr) {
+    holder_context_destroy(context);
+  }
 }

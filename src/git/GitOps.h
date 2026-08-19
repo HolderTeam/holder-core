@@ -1,10 +1,12 @@
 #pragma once
 
+#include "git/GitCredentialProvider.h"
 #include "git/GitRepo.h"
 #include "git/PushResult.h"
 #include "git/RemoteProbe.h"
 
 #include <filesystem>
+#include <memory>
 #include <string>
 
 namespace holder::git {
@@ -12,6 +14,12 @@ namespace holder::git {
 class GitOps {
  public:
   virtual ~GitOps() = default; // LCOV_EXCL_LINE
+
+  // Default no-op: implementations that don't override this keep whatever
+  // default credential behavior their underlying GitRepo already has (see
+  // GitRepo::set_credential_provider). Test doubles are not required to
+  // override it.
+  virtual void set_credential_provider(std::shared_ptr<GitCredentialProvider> /*provider*/) {}
 
   virtual void open_or_init(const std::filesystem::path& repo_dir) = 0;
   virtual void write_file(
@@ -35,6 +43,7 @@ class GitOps {
 
 class RealGitOps final : public GitOps {
  public:
+  void set_credential_provider(std::shared_ptr<GitCredentialProvider> provider) override;
   void open_or_init(const std::filesystem::path& repo_dir) override;
   void write_file(const std::filesystem::path& relative_path, const std::string& content) override;
   void stage_path(const std::filesystem::path& relative_path) override;

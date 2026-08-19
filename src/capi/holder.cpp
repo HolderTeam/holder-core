@@ -2,14 +2,19 @@
 
 #include "card/CardRepo.h"
 #include "card/CardStore.h"
+#include "git/EcdsaDerSigningCredentialProvider.h"
+#include "git/GitOps.h"
+#include "git/RepoSyncMetrics.h"
 #include "index/FtsIndexer.h"
 #include "index/Reindexer.h"
+#include "model/ProjectSyncState.h"
 #include "platform/Db.h"
 #include "project/DefaultProject.h"
 #include "project/ProjectRepo.h"
 #include "project/ProjectStore.h"
 #include "project/ProjectSyncRepo.h"
 
+#include <git2.h>
 #include <nlohmann/json.hpp>
 #include <sodium.h>
 
@@ -22,12 +27,14 @@
 #include <new>
 #include <string>
 #include <utility>
+#include <vector>
 
 struct holder_context {
   std::filesystem::path data_dir;
   std::filesystem::path db_path;
   holder::platform::Db db;
   holder::index::FtsIndexer fts{db};
+  std::shared_ptr<holder::git::GitCredentialProvider> credential_provider; // nullable
 };
 
 struct holder_error {
@@ -123,6 +130,116 @@ nlohmann::json search_row_to_json(const holder::index::FtsIndexer::SearchRow& ro
       {"updated_at", row.updated_at},
   };
 }
+
+std::unique_ptr<holder::git::RealGitOps> open_project_git(
+    holder_context* context,
+    const holder::model::Project& project
+) {
+  auto git = std::make_unique<holder::git::RealGitOps>();
+  if (context->credential_provider) {
+    git->set_credential_provider(context->credential_provider);
+  }
+  git->open_or_init(project.root_path);
+  return git;
+}
+
+nlohmann::json optional_json(const std::optional<std::string>& value) {
+  return value.has_value() ? nlohmann::json(*value) : nlohmann::json(nullptr);
+}
+
+nlohmann::json optional_json(const std::optional<long long>& value) {
+  return value.has_value() ? nlohmann::json(*value) : nlohmann::json(nullptr);
+}
+
+nlohmann::json project_sync_to_json(const std::optional<holder::model::ProjectSyncState>& sync) {
+  if (!sync.has_value()) {
+    return {
+        {"last_commit_at", nullptr},
+        {"last_push_at", nullptr},
+        {"last_pull_at", nullptr},
+        {"uncommitted_changes_count", 0},
+        {"unpushed_commits_count", 0},
+        {"last_push_status", nullptr},
+        {"last_pull_status", nullptr},
+        {"last_sync_error", nullptr},
+        {"last_sync_error_at", nullptr},
+        {"retry_count", 0},
+        {"next_retry_at", nullptr},
+        {"pull_retry_count", 0},
+        {"next_pull_retry_at", nullptr},
+        {"updated_at", nullptr},
+    };
+  }
+  return {
+      {"last_commit_at", optional_json(sync->last_commit_at)},
+      {"last_push_at", optional_json(sync->last_push_at)},
+      {"last_pull_at", optional_json(sync->last_pull_at)},
+      {"uncommitted_changes_count", sync->uncommitted_changes_count},
+      {"unpushed_commits_count", sync->unpushed_commits_count},
+      {"last_push_status", optional_json(sync->last_push_status)},
+      {"last_pull_status", optional_json(sync->last_pull_status)},
+      {"last_sync_error", optional_json(sync->last_sync_error)},
+      {"last_sync_error_at", optional_json(sync->last_sync_error_at)},
+      {"retry_count", sync->retry_count},
+      {"next_retry_at", optional_json(sync->next_retry_at)},
+      {"pull_retry_count", sync->pull_retry_count},
+      {"next_pull_retry_at", optional_json(sync->next_pull_retry_at)},
+      {"updated_at", sync->updated_at > 0 ? nlohmann::json(sync->updated_at) : nlohmann::json(nullptr)},
+  };
+}
+
+void refresh_sync_activity_counts(
+    holder::platform::Db& db,
+    const std::string& project_id,
+    const std::filesystem::path& root_path,
+    long long now
+) {
+  const auto metrics = holder::git::inspect_repo_sync_metrics(root_path, "origin");
+  holder::project::ProjectSyncRepo(db).update_activity_counts(
+      project_id,
+      {.uncommitted_changes_count = metrics.uncommitted_changes_count,
+       .unpushed_commits_count = metrics.unpushed_commits_count,
+       .updated_at = now}
+  );
+}
+
+// Owns the C-ABI signer's user_data/destroy_user_data pair for exactly as
+// long as some EcdsaDerSigningCredentialProvider's captured lambda keeps it
+// alive -- see holder_git_set_ssh_signer's ownership contract in holder.h.
+class CApiSshSignerHandle {
+ public:
+  CApiSshSignerHandle(void* user_data, holder_destroy_fn destroy_user_data)
+      : user_data_(user_data),
+        destroy_user_data_(destroy_user_data) {}
+
+  ~CApiSshSignerHandle() {
+    if (destroy_user_data_ != nullptr) {
+      destroy_user_data_(user_data_);
+    }
+  }
+
+  CApiSshSignerHandle(const CApiSshSignerHandle&) = delete;
+  CApiSshSignerHandle& operator=(const CApiSshSignerHandle&) = delete;
+
+  std::vector<unsigned char> sign(
+      holder_ssh_sign_fn sign_fn,
+      const unsigned char* data,
+      size_t data_len
+  ) const {
+    unsigned char* out_ptr = nullptr;
+    size_t out_len = 0;
+    const int rc = sign_fn(user_data_, data, data_len, &out_ptr, &out_len);
+    if (rc != 0 || out_ptr == nullptr) return {};
+
+    std::vector<unsigned char> result(out_ptr, out_ptr + out_len);
+    std::free(out_ptr);
+    return result;
+  }
+
+ private:
+  void* user_data_;
+  holder_destroy_fn destroy_user_data_;
+};
 
 long long now_epoch_seconds() {
   return std::chrono::duration_cast<std::chrono::seconds>(
@@ -688,6 +805,403 @@ int holder_ensure_default_project(
       return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
     }
 
+    *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);
+  }
+}
+
+int holder_git_set_homedir(const char* path, holder_error** out_error) {
+  clear_error(out_error);
+  if (path == nullptr || path[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "path must not be empty");
+  }
+
+  const int rc = git_libgit2_opts(GIT_OPT_SET_HOMEDIR, path);
+  if (rc != 0) {
+    const git_error* e = git_error_last();
+    return set_error(
+        out_error,
+        HOLDER_ERROR_RUNTIME,
+        std::string("git_libgit2_opts(GIT_OPT_SET_HOMEDIR) failed: ") +
+            (e && e->message ? e->message : "unknown error")
+    );
+  }
+  return HOLDER_OK;
+}
+
+int holder_git_set_ssh_signer(
+    holder_context* context,
+    const char* username,
+    const unsigned char* public_key_blob,
+    size_t public_key_blob_len,
+    holder_ssh_sign_fn sign_fn,
+    void* user_data,
+    holder_destroy_fn destroy_user_data,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (username == nullptr || username[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "username must not be empty");
+  }
+  if (public_key_blob == nullptr || public_key_blob_len == 0) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "public_key_blob must not be empty");
+  }
+  if (sign_fn == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "sign_fn must not be null");
+  }
+
+  try {
+    // Owns user_data for as long as the provider below (and the lambda it
+    // captures this in) is alive; replacing context->credential_provider
+    // (here, or via a later call, or via context destruction) drops the
+    // last reference and runs destroy_user_data exactly once.
+    auto handle = std::make_shared<CApiSshSignerHandle>(user_data, destroy_user_data);
+    std::vector<unsigned char> pubkey(public_key_blob, public_key_blob + public_key_blob_len);
+
+    context->credential_provider = std::make_shared<holder::git::EcdsaDerSigningCredentialProvider>(
+        std::string(username),
+        std::move(pubkey),
+        [handle, sign_fn](const unsigned char* data, size_t data_len) {
+          return handle->sign(sign_fn, data, data_len);
+        }
+    );
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);
+  }
+}
+
+int holder_project_update_git_remote(
+    holder_context* context,
+    const char* project_id,
+    const char* remote_url,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (project_id == nullptr || project_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "project_id must not be empty");
+  }
+
+  try {
+    holder::project::ProjectRepo repo(context->db);
+    if (!repo.get(project_id).has_value()) {
+      return set_error(out_error, HOLDER_ERROR_RUNTIME, "project not found: " + std::string(project_id));
+    }
+
+    const std::optional<std::string> url =
+        (remote_url != nullptr && remote_url[0] != '\0') ? std::optional<std::string>(remote_url)
+                                                          : std::nullopt;
+    repo.update_git_remote(project_id, url, now_epoch_seconds());
+
+    auto* out = duplicate_string(project_to_json(repo.get(project_id).value()).dump());
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    }
+
+    *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);
+  }
+}
+
+int holder_git_test_remote(
+    holder_context* context,
+    const char* project_id,
+    const char* branch,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (project_id == nullptr || project_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "project_id must not be empty");
+  }
+
+  try {
+    holder::project::ProjectRepo repo(context->db);
+    const auto project_opt = repo.get(project_id);
+    if (!project_opt.has_value()) {
+      return set_error(out_error, HOLDER_ERROR_RUNTIME, "project not found: " + std::string(project_id));
+    }
+    const auto& project = project_opt.value();
+    const std::string resolved_branch =
+        (branch != nullptr && branch[0] != '\0') ? std::string(branch) : "local_default";
+
+    nlohmann::json body = {
+        {"project_id", project_id},
+        {"remote_url", optional_json(project.git_remote_url)},
+        {"branch", resolved_branch},
+    };
+
+    if (!project.git_remote_url.has_value() || project.git_remote_url->empty()) {
+      body["status"] = holder::git::remote_probe_status_name(holder::git::RemoteProbeStatus::RemoteUnset);
+      body["remote_has_head"] = false;
+      body["error_message"] = "Remote URL is not configured.";
+    } else {
+      auto git = open_project_git(context, project);
+      git->set_remote("origin", project.git_remote_url.value());
+      const auto probe = git->probe_remote("origin");
+      body["status"] = holder::git::remote_probe_status_name(probe.status);
+      body["remote_has_head"] = probe.remote_has_head;
+      body["error_message"] = probe.error_message.empty() ? nlohmann::json(nullptr)
+                                                           : nlohmann::json(probe.error_message);
+    }
+
+    auto* out = duplicate_string(body.dump());
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    }
+    *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);
+  }
+}
+
+int holder_git_push(
+    holder_context* context,
+    const char* project_id,
+    const char* branch,
+    int set_upstream,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (project_id == nullptr || project_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "project_id must not be empty");
+  }
+
+  try {
+    holder::project::ProjectRepo repo(context->db);
+    holder::project::ProjectSyncRepo sync_repo(context->db);
+    const auto project_opt = repo.get(project_id);
+    if (!project_opt.has_value()) {
+      return set_error(out_error, HOLDER_ERROR_RUNTIME, "project not found: " + std::string(project_id));
+    }
+    const auto& project = project_opt.value();
+    const std::string requested_branch = (branch != nullptr) ? std::string(branch) : std::string();
+    const std::string resolved_branch = requested_branch.empty() ? "local_default" : requested_branch;
+    const auto now = now_epoch_seconds();
+
+    nlohmann::json body = {
+        {"project_id", project_id},
+        {"remote_url", optional_json(project.git_remote_url)},
+        {"branch", resolved_branch},
+    };
+
+    if (!project.git_remote_url.has_value() || project.git_remote_url->empty()) {
+      sync_repo.record_push_result(
+          project_id,
+          holder::git::push_status_name(holder::git::PushStatus::RemoteUnset),
+          false,
+          std::optional<std::string>{"Remote URL is not configured."},
+          now
+      );
+      body["status"] = holder::git::push_status_name(holder::git::PushStatus::RemoteUnset);
+      body["ahead_count"] = 0;
+      body["behind_count"] = 0;
+      body["local_head_commit"] = nullptr;
+      body["error_message"] = "Remote URL is not configured.";
+    } else {
+      auto git = open_project_git(context, project);
+      git->set_remote("origin", project.git_remote_url.value());
+      const auto push = git->push_branch("origin", requested_branch, set_upstream != 0);
+      const bool push_ok = push.status == holder::git::PushStatus::Pushed ||
+                           push.status == holder::git::PushStatus::UpToDate;
+      sync_repo.record_push_result(
+          project_id,
+          holder::git::push_status_name(push.status),
+          push_ok,
+          push.error_message.empty() ? std::optional<std::string>() : std::optional<std::string>(push.error_message),
+          now
+      );
+      try {
+        refresh_sync_activity_counts(context->db, project_id, project.root_path, now);
+      } catch (const std::exception&) {
+        // Best-effort only; metrics refresh failure does not fail push response.
+      }
+
+      body["status"] = holder::git::push_status_name(push.status);
+      body["ahead_count"] = push.ahead_count;
+      body["behind_count"] = push.behind_count;
+      body["local_head_commit"] =
+          push.local_head_commit.empty() ? nlohmann::json(nullptr) : nlohmann::json(push.local_head_commit);
+      body["error_message"] =
+          push.error_message.empty() ? nlohmann::json(nullptr) : nlohmann::json(push.error_message);
+    }
+
+    auto* out = duplicate_string(body.dump());
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    }
+    *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);
+  }
+}
+
+int holder_git_pull(
+    holder_context* context,
+    const char* project_id,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (project_id == nullptr || project_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "project_id must not be empty");
+  }
+
+  try {
+    holder::project::ProjectRepo repo(context->db);
+    holder::project::ProjectSyncRepo sync_repo(context->db);
+    const auto project_opt = repo.get(project_id);
+    if (!project_opt.has_value()) {
+      return set_error(out_error, HOLDER_ERROR_RUNTIME, "project not found: " + std::string(project_id));
+    }
+    const auto& project = project_opt.value();
+    const auto now = now_epoch_seconds();
+
+    nlohmann::json body = {{"project_id", project_id}};
+
+    if (!project.git_remote_url.has_value() || project.git_remote_url->empty()) {
+      sync_repo.record_pull_result(
+          project_id,
+          "failed",
+          false,
+          std::optional<std::string>{"Remote URL is not configured."},
+          now
+      );
+      body["status"] = "failed";
+      body["error_message"] = "Remote URL is not configured.";
+    } else {
+      auto git = open_project_git(context, project);
+      git->set_remote("origin", project.git_remote_url.value());
+      try {
+        git->pull_remote_ff_only("origin");
+        sync_repo.record_pull_result(project_id, "succeeded", true, std::nullopt, now);
+        body["status"] = "succeeded";
+        body["error_message"] = nullptr;
+      } catch (const std::exception& e) {
+        sync_repo.record_pull_result(project_id, "failed", false, std::optional<std::string>(e.what()), now);
+        body["status"] = "failed";
+        body["error_message"] = e.what();
+      }
+      try {
+        refresh_sync_activity_counts(context->db, project_id, project.root_path, now);
+      } catch (const std::exception&) {
+        // Best-effort only; metrics refresh failure does not fail pull response.
+      }
+    }
+
+    auto* out = duplicate_string(body.dump());
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    }
+    *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);
+  }
+}
+
+int holder_git_sync_status(
+    holder_context* context,
+    const char* project_id,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (project_id == nullptr || project_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "project_id must not be empty");
+  }
+
+  try {
+    holder::project::ProjectRepo repo(context->db);
+    if (!repo.get(project_id).has_value()) {
+      return set_error(out_error, HOLDER_ERROR_RUNTIME, "project not found: " + std::string(project_id));
+    }
+
+    holder::project::ProjectSyncRepo sync_repo(context->db);
+    nlohmann::json body = {
+        {"project_id", project_id},
+        {"sync", project_sync_to_json(sync_repo.get(project_id))},
+    };
+
+    auto* out = duplicate_string(body.dump());
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    }
     *out_json = out;
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {

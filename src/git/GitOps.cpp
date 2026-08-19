@@ -2,6 +2,10 @@
 
 namespace holder::git {
 
+void RealGitOps::set_credential_provider(std::shared_ptr<GitCredentialProvider> provider) {
+  repo_.set_credential_provider(std::move(provider));
+}
+
 void RealGitOps::open_or_init(const std::filesystem::path& repo_dir) {
   repo_.open_or_init(repo_dir);
 }

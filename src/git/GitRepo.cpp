@@ -1,10 +1,11 @@
 #include "git/GitRepo.h"
 
+#include "git/SshAgentAndFileCredentialProvider.h"
+
 #include <git2.h>
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
-#include <array>
 #include <cctype>
 #include <cstdlib>
 #include <fstream>
@@ -101,11 +102,6 @@ static PushResult push_head_error_result(git_remote* remote, const std::string& 
 }
 // LCOV_EXCL_STOP
 
-static std::string home_dir_or_empty() {
-  const char* home = std::getenv("HOME");
-  return home ? std::string(home) : std::string();
-}
-
 static std::string configured_default_branch_name() {
   const char* env_branch = std::getenv("GIT_DEFAULT_BRANCH");
   if (env_branch && env_branch[0] != '\0') {
@@ -189,44 +185,18 @@ static int git_credential_acquire_cb(
     unsigned int allowed_types,
     void* payload
 ) {
-  (void)payload;
-  (void)url;
+  auto* provider = static_cast<GitCredentialProvider*>(payload);
+  if (provider == nullptr) return GIT_PASSTHROUGH; // LCOV_EXCL_LINE
 
-  if ((allowed_types & GIT_CREDENTIAL_SSH_KEY) != 0U ||
-      (allowed_types & GIT_CREDENTIAL_SSH_MEMORY) != 0U) {
-    const char* user = username_from_url && username_from_url[0] != '\0' ? username_from_url
-                                                                         : "git";
-    int rc = git_credential_ssh_key_from_agent(out, user);
-    if (rc == 0) return 0;
-
-    const auto home = home_dir_or_empty();
-    if (!home.empty() && (allowed_types & GIT_CREDENTIAL_SSH_KEY) != 0U) {
-      const std::array<std::pair<std::string, std::string>, 2> keypairs = {
-          std::make_pair(home + "/.ssh/id_ed25519.pub", home + "/.ssh/id_ed25519"),
-          std::make_pair(home + "/.ssh/id_rsa.pub", home + "/.ssh/id_rsa"),
-      };
-      for (const auto& keypair : keypairs) {
-        rc = git_credential_ssh_key_new(
-            out,
-            user,
-            keypair.first.c_str(),
-            keypair.second.c_str(),
-            ""
-        );
-        if (rc == 0) return 0;
-      }
-    }
-  }
-
-  // No supported credential path found for this request.
-  return GIT_PASSTHROUGH;
+  return provider->acquire(out, url, username_from_url, allowed_types) ? 0 : GIT_PASSTHROUGH;
 }
 
-static git_remote_callbacks make_remote_callbacks() {
+static git_remote_callbacks make_remote_callbacks(GitCredentialProvider* provider) {
   git_remote_callbacks callbacks{};
   const int rc = git_remote_init_callbacks(&callbacks, GIT_REMOTE_CALLBACKS_VERSION);
   if (rc != 0) throw git_err("git_remote_init_callbacks failed", rc); // LCOV_EXCL_LINE
   callbacks.credentials = git_credential_acquire_cb;
+  callbacks.payload = provider;
   return callbacks;
 }
 
@@ -281,7 +251,9 @@ static void checkout_commit_oid(git_repository* repo, const git_oid& oid) {
   if (rc != 0) throw git_err("git_checkout_tree failed", rc);
 }
 
-GitRepo::GitRepo() { git_libgit2_init(); }
+GitRepo::GitRepo() : credential_provider_(std::make_shared<SshAgentAndFileCredentialProvider>()) {
+  git_libgit2_init();
+}
 
 GitRepo::~GitRepo() {
   if (repo_) {
@@ -289,6 +261,10 @@ GitRepo::~GitRepo() {
     repo_ = nullptr;
   }
   git_libgit2_shutdown();
+}
+
+void GitRepo::set_credential_provider(std::shared_ptr<GitCredentialProvider> provider) {
+  credential_provider_ = std::move(provider);
 }
 
 void GitRepo::ensure_open() const {
@@ -582,7 +558,7 @@ RemoteProbeResult GitRepo::probe_remote(const std::string& name) {
     }; // LCOV_EXCL_LINE
   }
 
-  auto callbacks = make_remote_callbacks();
+  auto callbacks = make_remote_callbacks(credential_provider_.get());
   const int connect_rc =
       git_remote_connect(remote, GIT_DIRECTION_FETCH, &callbacks, nullptr, nullptr);
   if (connect_rc != 0) {
@@ -687,7 +663,7 @@ PushResult GitRepo::push_branch(
   git_push_options push_opts{};
   rc = git_push_options_init(&push_opts, GIT_PUSH_OPTIONS_VERSION);
   if (rc != 0) throw git_err("git_push_options_init failed", rc); // LCOV_EXCL_LINE
-  push_opts.callbacks = make_remote_callbacks();
+  push_opts.callbacks = make_remote_callbacks(credential_provider_.get());
   rc = git_remote_push(remote, &refspecs, &push_opts);
   if (rc != 0) {
     const std::string error = git_error_message_or_default("git_remote_push failed");
@@ -733,7 +709,7 @@ void GitRepo::pull_remote_ff_only(const std::string& name) {
   git_fetch_options fetch_opts{};
   rc = git_fetch_options_init(&fetch_opts, GIT_FETCH_OPTIONS_VERSION);
   if (rc != 0) throw git_err("git_fetch_options_init failed", rc); // LCOV_EXCL_LINE
-  fetch_opts.callbacks = make_remote_callbacks();
+  fetch_opts.callbacks = make_remote_callbacks(credential_provider_.get());
   rc = git_remote_fetch(remote, nullptr, &fetch_opts, nullptr);
   if (rc != 0) {
     git_remote_free(remote);
@@ -830,13 +806,14 @@ int GitRepo::credential_callback_for_tests(
     const char* username_from_url,
     bool* out_credential_created
 ) {
+  SshAgentAndFileCredentialProvider provider;
   git_credential* cred = nullptr;
   const int rc = git_credential_acquire_cb(
       &cred,
       "ssh://example.invalid/repo.git",
       username_from_url,
       allowed_types,
-      nullptr
+      &provider
   );
   if (out_credential_created) {
     *out_credential_created = (cred != nullptr);

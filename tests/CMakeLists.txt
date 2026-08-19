@@ -28,6 +28,7 @@ add_executable(holder_core_tests
   FsAdapterFailure_test.cpp
   FtsIndexer_test.cpp
   GitAdapterFailure_test.cpp
+  GitCredentialProvider_test.cpp
   GitOps_test.cpp
   GitRepo_test.cpp
   LinkRepo_test.cpp

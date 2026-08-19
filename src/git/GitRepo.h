@@ -1,8 +1,10 @@
 #pragma once
+#include "git/GitCredentialProvider.h"
 #include "git/PushResult.h"
 #include "git/RemoteProbe.h"
 
 #include <filesystem>
+#include <memory>
 #include <string>
 
 namespace holder::git {
@@ -14,6 +16,12 @@ class GitRepo {
 
   GitRepo(const GitRepo&) = delete;
   GitRepo& operator=(const GitRepo&) = delete;
+
+  // Installs the credential provider used for subsequent network operations
+  // (probe/push/pull). Defaults to an SshAgentAndFileCredentialProvider, so
+  // this only needs to be called to install a different one (e.g. a
+  // platform-keystore-backed signer on Android).
+  void set_credential_provider(std::shared_ptr<GitCredentialProvider> provider);
 
   // Open existing or init a new repo at repo_dir (non-bare, has working tree).
   void open_or_init(const std::filesystem::path& repo_dir);
@@ -53,6 +61,7 @@ class GitRepo {
   static RemoteProbeStatus classify_remote_probe_error_for_tests(const std::string& message);
   static PushStatus classify_push_error_for_tests(const std::string& message);
   static std::string configured_default_branch_name_for_tests();
+  GitCredentialProvider* credential_provider_for_tests() const { return credential_provider_.get(); }
 
   std::filesystem::path repo_dir() const { return repo_dir_; }
 
@@ -65,6 +74,7 @@ class GitRepo {
 
   void* repo_ = nullptr; // git_repository*
   std::filesystem::path repo_dir_;
+  std::shared_ptr<GitCredentialProvider> credential_provider_;
 };
 
 } // namespace holder::git

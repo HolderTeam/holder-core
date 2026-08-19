@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -128,6 +130,124 @@ void holder_string_free(char* value);
 
 const char* holder_error_message(const holder_error* error);
 void holder_error_destroy(holder_error* error);
+
+// -- Git sync --
+
+// Global, process-wide libgit2 "home" directory override. Needed on
+// Android: libgit2's ssh transport looks for ~/.ssh/known_hosts via $HOME,
+// which Android apps don't have. Call once, before any git_* operation,
+// with a writable app-private directory (e.g. Context.filesDir). Not needed
+// on platforms with a real $HOME (desktop).
+int holder_git_set_homedir(const char* path, holder_error** out_error);
+
+// Raw signing callback for holder_git_set_ssh_signer. Given the challenge
+// bytes libssh2 wants signed, must return 0 and set *out_der_sig (malloc'd)
+// / *out_der_sig_len to a DER-encoded ECDSA-Sig-Value{r,s} produced by an
+// ecdsa-sha2-nistp256 (P-256/secp256r1) key, or return nonzero to indicate
+// a signing failure for this attempt. holder-core takes ownership of
+// *out_der_sig and frees it with free() after copying it.
+//
+// THREADING: may be invoked from any thread the host app performs a git
+// operation on, and multiple times over the signer's lifetime -- once per
+// git network operation that needs to authenticate, not once total. Do not
+// assume it runs on the thread that called holder_git_set_ssh_signer, and
+// do not cache anything thread-affine (e.g. a JNIEnv*) across calls.
+typedef int (*holder_ssh_sign_fn)(
+    void* user_data,
+    const unsigned char* data,
+    size_t data_len,
+    unsigned char** out_der_sig,
+    size_t* out_der_sig_len
+);
+
+// Called exactly once to release user_data: either when a later call to
+// holder_git_set_ssh_signer replaces this signer, or when context is
+// destroyed. May be NULL if user_data needs no cleanup.
+typedef void (*holder_destroy_fn)(void* user_data);
+
+// Installs a custom SSH identity (e.g. an Android Keystore-backed key) for
+// all subsequent git network operations (test-remote/push/pull) on this
+// context, replacing the default ssh-agent/~/.ssh lookup.
+//
+// public_key_blob is the raw SSH wire-format ecdsa-sha2-nistp256 public key
+// blob (RFC 5656 3.1) -- NOT base64-encoded, NOT the
+// "ecdsa-sha2-nistp256 AAAA... comment" line.
+//
+// OWNERSHIP: context takes ownership of user_data and will call
+// destroy_user_data(user_data) exactly once -- either when a subsequent
+// call to holder_git_set_ssh_signer replaces this signer, or when context
+// is destroyed via holder_context_destroy. A caller handing in a JNI global
+// reference (or similar) must release it only from destroy_user_data, never
+// eagerly: sign_fn can be invoked at any point up until then.
+int holder_git_set_ssh_signer(
+    holder_context* context,
+    const char* username,
+    const unsigned char* public_key_blob,
+    size_t public_key_blob_len,
+    holder_ssh_sign_fn sign_fn,
+    void* user_data,
+    holder_destroy_fn destroy_user_data,
+    holder_error** out_error
+);
+
+// Updates a project's configured git remote URL (remote_url NULL/empty
+// clears it). Sets *out_json to the updated project.
+int holder_project_update_git_remote(
+    holder_context* context,
+    const char* project_id,
+    const char* remote_url,
+    char** out_json,
+    holder_error** out_error
+);
+
+// Sets remote "origin" to the project's configured git_remote_url (if any)
+// and probes reachability. branch may be NULL/empty. Sets *out_json to
+// {project_id, remote_url, branch, status, remote_has_head, error_message}.
+int holder_git_test_remote(
+    holder_context* context,
+    const char* project_id,
+    const char* branch,
+    char** out_json,
+    holder_error** out_error
+);
+
+// Pushes the project's local branch to its configured remote. branch may be
+// NULL/empty to use the local HEAD's branch. Records the result into the
+// project's sync state (see holder_git_sync_status). Sets *out_json to
+// {project_id, remote_url, branch, status, ahead_count, behind_count,
+//  local_head_commit, error_message}.
+int holder_git_push(
+    holder_context* context,
+    const char* project_id,
+    const char* branch,
+    int set_upstream,
+    char** out_json,
+    holder_error** out_error
+);
+
+// Fast-forward-only pulls from the project's configured remote. Records the
+// result into the project's sync state. Sets *out_json to
+// {project_id, status: "succeeded"|"failed", error_message}.
+int holder_git_pull(
+    holder_context* context,
+    const char* project_id,
+    char** out_json,
+    holder_error** out_error
+);
+
+// Sets *out_json to {project_id, sync: {...}} mirroring
+// holder::model::ProjectSyncState (last_commit_at, last_push_at,
+// last_pull_at, uncommitted_changes_count, unpushed_commits_count,
+// last_push_status, last_pull_status, last_sync_error, last_sync_error_at,
+// retry_count, next_retry_at, pull_retry_count, next_pull_retry_at,
+// updated_at), or {project_id, sync: null} if no sync activity has been
+// recorded yet.
+int holder_git_sync_status(
+    holder_context* context,
+    const char* project_id,
+    char** out_json,
+    holder_error** out_error
+);
 
 #ifdef __cplusplus
 }
