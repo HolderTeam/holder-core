@@ -257,6 +257,54 @@ int holder_card_list(
   }
 }
 
+int holder_card_get_content(
+    holder_context* context,
+    const char* card_id,
+    char** out_content,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_content == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_content must not be null");
+  }
+  *out_content = nullptr;
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (card_id == nullptr || card_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "card_id must not be empty");
+  }
+
+  try {
+    holder::card::CardRepo repo(context->db);
+    const auto card = repo.get(card_id);
+    if (!card.has_value()) {
+      return set_error(out_error, HOLDER_ERROR_RUNTIME, "card not found: " + std::string(card_id));
+    }
+
+    holder::card::CardStore store(context->db, nullptr);
+    const auto content = store.get_content(*card);
+    if (!content.has_value()) {
+      return set_error(out_error, HOLDER_ERROR_RUNTIME, "card content missing");
+    }
+
+    auto* out = duplicate_string(*content);
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    }
+
+    *out_content = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);
+  }
+}
+
 int holder_project_create(
     holder_context* context,
     const char* name,

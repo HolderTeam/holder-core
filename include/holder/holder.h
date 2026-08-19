@@ -35,6 +35,15 @@ int holder_card_list(
     holder_error** out_error
 );
 
+// Returns the card's markdown body (not front matter). Fails with
+// HOLDER_ERROR_RUNTIME if the card is not found or its content file is missing.
+int holder_card_get_content(
+    holder_context* context,
+    const char* card_id,
+    char** out_content,
+    holder_error** out_error
+);
+
 // privacy_mode may be NULL/empty, defaulting to "plain". root_path may be
 // NULL/empty, defaulting to a directory derived from the project name under
 // the context's data_dir.

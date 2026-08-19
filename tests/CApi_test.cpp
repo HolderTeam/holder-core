@@ -297,6 +297,89 @@ TEST_CASE("C API creates a card with generated id and rel_path", "[capi]") {
   holder_context_destroy(context);
 }
 
+TEST_CASE("C API gets a card's content", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* project_json = nullptr;
+  REQUIRE(holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
+  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>();
+  holder_string_free(project_json);
+
+  char* card_json = nullptr;
+  REQUIRE(
+      holder_card_create(
+          context,
+          project_id.c_str(),
+          "Welcome",
+          "# Welcome to Holder\n\nBody text.\n",
+          nullptr,
+          &card_json,
+          &error
+      ) == HOLDER_OK
+  );
+  const std::string card_id = nlohmann::json::parse(card_json)["card_id"].get<std::string>();
+  holder_string_free(card_json);
+
+  char* content = nullptr;
+  REQUIRE(holder_card_get_content(context, card_id.c_str(), &content, &error) == HOLDER_OK);
+  REQUIRE(content != nullptr);
+  REQUIRE(error == nullptr);
+  REQUIRE(std::string(content) == "# Welcome to Holder\n\nBody text.\n");
+
+  holder_string_free(content);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API reports card not found for get_content", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* content = nullptr;
+  REQUIRE(holder_card_get_content(context, "missing-card", &content, &error) == HOLDER_ERROR_RUNTIME);
+  REQUIRE(content == nullptr);
+  REQUIRE(error != nullptr);
+  REQUIRE(std::string(holder_error_message(error)).find("not found") != std::string::npos);
+
+  holder_error_destroy(error);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API reports invalid card get_content arguments", "[capi]") {
+  holder_error* error = nullptr;
+  char* content = nullptr;
+
+  REQUIRE(
+      holder_card_get_content(nullptr, "card-1", &content, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(content == nullptr);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  REQUIRE(
+      holder_card_get_content(context, "", &content, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(error != nullptr);
+  REQUIRE(std::string(holder_error_message(error)).find("card_id") != std::string::npos);
+
+  holder_error_destroy(error);
+  holder_context_destroy(context);
+}
+
 TEST_CASE("C API reports invalid card create arguments", "[capi]") {
   holder_error* error = nullptr;
   char* json = nullptr;
