@@ -139,7 +139,7 @@ std::vector<FtsIndexer::SearchRow> FtsIndexer::search_cards(
 ) {
   static constexpr const char* SQL = "SELECT c.card_id, c.title, c.updated_at, c.created_at, "
                                      "bm25(cards_fts) AS score, "
-                                     "snippet(cards_fts, 2, '[', ']', '...', 10) "
+                                     "snippet(cards_fts, 3, '[', ']', '...', 10) "
                                      "FROM cards_fts "
                                      "JOIN cards c ON c.card_id = cards_fts.card_id "
                                      "WHERE cards_fts.project_id = ? AND cards_fts MATCH ? "
@@ -170,14 +170,7 @@ std::vector<FtsIndexer::SearchRow> FtsIndexer::search_cards(
       row.created_at = sqlite3_column_int64(stmt, 3);
       row.rank = sqlite3_column_double(stmt, 4);
       const auto* text = sqlite3_column_text(stmt, 5);
-      const std::string raw = text ? reinterpret_cast<const char*>(text) : "";
-      if (raw.empty()) {
-        row.snippet = ""; // LCOV_EXCL_LINE
-      } else if (raw.front() == '[' || raw.find('[') != std::string::npos) {
-        row.snippet = raw;
-      } else {
-        row.snippet = "[" + raw + "]"; // LCOV_EXCL_LINE
-      }
+      row.snippet = text ? reinterpret_cast<const char*>(text) : "";
       out.push_back(std::move(row));
       continue;
     }

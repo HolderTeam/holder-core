@@ -2,6 +2,8 @@
 
 #include "card/CardRepo.h"
 #include "card/CardStore.h"
+#include "index/FtsIndexer.h"
+#include "index/Reindexer.h"
 #include "platform/Db.h"
 #include "project/DefaultProject.h"
 #include "project/ProjectRepo.h"
@@ -25,6 +27,7 @@ struct holder_context {
   std::filesystem::path data_dir;
   std::filesystem::path db_path;
   holder::platform::Db db;
+  holder::index::FtsIndexer fts{db};
 };
 
 struct holder_error {
@@ -108,6 +111,17 @@ nlohmann::json card_to_json(const holder::model::Card& card) {
                            ? nlohmann::json(*card.deleted_at)
                            : nlohmann::json(nullptr);
   return body;
+}
+
+nlohmann::json search_row_to_json(const holder::index::FtsIndexer::SearchRow& row) {
+  return {
+      {"card_id", row.id},
+      {"title", row.title},
+      {"snippet", row.snippet},
+      {"rank", row.rank},
+      {"created_at", row.created_at},
+      {"updated_at", row.updated_at},
+  };
 }
 
 long long now_epoch_seconds() {
@@ -287,7 +301,7 @@ int holder_card_get_content(
       return set_error(out_error, HOLDER_ERROR_RUNTIME, "card not found: " + std::string(card_id));
     }
 
-    holder::card::CardStore store(context->db, nullptr);
+    holder::card::CardStore store(context->db, &context->fts);
     const auto content = store.get_content(*card);
     if (!content.has_value()) {
       return set_error(out_error, HOLDER_ERROR_RUNTIME, "card content missing");
@@ -469,7 +483,7 @@ int holder_card_create(
       card.parent_card_id = std::string(parent_card_id);
     }
 
-    holder::card::CardStore store(context->db, nullptr);
+    holder::card::CardStore store(context->db, &context->fts);
     store.create(card, content != nullptr ? std::string(content) : std::string());
 
     holder::card::CardRepo repo(context->db);
@@ -515,7 +529,7 @@ int holder_card_update_content(
   }
 
   try {
-    holder::card::CardStore store(context->db, nullptr);
+    holder::card::CardStore store(context->db, &context->fts);
     const std::optional<std::string> title_opt =
         (title != nullptr && title[0] != '\0') ? std::optional<std::string>(title) : std::nullopt;
     store.update_content(card_id, content, title_opt, now_epoch_seconds());
@@ -552,8 +566,75 @@ int holder_card_delete(holder_context* context, const char* card_id, holder_erro
   }
 
   try {
-    holder::card::CardStore store(context->db, nullptr);
+    holder::card::CardStore store(context->db, &context->fts);
     store.trash(card_id, now_epoch_seconds());
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);
+  }
+}
+
+int holder_card_search(
+    holder_context* context,
+    const char* project_id,
+    const char* query,
+    int limit,
+    int offset,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (project_id == nullptr || project_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "project_id must not be empty");
+  }
+  if (query == nullptr || query[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "query must not be empty");
+  }
+
+  try {
+    const auto rows = context->fts.search_cards(project_id, query, limit, offset);
+    nlohmann::json body = nlohmann::json::array();
+    for (const auto& row : rows) {
+      body.push_back(search_row_to_json(row));
+    }
+
+    auto* out = duplicate_string(body.dump());
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    }
+
+    *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);
+  }
+}
+
+int holder_reindex(holder_context* context, holder_error** out_error) {
+  clear_error(out_error);
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+
+  try {
+    holder::index::Reindexer reindexer(context->db);
+    reindexer.run();
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
     return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
@@ -596,7 +677,8 @@ int holder_ensure_default_project(
         welcome_title,
         welcome_content != nullptr ? std::string(welcome_content) : std::string(),
         uuid_v4,
-        context->data_dir / "projects"
+        context->data_dir / "projects",
+        &context->fts
     );
 
     auto* out = duplicate_string(

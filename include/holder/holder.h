@@ -107,6 +107,23 @@ int holder_card_update_content(
 // Soft-deletes (trashes) a card; it stops appearing in holder_card_list.
 int holder_card_delete(holder_context* context, const char* card_id, holder_error** out_error);
 
+// Full-text searches a project's (non-deleted) cards. Sets *out_json to a JSON
+// array of {card_id, title, snippet, rank, created_at, updated_at}, ranked
+// best-match first.
+int holder_card_search(
+    holder_context* context,
+    const char* project_id,
+    const char* query,
+    int limit,
+    int offset,
+    char** out_json,
+    holder_error** out_error
+);
+
+// Rebuilds the full-text search index from the database. Safe to call anytime;
+// mainly useful to backfill data written before FTS indexing was wired up.
+int holder_reindex(holder_context* context, holder_error** out_error);
+
 void holder_string_free(char* value);
 
 const char* holder_error_message(const holder_error* error);
