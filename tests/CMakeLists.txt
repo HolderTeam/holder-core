@@ -16,6 +16,7 @@ add_executable(holder_core_tests
   AiRunRepo_test.cpp
   AiRunnerRepo_test.cpp
   AiThreadRepo_test.cpp
+  CApi_test.cpp
   CardFrontMatter_test.cpp
   CardPaths_test.cpp
   CardRepo_test.cpp
@@ -51,6 +52,10 @@ target_link_libraries(holder_core_tests PRIVATE
 )
 
 target_compile_definitions(holder_core_tests PRIVATE
+  EXPECTED_HOLDER_VERSION_STRING="${PROJECT_VERSION}"
+  EXPECTED_HOLDER_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+  EXPECTED_HOLDER_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+  EXPECTED_HOLDER_VERSION_PATCH=${PROJECT_VERSION_PATCH}
   SCHEMA_SQL_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../schema/schema.sql"
 )
 

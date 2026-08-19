@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(holder VERSION 0.1.0 LANGUAGES CXX)
+include(cmake/HolderVersion.cmake)
+
+project(holder VERSION ${HOLDER_CORE_VERSION} LANGUAGES CXX)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 include(CTest)
@@ -19,7 +21,7 @@ if(WIN32)
   )
 endif()
 
-if(WIN32)
+if(WIN32 OR ANDROID)
   set(HOLDER_CORE_USE_PKG_CONFIG_DEPS OFF)
 else()
   set(HOLDER_CORE_USE_PKG_CONFIG_DEPS ON)
@@ -41,7 +43,7 @@ else()
   set(HOLDER_CORE_YAML_CPP_TARGET yaml-cpp)
 endif()
 
-if(WIN32)
+if(WIN32 OR ANDROID)
   find_package(unofficial-sqlite3 CONFIG QUIET)
   if(TARGET unofficial::sqlite3::sqlite3)
     set(HOLDER_CORE_SQLITE3_TARGET unofficial::sqlite3::sqlite3)
@@ -107,6 +109,8 @@ else()
 endif()
 
 add_library(holder STATIC
+  src/capi/holder.cpp
+  src/capi/version.cpp
   src/ai/AiMessageFrontMatter.cpp
   src/ai/AiMessagePaths.cpp
   src/ai/AiMessageRepo.cpp
@@ -142,10 +146,15 @@ add_library(holder STATIC
   src/sync/ProjectSyncPolicy.cpp
 )
 add_library(Holder::Core ALIAS holder)
-set_target_properties(holder PROPERTIES EXPORT_NAME Core)
+set_target_properties(holder PROPERTIES
+  EXPORT_NAME Core
+  POSITION_INDEPENDENT_CODE ON
+)
 
 target_include_directories(holder PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/holder>
 )
 
@@ -153,6 +162,13 @@ target_compile_definitions(holder PUBLIC
   CARD_SERVER_HAVE_LIBGIT2=1
   HOLDER_HAVE_MACOS_KEYCHAIN=${HOLDER_CORE_HAVE_MACOS_KEYCHAIN}
   HOLDER_HAVE_WINDOWS_CREDENTIAL_MANAGER=${HOLDER_CORE_HAVE_WINDOWS_CREDENTIAL_MANAGER}
+)
+
+target_compile_definitions(holder PRIVATE
+  HOLDER_VERSION_STRING="${PROJECT_VERSION}"
+  HOLDER_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+  HOLDER_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+  HOLDER_VERSION_PATCH=${PROJECT_VERSION_PATCH}
 )
 
 if(LIBSECRET_FOUND)
@@ -208,6 +224,10 @@ install(TARGETS holder
 )
 install(DIRECTORY src/
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/holder
+  FILES_MATCHING PATTERN "*.h"
+)
+install(DIRECTORY include/
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
   FILES_MATCHING PATTERN "*.h"
 )
 install(EXPORT holderTargets
