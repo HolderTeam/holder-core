@@ -93,11 +93,11 @@ int EcdsaDerSigningCredentialProvider::sign_trampoline(
 }
 
 EcdsaDerSigningCredentialProvider::EcdsaDerSigningCredentialProvider(
-    std::string username,
+    std::string default_username,
     std::vector<unsigned char> public_key_blob,
     EcdsaDerSignFn sign_raw
 )
-    : username_(std::move(username)),
+    : default_username_(std::move(default_username)),
       public_key_blob_(std::move(public_key_blob)),
       sign_raw_(std::move(sign_raw)) {}
 
@@ -110,14 +110,23 @@ std::vector<unsigned char> EcdsaDerSigningCredentialProvider::der_to_ssh_wire_si
 bool EcdsaDerSigningCredentialProvider::acquire(
     git_credential** out,
     const char* /*url*/,
-    const char* /*username_from_url*/,
+    const char* username_from_url,
     unsigned int allowed_types
 ) {
   if ((allowed_types & GIT_CREDENTIAL_SSH_CUSTOM) == 0U) return false;
 
+  // libgit2 commits to a username earlier in the handshake than this
+  // callback runs; offering anything else here fails with "username does
+  // not match previous request", so prefer the URL's username when it has
+  // one (matching SshAgentAndFileCredentialProvider's behavior) and only
+  // fall back to default_username_ when the URL didn't specify one.
+  const char* user = (username_from_url != nullptr && username_from_url[0] != '\0')
+                          ? username_from_url
+                          : default_username_.c_str();
+
   const int rc = git_credential_ssh_custom_new(
       out,
-      username_.c_str(),
+      user,
       reinterpret_cast<const char*>(public_key_blob_.data()),
       public_key_blob_.size(),
       sign_trampoline,

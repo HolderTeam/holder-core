@@ -36,8 +36,17 @@ class EcdsaDerSigningCredentialProvider final : public GitCredentialProvider {
   // public_key_blob is the raw SSH wire-format ecdsa-sha2-nistp256 public
   // key blob (RFC 5656 3.1) -- NOT base64-encoded, NOT the
   // "ecdsa-sha2-nistp256 AAAA... comment" line.
+  //
+  // default_username is used only when a remote URL doesn't embed one of its
+  // own (e.g. "ssh://host/repo.git" with no "user@"); acquire() otherwise
+  // uses the URL's username, matching SshAgentAndFileCredentialProvider's
+  // behavior. libgit2 commits to a username during an earlier stage of the
+  // SSH handshake than this callback -- offering anything else here fails
+  // with "username does not match previous request", so this provider must
+  // not just always assume e.g. "git" regardless of what a caller's URL
+  // actually says.
   EcdsaDerSigningCredentialProvider(
-      std::string username,
+      std::string default_username,
       std::vector<unsigned char> public_key_blob,
       EcdsaDerSignFn sign_raw
   );
@@ -66,7 +75,7 @@ class EcdsaDerSigningCredentialProvider final : public GitCredentialProvider {
       void** abstract
   );
 
-  std::string username_;
+  std::string default_username_;
   std::vector<unsigned char> public_key_blob_;
   EcdsaDerSignFn sign_raw_;
 };

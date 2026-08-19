@@ -133,6 +133,37 @@ TEST_CASE("EcdsaDerSigningCredentialProvider only handles GIT_CREDENTIAL_SSH_CUS
   }
 }
 
+TEST_CASE("EcdsaDerSigningCredentialProvider prefers the URL's username over its default", "[git]") {
+  using holder::git::EcdsaDerSigningCredentialProvider;
+
+  EcdsaDerSigningCredentialProvider provider(
+      "git",
+      dummy_p256_ssh_pubkey_blob(),
+      [](const unsigned char*, size_t) -> std::vector<unsigned char> { return {}; }
+  );
+
+  SECTION("URL supplies a username") {
+    git_credential* cred = nullptr;
+    REQUIRE(provider.acquire(&cred, "ssh://zeth@example.invalid/repo.git", "zeth", GIT_CREDENTIAL_SSH_CUSTOM));
+    REQUIRE(std::string(git_credential_get_username(cred)) == "zeth");
+    git_credential_free(cred);
+  }
+
+  SECTION("URL has no username: falls back to the provider's default") {
+    git_credential* cred = nullptr;
+    REQUIRE(provider.acquire(&cred, "ssh://example.invalid/repo.git", "", GIT_CREDENTIAL_SSH_CUSTOM));
+    REQUIRE(std::string(git_credential_get_username(cred)) == "git");
+    git_credential_free(cred);
+  }
+
+  SECTION("URL username is null: falls back to the provider's default") {
+    git_credential* cred = nullptr;
+    REQUIRE(provider.acquire(&cred, "ssh://example.invalid/repo.git", nullptr, GIT_CREDENTIAL_SSH_CUSTOM));
+    REQUIRE(std::string(git_credential_get_username(cred)) == "git");
+    git_credential_free(cred);
+  }
+}
+
 TEST_CASE("GitRepo defaults to an SshAgentAndFileCredentialProvider and honors set_credential_provider", "[git]") {
   holder::git::GitRepo repo;
   REQUIRE(repo.credential_provider_for_tests() != nullptr);
