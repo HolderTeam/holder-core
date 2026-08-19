@@ -58,6 +58,19 @@ int holder_card_create(
     holder_error** out_error
 );
 
+// If any project already exists, does nothing and sets *out_json to the JSON
+// literal "null". Otherwise creates a plain project named `name` with a
+// single welcome card, and sets *out_json to the created project. welcome_content
+// may be NULL.
+int holder_ensure_default_project(
+    holder_context* context,
+    const char* name,
+    const char* welcome_title,
+    const char* welcome_content,
+    char** out_json,
+    holder_error** out_error
+);
+
 void holder_string_free(char* value);
 
 const char* holder_error_message(const holder_error* error);

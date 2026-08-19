@@ -2,15 +2,14 @@
 
 #include "card/CardRepo.h"
 #include "card/CardStore.h"
-#include "git/GitOps.h"
 #include "platform/Db.h"
-#include "privacy/ProjectPrivacy.h"
+#include "project/DefaultProject.h"
 #include "project/ProjectRepo.h"
+#include "project/ProjectStore.h"
 
 #include <nlohmann/json.hpp>
 #include <sodium.h>
 
-#include <cctype>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -137,36 +136,6 @@ std::string uuid_v4() {
     }
   }
   return out;
-}
-
-std::string slugify(const std::string& name) {
-  std::string slug;
-  slug.reserve(name.size());
-  bool last_was_dash = false;
-  for (char ch : name) {
-    if (std::isalnum(static_cast<unsigned char>(ch))) {
-      slug.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
-      last_was_dash = false;
-    } else if (!last_was_dash && !slug.empty()) {
-      slug.push_back('-');
-      last_was_dash = true;
-    }
-  }
-  while (!slug.empty() && slug.back() == '-') {
-    slug.pop_back();
-  }
-  return slug.empty() ? "project" : slug;
-}
-
-std::filesystem::path unique_project_root(
-    const std::filesystem::path& projects_root,
-    const std::string& slug
-) {
-  auto candidate = projects_root / slug;
-  for (int suffix = 2; std::filesystem::exists(candidate); ++suffix) {
-    candidate = projects_root / (slug + "-" + std::to_string(suffix));
-  }
-  return candidate;
 }
 
 } // namespace
@@ -311,41 +280,18 @@ int holder_project_create(
 
   try {
     holder::model::Project project;
-    project.project_id = uuid_v4();
     project.name = name;
-    project.root_path = (root_path != nullptr && root_path[0] != '\0')
-                             ? std::string(root_path)
-                             : unique_project_root(context->data_dir / "projects", slugify(name))
-                                   .string();
+    if (root_path != nullptr && root_path[0] != '\0') {
+      project.root_path = root_path;
+    }
     project.privacy_mode =
         (privacy_mode != nullptr && privacy_mode[0] != '\0') ? std::string(privacy_mode) : "plain";
-    project.created_at = now_epoch_seconds();
-    project.updated_at = project.created_at;
 
-    holder::project::ProjectRepo repo(context->db);
-    repo.create(project);
+    holder::project::ProjectStore store(context->db);
+    const auto created =
+        store.create(std::move(project), uuid_v4, context->data_dir / "projects");
 
-    try {
-      holder::git::RealGitOps git;
-      git.open_or_init(project.root_path);
-      if (project.privacy_mode == "encrypted_git") {
-        holder::privacy::ensure_encrypted_project_ready(
-            git,
-            repo,
-            project.project_id,
-            project.root_path,
-            std::nullopt,
-            project.updated_at,
-            uuid_v4
-        );
-      }
-    } catch (...) {
-      repo.remove(project.project_id);
-      throw;
-    }
-
-    const auto created = repo.get(project.project_id);
-    auto* out = duplicate_string(project_to_json(created.value()).dump());
+    auto* out = duplicate_string(project_to_json(created).dump());
     if (out == nullptr) {
       return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
     }
@@ -403,6 +349,59 @@ int holder_card_create(
     holder::card::CardRepo repo(context->db);
     const auto created = repo.get(card.card_id);
     auto* out = duplicate_string(card_to_json(created.value()).dump());
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    }
+
+    *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);
+  }
+}
+
+int holder_ensure_default_project(
+    holder_context* context,
+    const char* name,
+    const char* welcome_title,
+    const char* welcome_content,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (name == nullptr || name[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "name must not be empty");
+  }
+  if (welcome_title == nullptr || welcome_title[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "welcome_title must not be empty");
+  }
+
+  try {
+    const auto created = holder::project::ensure_default_project(
+        context->db,
+        name,
+        "plain",
+        welcome_title,
+        welcome_content != nullptr ? std::string(welcome_content) : std::string(),
+        uuid_v4,
+        context->data_dir / "projects"
+    );
+
+    auto* out = duplicate_string(
+        created.has_value() ? project_to_json(created.value()).dump() : std::string("null")
+    );
     if (out == nullptr) {
       return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
     }

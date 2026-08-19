@@ -204,12 +204,22 @@ TEST_CASE("C API creates a plain project defaulting root_path and privacy_mode",
   REQUIRE(body["name"] == "Home");
   REQUIRE(body["privacy_mode"] == "plain");
   REQUIRE_FALSE(body["project_id"].get<std::string>().empty());
+  const std::string project_id = body["project_id"].get<std::string>();
   const std::string root_path = body["root_path"].get<std::string>();
   REQUIRE(root_path.find("projects/home") != std::string::npos);
-  REQUIRE(std::filesystem::is_directory(root_path));
-  REQUIRE(std::filesystem::is_directory(std::filesystem::path(root_path) / ".git"));
+  // A plain project with no remote is not git-initialized until its first
+  // write (e.g. a card create), to avoid creating empty repos up front.
+  REQUIRE_FALSE(std::filesystem::exists(root_path));
 
   holder_string_free(json);
+
+  char* card_json = nullptr;
+  REQUIRE(
+      holder_card_create(context, project_id.c_str(), "Welcome", nullptr, nullptr, &card_json, &error) ==
+      HOLDER_OK
+  );
+  holder_string_free(card_json);
+  REQUIRE(std::filesystem::is_directory(std::filesystem::path(root_path) / ".git"));
 
   char* list_json = nullptr;
   REQUIRE(holder_project_list(context, &list_json, &error) == HOLDER_OK);
@@ -311,6 +321,93 @@ TEST_CASE("C API reports invalid card create arguments", "[capi]") {
   );
   REQUIRE(error != nullptr);
   REQUIRE(std::string(holder_error_message(error)).find("title") != std::string::npos);
+
+  holder_error_destroy(error);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API ensure_default_project bootstraps once and then no-ops", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_ensure_default_project(
+          context,
+          "Home",
+          "Welcome",
+          "# Welcome to Holder\n",
+          &json,
+          &error
+      ) == HOLDER_OK
+  );
+  REQUIRE(json != nullptr);
+  REQUIRE(error == nullptr);
+
+  const auto body = nlohmann::json::parse(json);
+  REQUIRE(body["name"] == "Home");
+  REQUIRE(body["privacy_mode"] == "plain");
+  const std::string project_id = body["project_id"].get<std::string>();
+  holder_string_free(json);
+
+  char* card_list_json = nullptr;
+  REQUIRE(holder_card_list(context, project_id.c_str(), &card_list_json, &error) == HOLDER_OK);
+  const auto cards = nlohmann::json::parse(card_list_json);
+  REQUIRE(cards.size() == 1);
+  REQUIRE(cards[0]["title"] == "Welcome");
+  holder_string_free(card_list_json);
+
+  char* second_json = nullptr;
+  REQUIRE(
+      holder_ensure_default_project(
+          context,
+          "Home",
+          "Welcome",
+          "# Welcome to Holder\n",
+          &second_json,
+          &error
+      ) == HOLDER_OK
+  );
+  REQUIRE(second_json != nullptr);
+  REQUIRE(std::string(second_json) == "null");
+  holder_string_free(second_json);
+
+  char* project_list_json = nullptr;
+  REQUIRE(holder_project_list(context, &project_list_json, &error) == HOLDER_OK);
+  REQUIRE(nlohmann::json::parse(project_list_json).size() == 1);
+  holder_string_free(project_list_json);
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API reports invalid ensure_default_project arguments", "[capi]") {
+  holder_error* error = nullptr;
+  char* json = nullptr;
+
+  REQUIRE(
+      holder_ensure_default_project(nullptr, "Home", "Welcome", nullptr, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(json == nullptr);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  REQUIRE(
+      holder_ensure_default_project(context, "Home", "", nullptr, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(error != nullptr);
+  REQUIRE(std::string(holder_error_message(error)).find("welcome_title") != std::string::npos);
 
   holder_error_destroy(error);
   holder_context_destroy(context);

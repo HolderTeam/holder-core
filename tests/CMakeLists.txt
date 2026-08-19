@@ -23,6 +23,7 @@ add_executable(holder_core_tests
   CardStore_test.cpp
   CardStoreFsFailure_test.cpp
   Cascade_test.cpp
+  DefaultProject_test.cpp
   Db_test.cpp
   FsAdapterFailure_test.cpp
   FtsIndexer_test.cpp
@@ -33,8 +34,10 @@ add_executable(holder_core_tests
   Migrations_test.cpp
   PrivacyCryptoService_test.cpp
   PrivacyError_test.cpp
+  ProjectPaths_test.cpp
   ProjectPrivacy_test.cpp
   ProjectRepo_test.cpp
+  ProjectStore_test.cpp
   ProjectSyncPolicy_test.cpp
   ProjectSyncRepo_test.cpp
   PushResult_test.cpp
