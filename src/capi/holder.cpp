@@ -6,6 +6,7 @@
 #include "project/DefaultProject.h"
 #include "project/ProjectRepo.h"
 #include "project/ProjectStore.h"
+#include "project/ProjectSyncRepo.h"
 
 #include <nlohmann/json.hpp>
 #include <sodium.h>
@@ -238,6 +239,9 @@ int holder_card_list(
     holder::card::CardRepo repo(context->db);
     nlohmann::json body = nlohmann::json::array();
     for (const auto& card : repo.list_all(project_id)) {
+      if (card.deleted_at.has_value()) {
+        continue;
+      }
       body.push_back(card_to_json(card));
     }
 
@@ -355,6 +359,80 @@ int holder_project_create(
   }
 }
 
+int holder_project_rename(
+    holder_context* context,
+    const char* project_id,
+    const char* name,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (project_id == nullptr || project_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "project_id must not be empty");
+  }
+  if (name == nullptr || name[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "name must not be empty");
+  }
+
+  try {
+    holder::project::ProjectRepo repo(context->db);
+    if (!repo.get(project_id).has_value()) {
+      return set_error(out_error, HOLDER_ERROR_RUNTIME, "project not found: " + std::string(project_id));
+    }
+
+    repo.update_name(project_id, name, now_epoch_seconds());
+
+    auto* out = duplicate_string(project_to_json(repo.get(project_id).value()).dump());
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    }
+
+    *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);
+  }
+}
+
+int holder_project_delete(holder_context* context, const char* project_id, holder_error** out_error) {
+  clear_error(out_error);
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (project_id == nullptr || project_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "project_id must not be empty");
+  }
+
+  try {
+    holder::project::ProjectRepo repo(context->db);
+    if (!repo.get(project_id).has_value()) {
+      return set_error(out_error, HOLDER_ERROR_RUNTIME, "project not found: " + std::string(project_id));
+    }
+
+    repo.remove(project_id);
+    holder::project::ProjectSyncRepo(context->db).remove(project_id);
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);
+  }
+}
+
 int holder_card_create(
     holder_context* context,
     const char* project_id,
@@ -402,6 +480,80 @@ int holder_card_create(
     }
 
     *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);
+  }
+}
+
+int holder_card_update_content(
+    holder_context* context,
+    const char* card_id,
+    const char* content,
+    const char* title,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (card_id == nullptr || card_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "card_id must not be empty");
+  }
+  if (content == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "content must not be null");
+  }
+
+  try {
+    holder::card::CardStore store(context->db, nullptr);
+    const std::optional<std::string> title_opt =
+        (title != nullptr && title[0] != '\0') ? std::optional<std::string>(title) : std::nullopt;
+    store.update_content(card_id, content, title_opt, now_epoch_seconds());
+
+    holder::card::CardRepo repo(context->db);
+    const auto updated = repo.get(card_id);
+    if (!updated.has_value()) {
+      return set_error(out_error, HOLDER_ERROR_RUNTIME, "card not found: " + std::string(card_id));
+    }
+
+    auto* out = duplicate_string(card_to_json(updated.value()).dump());
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    }
+
+    *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);
+  }
+}
+
+int holder_card_delete(holder_context* context, const char* card_id, holder_error** out_error) {
+  clear_error(out_error);
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (card_id == nullptr || card_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "card_id must not be empty");
+  }
+
+  try {
+    holder::card::CardStore store(context->db, nullptr);
+    store.trash(card_id, now_epoch_seconds());
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
     return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");

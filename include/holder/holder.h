@@ -80,6 +80,33 @@ int holder_ensure_default_project(
     holder_error** out_error
 );
 
+// Renames a project, setting *out_json to the updated project.
+int holder_project_rename(
+    holder_context* context,
+    const char* project_id,
+    const char* name,
+    char** out_json,
+    holder_error** out_error
+);
+
+// Removes the project row (cascading to its cards per the schema) and any
+// sync state. Does not touch the project's files on disk.
+int holder_project_delete(holder_context* context, const char* project_id, holder_error** out_error);
+
+// Replaces a card's content and, if title is non-NULL, its title. Sets
+// *out_json to the updated card.
+int holder_card_update_content(
+    holder_context* context,
+    const char* card_id,
+    const char* content,
+    const char* title,
+    char** out_json,
+    holder_error** out_error
+);
+
+// Soft-deletes (trashes) a card; it stops appearing in holder_card_list.
+int holder_card_delete(holder_context* context, const char* card_id, holder_error** out_error);
+
 void holder_string_free(char* value);
 
 const char* holder_error_message(const holder_error* error);

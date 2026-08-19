@@ -252,6 +252,112 @@ TEST_CASE("C API reports invalid project create arguments", "[capi]") {
   holder_context_destroy(context);
 }
 
+TEST_CASE("C API renames a project", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* project_json = nullptr;
+  REQUIRE(holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
+  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>();
+  holder_string_free(project_json);
+
+  char* renamed_json = nullptr;
+  REQUIRE(holder_project_rename(context, project_id.c_str(), "Personal", &renamed_json, &error) == HOLDER_OK);
+  REQUIRE(nlohmann::json::parse(renamed_json)["name"] == "Personal");
+  holder_string_free(renamed_json);
+
+  char* list_json = nullptr;
+  REQUIRE(holder_project_list(context, &list_json, &error) == HOLDER_OK);
+  REQUIRE(nlohmann::json::parse(list_json)[0]["name"] == "Personal");
+  holder_string_free(list_json);
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API reports invalid project rename arguments", "[capi]") {
+  holder_error* error = nullptr;
+  char* json = nullptr;
+
+  REQUIRE(
+      holder_project_rename(nullptr, "project-1", "New Name", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(json == nullptr);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  REQUIRE(
+      holder_project_rename(context, "missing-project", "New Name", &json, &error) ==
+      HOLDER_ERROR_RUNTIME
+  );
+  REQUIRE(error != nullptr);
+  REQUIRE(std::string(holder_error_message(error)).find("not found") != std::string::npos);
+
+  holder_error_destroy(error);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API deletes a project and cascades its cards", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* project_json = nullptr;
+  REQUIRE(holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
+  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>();
+  holder_string_free(project_json);
+
+  char* card_json = nullptr;
+  REQUIRE(
+      holder_card_create(context, project_id.c_str(), "Welcome", nullptr, nullptr, &card_json, &error) ==
+      HOLDER_OK
+  );
+  holder_string_free(card_json);
+
+  REQUIRE(holder_project_delete(context, project_id.c_str(), &error) == HOLDER_OK);
+
+  char* list_json = nullptr;
+  REQUIRE(holder_project_list(context, &list_json, &error) == HOLDER_OK);
+  REQUIRE(nlohmann::json::parse(list_json).empty());
+  holder_string_free(list_json);
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API reports invalid project delete arguments", "[capi]") {
+  holder_error* error = nullptr;
+
+  REQUIRE(holder_project_delete(nullptr, "project-1", &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  REQUIRE(holder_project_delete(context, "missing-project", &error) == HOLDER_ERROR_RUNTIME);
+  REQUIRE(error != nullptr);
+  REQUIRE(std::string(holder_error_message(error)).find("not found") != std::string::npos);
+
+  holder_error_destroy(error);
+  holder_context_destroy(context);
+}
+
 TEST_CASE("C API creates a card with generated id and rel_path", "[capi]") {
   const auto data_dir = holder::test::make_temp_dir();
   const auto schema = read_schema_sql();
@@ -404,6 +510,122 @@ TEST_CASE("C API reports invalid card create arguments", "[capi]") {
   );
   REQUIRE(error != nullptr);
   REQUIRE(std::string(holder_error_message(error)).find("title") != std::string::npos);
+
+  holder_error_destroy(error);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API updates a card's content and title", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* project_json = nullptr;
+  REQUIRE(holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
+  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>();
+  holder_string_free(project_json);
+
+  char* card_json = nullptr;
+  REQUIRE(
+      holder_card_create(context, project_id.c_str(), "Welcome", "Original body", nullptr, &card_json, &error) ==
+      HOLDER_OK
+  );
+  const std::string card_id = nlohmann::json::parse(card_json)["card_id"].get<std::string>();
+  holder_string_free(card_json);
+
+  char* updated_json = nullptr;
+  REQUIRE(
+      holder_card_update_content(context, card_id.c_str(), "New body", "Renamed", &updated_json, &error) ==
+      HOLDER_OK
+  );
+  REQUIRE(nlohmann::json::parse(updated_json)["title"] == "Renamed");
+  holder_string_free(updated_json);
+
+  char* content = nullptr;
+  REQUIRE(holder_card_get_content(context, card_id.c_str(), &content, &error) == HOLDER_OK);
+  REQUIRE(std::string(content) == "New body");
+  holder_string_free(content);
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API reports invalid card update_content arguments", "[capi]") {
+  holder_error* error = nullptr;
+  char* json = nullptr;
+
+  REQUIRE(
+      holder_card_update_content(nullptr, "card-1", "content", nullptr, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(json == nullptr);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  REQUIRE(
+      holder_card_update_content(context, "missing-card", "content", nullptr, &json, &error) ==
+      HOLDER_ERROR_RUNTIME
+  );
+  REQUIRE(error != nullptr);
+
+  holder_error_destroy(error);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API deletes (trashes) a card so it stops appearing in the list", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* project_json = nullptr;
+  REQUIRE(holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
+  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>();
+  holder_string_free(project_json);
+
+  char* card_json = nullptr;
+  REQUIRE(
+      holder_card_create(context, project_id.c_str(), "Welcome", nullptr, nullptr, &card_json, &error) ==
+      HOLDER_OK
+  );
+  const std::string card_id = nlohmann::json::parse(card_json)["card_id"].get<std::string>();
+  holder_string_free(card_json);
+
+  REQUIRE(holder_card_delete(context, card_id.c_str(), &error) == HOLDER_OK);
+
+  char* list_json = nullptr;
+  REQUIRE(holder_card_list(context, project_id.c_str(), &list_json, &error) == HOLDER_OK);
+  REQUIRE(nlohmann::json::parse(list_json).empty());
+  holder_string_free(list_json);
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API reports invalid card delete arguments", "[capi]") {
+  holder_error* error = nullptr;
+
+  REQUIRE(holder_card_delete(nullptr, "card-1", &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  REQUIRE(holder_card_delete(context, "missing-card", &error) == HOLDER_ERROR_RUNTIME);
+  REQUIRE(error != nullptr);
 
   holder_error_destroy(error);
   holder_context_destroy(context);
