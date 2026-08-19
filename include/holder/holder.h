@@ -173,12 +173,16 @@ typedef void (*holder_destroy_fn)(void* user_data);
 // blob (RFC 5656 3.1) -- NOT base64-encoded, NOT the
 // "ecdsa-sha2-nistp256 AAAA... comment" line.
 //
-// OWNERSHIP: context takes ownership of user_data and will call
-// destroy_user_data(user_data) exactly once -- either when a subsequent
-// call to holder_git_set_ssh_signer replaces this signer, or when context
-// is destroyed via holder_context_destroy. A caller handing in a JNI global
-// reference (or similar) must release it only from destroy_user_data, never
-// eagerly: sign_fn can be invoked at any point up until then.
+// OWNERSHIP: this call takes ownership of user_data unconditionally, from
+// the moment it's called -- regardless of whether it succeeds. destroy_user_data
+// is guaranteed to run exactly once: immediately, before this call returns,
+// if it fails for any reason (including invalid arguments); or later, when a
+// subsequent call to holder_git_set_ssh_signer replaces this signer or
+// context is destroyed via holder_context_destroy, if it succeeds. Callers
+// never need to release user_data themselves on a failure return, and must
+// not release it eagerly on success (e.g. a JNI global reference must only
+// be freed from destroy_user_data, since sign_fn can be invoked at any point
+// up until then).
 int holder_git_set_ssh_signer(
     holder_context* context,
     const char* username,

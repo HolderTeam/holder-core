@@ -846,6 +846,22 @@ int holder_git_set_ssh_signer(
     holder_error** out_error
 ) {
   clear_error(out_error);
+
+  // Takes ownership of user_data unconditionally from this point on -- via
+  // this shared_ptr, which either gets captured into the installed provider
+  // below (success) or simply falls out of scope at any early return
+  // (failure) -- so destroy_user_data runs exactly once either way: right
+  // away if this call fails for any reason, or later (on replacement or
+  // context destruction) if it succeeds. Callers never need to guess which
+  // case applies or risk a double-release.
+  std::shared_ptr<CApiSshSignerHandle> handle;
+  try {
+    handle = std::make_shared<CApiSshSignerHandle>(user_data, destroy_user_data);
+  } catch (const std::bad_alloc&) {
+    // user_data was never captured; nothing to release.
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+  }
+
   if (context == nullptr) {
     return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
   }
@@ -860,11 +876,6 @@ int holder_git_set_ssh_signer(
   }
 
   try {
-    // Owns user_data for as long as the provider below (and the lambda it
-    // captures this in) is alive; replacing context->credential_provider
-    // (here, or via a later call, or via context destruction) drops the
-    // last reference and runs destroy_user_data exactly once.
-    auto handle = std::make_shared<CApiSshSignerHandle>(user_data, destroy_user_data);
     std::vector<unsigned char> pubkey(public_key_blob, public_key_blob + public_key_blob_len);
 
     context->credential_provider = std::make_shared<holder::git::EcdsaDerSigningCredentialProvider>(

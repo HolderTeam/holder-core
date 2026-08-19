@@ -1100,11 +1100,44 @@ TEST_CASE("C API git_set_ssh_signer validates arguments and destroys user_data e
 
   const unsigned char pubkey[] = {0x01, 0x02, 0x03};
 
-  SECTION("rejects a null sign_fn") {
+  SECTION("rejects a null sign_fn, still destroying user_data exactly once") {
+    int destroy_count = 0;
+    auto destroy = [](void* user_data) {
+      *static_cast<int*>(user_data) += 1;
+    };
     REQUIRE(
-        holder_git_set_ssh_signer(context, "git", pubkey, sizeof(pubkey), nullptr, nullptr, nullptr, &error) ==
-        HOLDER_ERROR_INVALID_ARGUMENT
+        holder_git_set_ssh_signer(
+            context,
+            "git",
+            pubkey,
+            sizeof(pubkey),
+            nullptr,
+            &destroy_count,
+            destroy,
+            &error
+        ) == HOLDER_ERROR_INVALID_ARGUMENT
     );
+    REQUIRE(destroy_count == 1);
+  }
+
+  SECTION("rejects an empty username, still destroying user_data exactly once") {
+    int destroy_count = 0;
+    auto destroy = [](void* user_data) {
+      *static_cast<int*>(user_data) += 1;
+    };
+    REQUIRE(
+        holder_git_set_ssh_signer(
+            context,
+            "",
+            pubkey,
+            sizeof(pubkey),
+            fake_sign_ok,
+            &destroy_count,
+            destroy,
+            &error
+        ) == HOLDER_ERROR_INVALID_ARGUMENT
+    );
+    REQUIRE(destroy_count == 1);
   }
 
   SECTION("destroy_user_data fires once when replaced, and once more for the replacement at context destroy") {
