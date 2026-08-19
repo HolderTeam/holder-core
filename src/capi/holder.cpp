@@ -822,6 +822,16 @@ int holder_git_set_homedir(const char* path, holder_error** out_error) {
     return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "path must not be empty");
   }
 
+  // libgit2 only runs its real subsystem init (including deriving the default
+  // homedir) on the process's first git_libgit2_init() 0->1 transition; later
+  // calls (e.g. from each GitRepo constructed per git operation) just bump a
+  // refcount. Force that first transition to happen here, before setting our
+  // override, so it isn't silently clobbered the next time a GitRepo is
+  // constructed. Deliberately never shut this reference back down: it must
+  // outlive every GitRepo for the rest of the process, or the override would
+  // be reset back to defaults whenever the refcount happened to hit zero.
+  git_libgit2_init();
+
   const int rc = git_libgit2_opts(GIT_OPT_SET_HOMEDIR, path);
   if (rc != 0) {
     const git_error* e = git_error_last();
