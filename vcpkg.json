@@ -4,7 +4,12 @@
   "builtin-baseline": "9e593bb18ea69cc5095e012465dcd675a822ed0d",
   "dependencies": [
     "catch2",
-    "libgit2",
+    {
+      "name": "libgit2",
+      "features": [
+        "ssh"
+      ]
+    },
     "libsodium",
     "nlohmann-json",
     "openssl",
