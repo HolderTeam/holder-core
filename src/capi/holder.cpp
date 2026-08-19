@@ -1,11 +1,17 @@
 #include "holder/holder.h"
 
 #include "card/CardRepo.h"
+#include "card/CardStore.h"
+#include "git/GitOps.h"
 #include "platform/Db.h"
+#include "privacy/ProjectPrivacy.h"
 #include "project/ProjectRepo.h"
 
 #include <nlohmann/json.hpp>
+#include <sodium.h>
 
+#include <cctype>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
@@ -102,6 +108,65 @@ nlohmann::json card_to_json(const holder::model::Card& card) {
                            ? nlohmann::json(*card.deleted_at)
                            : nlohmann::json(nullptr);
   return body;
+}
+
+long long now_epoch_seconds() {
+  return std::chrono::duration_cast<std::chrono::seconds>(
+             std::chrono::system_clock::now().time_since_epoch()
+  )
+      .count();
+}
+
+std::string uuid_v4() {
+  if (sodium_init() < 0) {
+    throw std::runtime_error("failed to initialize libsodium"); // LCOV_EXCL_LINE
+  }
+  unsigned char bytes[16];
+  randombytes_buf(bytes, sizeof(bytes));
+  bytes[6] = static_cast<unsigned char>((bytes[6] & 0x0F) | 0x40); // version 4
+  bytes[8] = static_cast<unsigned char>((bytes[8] & 0x3F) | 0x80); // variant 10xx
+
+  static const char* kHex = "0123456789abcdef";
+  std::string out;
+  out.reserve(36);
+  for (int i = 0; i < 16; ++i) {
+    out.push_back(kHex[bytes[i] >> 4]);
+    out.push_back(kHex[bytes[i] & 0x0F]);
+    if (i == 3 || i == 5 || i == 7 || i == 9) {
+      out.push_back('-');
+    }
+  }
+  return out;
+}
+
+std::string slugify(const std::string& name) {
+  std::string slug;
+  slug.reserve(name.size());
+  bool last_was_dash = false;
+  for (char ch : name) {
+    if (std::isalnum(static_cast<unsigned char>(ch))) {
+      slug.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+      last_was_dash = false;
+    } else if (!last_was_dash && !slug.empty()) {
+      slug.push_back('-');
+      last_was_dash = true;
+    }
+  }
+  while (!slug.empty() && slug.back() == '-') {
+    slug.pop_back();
+  }
+  return slug.empty() ? "project" : slug;
+}
+
+std::filesystem::path unique_project_root(
+    const std::filesystem::path& projects_root,
+    const std::string& slug
+) {
+  auto candidate = projects_root / slug;
+  for (int suffix = 2; std::filesystem::exists(candidate); ++suffix) {
+    candidate = projects_root / (slug + "-" + std::to_string(suffix));
+  }
+  return candidate;
 }
 
 } // namespace
@@ -208,6 +273,136 @@ int holder_card_list(
     }
 
     auto* out = duplicate_string(body.dump());
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    }
+
+    *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);
+  }
+}
+
+int holder_project_create(
+    holder_context* context,
+    const char* name,
+    const char* root_path,
+    const char* privacy_mode,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (name == nullptr || name[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "name must not be empty");
+  }
+
+  try {
+    holder::model::Project project;
+    project.project_id = uuid_v4();
+    project.name = name;
+    project.root_path = (root_path != nullptr && root_path[0] != '\0')
+                             ? std::string(root_path)
+                             : unique_project_root(context->data_dir / "projects", slugify(name))
+                                   .string();
+    project.privacy_mode =
+        (privacy_mode != nullptr && privacy_mode[0] != '\0') ? std::string(privacy_mode) : "plain";
+    project.created_at = now_epoch_seconds();
+    project.updated_at = project.created_at;
+
+    holder::project::ProjectRepo repo(context->db);
+    repo.create(project);
+
+    try {
+      holder::git::RealGitOps git;
+      git.open_or_init(project.root_path);
+      if (project.privacy_mode == "encrypted_git") {
+        holder::privacy::ensure_encrypted_project_ready(
+            git,
+            repo,
+            project.project_id,
+            project.root_path,
+            std::nullopt,
+            project.updated_at,
+            uuid_v4
+        );
+      }
+    } catch (...) {
+      repo.remove(project.project_id);
+      throw;
+    }
+
+    const auto created = repo.get(project.project_id);
+    auto* out = duplicate_string(project_to_json(created.value()).dump());
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    }
+
+    *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);
+  }
+}
+
+int holder_card_create(
+    holder_context* context,
+    const char* project_id,
+    const char* title,
+    const char* content,
+    const char* parent_card_id,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (project_id == nullptr || project_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "project_id must not be empty");
+  }
+  if (title == nullptr || title[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "title must not be empty");
+  }
+
+  try {
+    holder::model::Card card;
+    card.card_id = uuid_v4();
+    card.project_id = project_id;
+    card.title = title;
+    card.created_at = now_epoch_seconds();
+    card.updated_at = card.created_at;
+    if (parent_card_id != nullptr && parent_card_id[0] != '\0') {
+      card.parent_card_id = std::string(parent_card_id);
+    }
+
+    holder::card::CardStore store(context->db, nullptr);
+    store.create(card, content != nullptr ? std::string(content) : std::string());
+
+    holder::card::CardRepo repo(context->db);
+    const auto created = repo.get(card.card_id);
+    auto* out = duplicate_string(card_to_json(created.value()).dump());
     if (out == nullptr) {
       return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
     }

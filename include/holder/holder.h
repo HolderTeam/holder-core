@@ -35,6 +35,29 @@ int holder_card_list(
     holder_error** out_error
 );
 
+// privacy_mode may be NULL/empty, defaulting to "plain". root_path may be
+// NULL/empty, defaulting to a directory derived from the project name under
+// the context's data_dir.
+int holder_project_create(
+    holder_context* context,
+    const char* name,
+    const char* root_path,
+    const char* privacy_mode,
+    char** out_json,
+    holder_error** out_error
+);
+
+// content and parent_card_id may be NULL.
+int holder_card_create(
+    holder_context* context,
+    const char* project_id,
+    const char* title,
+    const char* content,
+    const char* parent_card_id,
+    char** out_json,
+    holder_error** out_error
+);
+
 void holder_string_free(char* value);
 
 const char* holder_error_message(const holder_error* error);
