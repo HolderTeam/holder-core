@@ -1546,6 +1546,39 @@ TEST_CASE("C API git_sync_if_due reports up_to_date for a repo with no commits y
   holder_context_destroy(context);
 }
 
+TEST_CASE(
+    "C API git_sync_if_due reports unknown_error when an encrypted project's push safety check fails",
+    "[capi][git][privacy]"
+) {
+  // A raw plaintext file sitting where an encrypted card should be trips
+  // assert_encryption_push_safe, which only holder_git_sync_if_due (not holder_git_push
+  // directly) runs before pushing an encrypted_git project.
+  const auto data_dir = holder::test::make_temp_dir();
+  holder::test::EnvGuard keystore_env("HOLDER_TEST_KEYSTORE_DIR", (data_dir / "keystore").string());
+  const auto remote_dir = data_dir / "remote";
+  init_bare_repo(remote_dir);
+  const auto repo_dir = data_dir / "repo";
+  seed_encrypted_project(data_dir, "project-1", repo_dir, "Notes", remote_dir.string());
+
+  const auto plain_path = repo_dir / "cards" / "ab" / "plain.md";
+  std::filesystem::create_directories(plain_path.parent_path());
+  std::ofstream(plain_path) << "# title\nhello\n";
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(holder_git_sync_if_due(context, "project-1", 3600, 3600, &json, &error) == HOLDER_OK);
+  const auto body = nlohmann::json::parse(json);
+  REQUIRE(body["push_attempted"] == true);
+  REQUIRE(body["push_status"] == "unknown_error");
+  REQUIRE_FALSE(body["push_error"].is_null());
+  holder_string_free(json);
+  holder_context_destroy(context);
+}
+
 TEST_CASE("C API git_pull reports a real fetch failure as a failed status", "[capi][git]") {
   // A genuinely empty bare remote (no commits, no refs) fails pull_remote_ff_only with a plain
   // exception rather than NonFastForwardPullError -- there's nothing to diverge from.

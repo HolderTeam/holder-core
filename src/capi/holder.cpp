@@ -1010,10 +1010,12 @@ int holder_git_set_ssh_signer(
   std::shared_ptr<CApiSshSignerHandle> handle;
   try {
     handle = std::make_shared<CApiSshSignerHandle>(user_data, destroy_user_data);
+  // LCOV_EXCL_START
   } catch (const std::bad_alloc&) {
     // user_data was never captured; nothing to release.
-    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed"); // LCOV_EXCL_LINE
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
   }
+  // LCOV_EXCL_STOP
 
   if (context == nullptr) {
     return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
@@ -1039,16 +1041,18 @@ int holder_git_set_ssh_signer(
         }
     );
     return HOLDER_OK;
+  // EcdsaDerSigningCredentialProvider's constructor never throws anything but bad_alloc, so
+  // beyond that this whole catch chain is unreachable given the current implementation --
+  // kept only as the same defense-in-depth boilerplate every other C ABI function uses.
+  // LCOV_EXCL_START
   } catch (const std::bad_alloc&) {
-    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
   } catch (const std::exception& e) {
-    // EcdsaDerSigningCredentialProvider's constructor never throws anything but bad_alloc
-    // (already handled above); this arm is unreachable given the current implementation, kept
-    // only as the same defense-in-depth boilerplate every other C ABI function uses.
-    return set_exception(out_error, e);  // LCOV_EXCL_LINE
+    return set_exception(out_error, e);
   } catch (...) {
-    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
+    return set_unknown_exception(out_error);
   }
+  // LCOV_EXCL_STOP
 }
 
 int holder_project_update_git_remote(
@@ -1577,9 +1581,11 @@ int holder_keyring_set_provider(
   std::shared_ptr<CApiKeyringProviderHandle> handle;
   try {
     handle = std::make_shared<CApiKeyringProviderHandle>(user_data, destroy_user_data);
+  // LCOV_EXCL_START
   } catch (const std::bad_alloc&) {
-    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
   }
+  // LCOV_EXCL_STOP
 
   if (lookup_fn == nullptr || store_fn == nullptr || remove_fn == nullptr) {
     return set_error(
@@ -1604,16 +1610,19 @@ int holder_keyring_set_provider(
         }
     );
     return HOLDER_OK;
+  // platform_keyring_set_external_provider only moves std::functions into storage; it never
+  // throws anything but bad_alloc, so beyond that this whole catch chain is unreachable given
+  // the current implementation -- kept only as the same defense-in-depth boilerplate as
+  // elsewhere.
+  // LCOV_EXCL_START
   } catch (const std::bad_alloc&) {
-    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
   } catch (const std::exception& e) {
-    // platform_keyring_set_external_provider only moves std::functions into storage; it never
-    // throws anything but bad_alloc (handled above). Unreachable given the current
-    // implementation, kept only as the same defense-in-depth boilerplate as elsewhere.
-    return set_exception(out_error, e);  // LCOV_EXCL_LINE
+    return set_exception(out_error, e);
   } catch (...) {
-    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
+    return set_unknown_exception(out_error);
   }
+  // LCOV_EXCL_STOP
 }
 
 int holder_encryption_check(
