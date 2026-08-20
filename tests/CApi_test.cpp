@@ -100,6 +100,10 @@ void seed_git_project(
   project.name = "Git Project";
   project.root_path = root_path.string();
   project.git_remote_url = remote_url;
+  // Tests using this helper write plain (unencrypted) markdown directly to
+  // the working tree, so this must not be the default "encrypted_git" --
+  // that would (correctly) trip assert_encryption_push_safe.
+  project.privacy_mode = "plain";
   project.created_at = 10;
   project.updated_at = 20;
 
@@ -1191,4 +1195,83 @@ TEST_CASE("C API git_set_ssh_signer validates arguments and destroys user_data e
   if (context != nullptr) {
     holder_context_destroy(context);
   }
+}
+
+TEST_CASE("C API git_sync_if_due is a no-op when no remote is configured", "[capi][git]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(holder_git_sync_if_due(context, "project-1", 0, 0, &json, &error) == HOLDER_OK);
+  const auto body = nlohmann::json::parse(json);
+  REQUIRE(body["pull_attempted"] == false);
+  REQUIRE(body["push_attempted"] == false);
+
+  holder_string_free(json);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API git_sync_if_due pulls and pushes when nothing has synced yet, then skips until due again", "[capi][git]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto remote_dir = data_dir / "remote";
+  init_bare_repo(remote_dir);
+
+  const auto local_dir = data_dir / "repo";
+  holder::git::GitRepo local_repo;
+  local_repo.open_or_init(local_dir);
+  local_repo.write_file("cards/a.md", "v1");
+  local_repo.stage_path("cards/a.md");
+  local_repo.commit("seed");
+
+  seed_git_project(data_dir, "project-1", local_dir, remote_dir.string());
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  // Long intervals so this first call is due only because there's no prior sync state.
+  // The remote is a genuinely empty bare repo (no commits yet), so the pull attempt
+  // fails as expected -- there's nothing to pull -- and only the push seeds it.
+  char* json = nullptr;
+  REQUIRE(holder_git_sync_if_due(context, "project-1", 3600, 3600, &json, &error) == HOLDER_OK);
+  auto body = nlohmann::json::parse(json);
+  REQUIRE(body["pull_attempted"] == true);
+  REQUIRE(body["pull_status"] == "failed");
+  REQUIRE(body["push_attempted"] == true);
+  REQUIRE(body["push_status"] == "pushed");
+  holder_string_free(json);
+
+  // Called again immediately with the same long intervals: now due to both
+  // having a recent last_pull_at/last_push_at.
+  json = nullptr;
+  REQUIRE(holder_git_sync_if_due(context, "project-1", 3600, 3600, &json, &error) == HOLDER_OK);
+  body = nlohmann::json::parse(json);
+  REQUIRE(body["pull_attempted"] == false);
+  REQUIRE(body["push_attempted"] == false);
+
+  holder_string_free(json);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API git_sync_if_due reports invalid project arguments", "[capi][git]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_git_sync_if_due(context, "does-not-exist", 0, 0, &json, &error) == HOLDER_ERROR_RUNTIME
+  );
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+
+  holder_context_destroy(context);
 }

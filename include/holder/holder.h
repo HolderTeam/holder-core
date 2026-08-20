@@ -253,6 +253,30 @@ int holder_git_sync_status(
     holder_error** out_error
 );
 
+// Pulls and/or pushes the project only if enough time has passed since the
+// last attempt of each, per the same cadence policy holder-daemon's
+// background worker uses (holder::sync::should_attempt_pull/push) --
+// intended for a periodic background job (e.g. Android WorkManager) to call
+// on a tighter schedule than the desired sync interval, without over-syncing.
+// A no-op (HOLDER_OK, pull_attempted/push_attempted both false) if the
+// project has no remote configured, or if neither is due yet.
+//
+// push_interval_seconds/pull_interval_seconds override the default cadence
+// (1200s/300s, matching holder-daemon's worker) when positive; pass 0 for
+// the default.
+//
+// Sets *out_json to {project_id, pull_attempted, pull_status, pull_error,
+// push_attempted, push_status, push_error}, where each *_status/*_error is
+// null when its *_attempted is false.
+int holder_git_sync_if_due(
+    holder_context* context,
+    const char* project_id,
+    int push_interval_seconds,
+    int pull_interval_seconds,
+    char** out_json,
+    holder_error** out_error
+);
+
 #ifdef __cplusplus
 }
 #endif

@@ -9,10 +9,12 @@
 #include "index/Reindexer.h"
 #include "model/ProjectSyncState.h"
 #include "platform/Db.h"
+#include "privacy/ProjectPrivacy.h"
 #include "project/DefaultProject.h"
 #include "project/ProjectRepo.h"
 #include "project/ProjectStore.h"
 #include "project/ProjectSyncRepo.h"
+#include "sync/ProjectSyncPolicy.h"
 
 #include <git2.h>
 #include <nlohmann/json.hpp>
@@ -1218,6 +1220,156 @@ int holder_git_sync_status(
         {"project_id", project_id},
         {"sync", project_sync_to_json(sync_repo.get(project_id))},
     };
+
+    auto* out = duplicate_string(body.dump());
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    }
+    *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);
+  }
+}
+
+int holder_git_sync_if_due(
+    holder_context* context,
+    const char* project_id,
+    int push_interval_seconds,
+    int pull_interval_seconds,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (project_id == nullptr || project_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "project_id must not be empty");
+  }
+
+  try {
+    holder::project::ProjectRepo repo(context->db);
+    holder::project::ProjectSyncRepo sync_repo(context->db);
+    const auto project_opt = repo.get(project_id);
+    if (!project_opt.has_value()) {
+      return set_error(out_error, HOLDER_ERROR_RUNTIME, "project not found: " + std::string(project_id));
+    }
+    const auto& project = project_opt.value();
+
+    nlohmann::json body = {
+        {"project_id", project_id},
+        {"pull_attempted", false},
+        {"pull_status", nullptr},
+        {"pull_error", nullptr},
+        {"push_attempted", false},
+        {"push_status", nullptr},
+        {"push_error", nullptr},
+    };
+
+    if (!project.git_remote_url.has_value() || project.git_remote_url->empty()) {
+      auto* out = duplicate_string(body.dump());
+      if (out == nullptr) {
+        return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+      }
+      *out_json = out;
+      return HOLDER_OK;
+    }
+
+    const auto now = now_epoch_seconds();
+    auto git = open_project_git(context, project);
+    git->set_remote("origin", project.git_remote_url.value());
+
+    const auto state = sync_repo.get(project_id);
+    holder::sync::PullDecisionInput pull_input{
+        .last_pull_at = state.has_value() ? state->last_pull_at : std::optional<long long>{},
+        .next_pull_retry_at = state.has_value() ? state->next_pull_retry_at : std::optional<long long>{},
+        .now = now,
+    };
+    if (pull_interval_seconds > 0) pull_input.pull_interval_seconds = pull_interval_seconds;
+
+    if (holder::sync::should_attempt_pull(pull_input)) {
+      body["pull_attempted"] = true;
+      try {
+        git->pull_remote_ff_only("origin");
+        sync_repo.record_pull_result(project_id, "succeeded", true, std::nullopt, now);
+        body["pull_status"] = "succeeded";
+      } catch (const std::exception& e) {
+        sync_repo.record_pull_result(
+            project_id,
+            "failed",
+            false,
+            std::optional<std::string>(e.what()),
+            now
+        );
+        body["pull_status"] = "failed";
+        body["pull_error"] = std::string(e.what());
+      }
+      try {
+        refresh_sync_activity_counts(context->db, project_id, project.root_path, now);
+      } catch (const std::exception&) {
+        // Best-effort only; metrics refresh failure does not fail sync_if_due.
+      }
+    }
+
+    // Re-read rather than reuse `state`: record_pull_result above may have
+    // just written this row, and push's decision should see that write even
+    // though it only reads push-specific fields.
+    const auto state_for_push = sync_repo.get(project_id);
+    holder::sync::PushDecisionInput push_input{
+        .last_push_at = state_for_push.has_value() ? state_for_push->last_push_at
+                                                    : std::optional<long long>{},
+        .next_retry_at = state_for_push.has_value() ? state_for_push->next_retry_at
+                                                     : std::optional<long long>{},
+        .now = now,
+    };
+    if (push_interval_seconds > 0) push_input.push_interval_seconds = push_interval_seconds;
+
+    if (holder::sync::should_attempt_push(push_input)) {
+      body["push_attempted"] = true;
+      try {
+        if (project.privacy_mode == "encrypted_git") {
+          holder::privacy::assert_encryption_push_safe(project.root_path);
+        }
+        const auto push = git->push_branch("origin", "", true);
+        const bool push_ok = push.status == holder::git::PushStatus::Pushed ||
+                             push.status == holder::git::PushStatus::UpToDate;
+        sync_repo.record_push_result(
+            project_id,
+            holder::git::push_status_name(push.status),
+            push_ok,
+            push.error_message.empty() ? std::optional<std::string>()
+                                       : std::optional<std::string>(push.error_message),
+            now
+        );
+        body["push_status"] = holder::git::push_status_name(push.status);
+        if (!push.error_message.empty()) body["push_error"] = push.error_message;
+      } catch (const std::exception& e) {
+        sync_repo.record_push_result(
+            project_id,
+            holder::git::push_status_name(holder::git::PushStatus::UnknownError),
+            false,
+            std::optional<std::string>(e.what()),
+            now
+        );
+        body["push_status"] = holder::git::push_status_name(holder::git::PushStatus::UnknownError);
+        body["push_error"] = std::string(e.what());
+      }
+      try {
+        refresh_sync_activity_counts(context->db, project_id, project.root_path, now);
+      } catch (const std::exception&) {
+        // Best-effort only; metrics refresh failure does not fail sync_if_due.
+      }
+    }
 
     auto* out = duplicate_string(body.dump());
     if (out == nullptr) {
