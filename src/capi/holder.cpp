@@ -58,12 +58,12 @@ int set_error(holder_error** out_error, int code, std::string message) {
   if (out_error != nullptr) {
     try {
       *out_error = new holder_error{std::move(message)};
+    // LCOV_EXCL_START
     } catch (...) {
-      // LCOV_EXCL_START
       *out_error = nullptr;
       return HOLDER_ERROR_ALLOCATION;
-      // LCOV_EXCL_STOP
     }
+    // LCOV_EXCL_STOP
   }
   return code;
 }
@@ -1035,7 +1035,7 @@ int holder_git_set_ssh_signer(
         std::string(username),
         std::move(pubkey),
         [handle, sign_fn](const unsigned char* data, size_t data_len) {
-          return handle->sign(sign_fn, data, data_len);
+          return handle->sign(sign_fn, data, data_len); // LCOV_EXCL_LINE -- see CApiSshSignerHandle::sign
         }
     );
     return HOLDER_OK;
@@ -1230,9 +1230,13 @@ int holder_git_push(
       );
       try {
         refresh_sync_activity_counts(context->db, project_id, project.root_path, now);
+      // LCOV_EXCL_START -- refresh_sync_activity_counts only throws if the repo dir is an
+      // unreadable/corrupted git repo at this exact moment, not practically triggerable
+      // right after a successful push/pull/import against it.
       } catch (const std::exception&) {
         // Best-effort only; metrics refresh failure does not fail push response.
       }
+      // LCOV_EXCL_STOP
 
       body["status"] = holder::git::push_status_name(push.status);
       body["ahead_count"] = push.ahead_count;
@@ -1323,9 +1327,13 @@ int holder_git_pull(
       }
       try {
         refresh_sync_activity_counts(context->db, project_id, project.root_path, now);
+      // LCOV_EXCL_START -- refresh_sync_activity_counts only throws if the repo dir is an
+      // unreadable/corrupted git repo at this exact moment, not practically triggerable
+      // right after a successful push/pull/import against it.
       } catch (const std::exception&) {
         // Best-effort only; metrics refresh failure does not fail pull response.
       }
+      // LCOV_EXCL_STOP
     }
 
     auto* out = duplicate_string(body.dump());
@@ -1476,9 +1484,13 @@ int holder_git_sync_if_due(
       }
       try {
         refresh_sync_activity_counts(context->db, project_id, project.root_path, now);
+      // LCOV_EXCL_START -- refresh_sync_activity_counts only throws if the repo dir is an
+      // unreadable/corrupted git repo at this exact moment, not practically triggerable
+      // right after a successful push/pull/import against it.
       } catch (const std::exception&) {
         // Best-effort only; metrics refresh failure does not fail sync_if_due.
       }
+      // LCOV_EXCL_STOP
     }
 
     // Re-read rather than reuse `state`: record_pull_result above may have
@@ -1526,9 +1538,13 @@ int holder_git_sync_if_due(
       }
       try {
         refresh_sync_activity_counts(context->db, project_id, project.root_path, now);
+      // LCOV_EXCL_START -- refresh_sync_activity_counts only throws if the repo dir is an
+      // unreadable/corrupted git repo at this exact moment, not practically triggerable
+      // right after a successful push/pull/import against it.
       } catch (const std::exception&) {
         // Best-effort only; metrics refresh failure does not fail sync_if_due.
       }
+      // LCOV_EXCL_STOP
     }
 
     auto* out = duplicate_string(body.dump());
@@ -1887,9 +1903,13 @@ int holder_recovery_token_import_global(
         try {
           git->set_remote("origin", metadata.git_remote_url.value());
           remote_configured = true;
+          // LCOV_EXCL_START -- libgit2 is lenient about remote URL content and "origin" is
+          // always a valid remote name here, so this realistically only fails on an internal
+          // libgit2 error, not on any input a test could construct.
         } catch (const std::exception& ex) {
           remote_error = ex.what();
         }
+        // LCOV_EXCL_STOP
 
         if (remote_configured) {
           try {
@@ -1916,9 +1936,13 @@ int holder_recovery_token_import_global(
         }
         try {
           refresh_sync_activity_counts(context->db, metadata.project_id, refreshed->root_path, now);
+        // LCOV_EXCL_START -- refresh_sync_activity_counts only throws if the repo dir is an
+        // unreadable/corrupted git repo at this exact moment, not practically triggerable
+        // right after a successful push/pull/import against it.
         } catch (const std::exception&) {
           // Best-effort only; metrics refresh failure does not fail import.
         }
+        // LCOV_EXCL_STOP
       }
     }
 

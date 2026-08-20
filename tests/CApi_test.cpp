@@ -1061,6 +1061,28 @@ TEST_CASE("C API git_push reports remote_unset and records it in sync status", "
   holder_context_destroy(context);
 }
 
+TEST_CASE("C API git_push reports up_to_date for a repo with no commits yet", "[capi][git]") {
+  // No card is ever created here, so open_project_git's lazy git_repository_init leaves the
+  // local repo with an unborn HEAD -- exercising the "nothing to push" branch distinct from
+  // remote_unset (which never even opens the repo).
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto remote_dir = data_dir / "remote";
+  init_bare_repo(remote_dir);
+  seed_git_project(data_dir, "project-1", data_dir / "repo", remote_dir.string());
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(holder_git_push(context, "project-1", nullptr, 1, &json, &error) == HOLDER_OK);
+  const auto body = nlohmann::json::parse(json);
+  REQUIRE(body["status"] == "up_to_date");
+  holder_string_free(json);
+  holder_context_destroy(context);
+}
+
 TEST_CASE("C API git_push and git_pull round-trip through a local remote", "[capi][git]") {
   const auto data_dir = holder::test::make_temp_dir();
   const auto remote_dir = data_dir / "remote";
@@ -1500,6 +1522,56 @@ TEST_CASE("C API git_sync_if_due pulls and pushes when nothing has synced yet, t
   REQUIRE(body["pull_attempted"] == false);
   REQUIRE(body["push_attempted"] == false);
 
+  holder_string_free(json);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API git_sync_if_due reports up_to_date for a repo with no commits yet", "[capi][git]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto remote_dir = data_dir / "remote";
+  init_bare_repo(remote_dir);
+  seed_git_project(data_dir, "project-1", data_dir / "repo", remote_dir.string());
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(holder_git_sync_if_due(context, "project-1", 3600, 3600, &json, &error) == HOLDER_OK);
+  const auto body = nlohmann::json::parse(json);
+  REQUIRE(body["push_attempted"] == true);
+  REQUIRE(body["push_status"] == "up_to_date");
+  holder_string_free(json);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API git_pull reports a real fetch failure as a failed status", "[capi][git]") {
+  // A genuinely empty bare remote (no commits, no refs) fails pull_remote_ff_only with a plain
+  // exception rather than NonFastForwardPullError -- there's nothing to diverge from.
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto remote_dir = data_dir / "remote";
+  init_bare_repo(remote_dir);
+
+  const auto local_dir = data_dir / "repo";
+  holder::git::GitRepo local_repo;
+  local_repo.open_or_init(local_dir);
+  local_repo.write_file("cards/a.md", "v1");
+  local_repo.stage_path("cards/a.md");
+  local_repo.commit("seed");
+
+  seed_git_project(data_dir, "project-1", local_dir, remote_dir.string());
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(holder_git_pull(context, "project-1", &json, &error) == HOLDER_OK);
+  const auto body = nlohmann::json::parse(json);
+  REQUIRE(body["status"] == "failed");
+  REQUIRE_FALSE(body["error_message"].is_null());
   holder_string_free(json);
   holder_context_destroy(context);
 }
@@ -2079,6 +2151,53 @@ TEST_CASE("C API recovery_token_import_global configures and pulls a remote hint
   holder_context_destroy(context);
 }
 
+TEST_CASE(
+    "C API recovery_token_import_global reports a failed pull when the remote hint is a real but empty repo",
+    "[capi][privacy]"
+) {
+  // The remote is reachable and gets configured successfully, but has no commits at all -- so
+  // the pull itself fails with a plain exception (nothing to diverge from), distinct from both
+  // "remote unreachable" and the card-level conflict-resolution path.
+  const auto data_dir = holder::test::make_temp_dir();
+  holder::test::EnvGuard keystore_env("HOLDER_TEST_KEYSTORE_DIR", (data_dir / "keystore").string());
+
+  const auto remote_dir = data_dir / "remote";
+  init_bare_repo(remote_dir);
+
+  seed_encrypted_project(data_dir, "project-1", data_dir / "repo", "Synced Notes", remote_dir.string());
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(holder_recovery_token_export(context, "project-1", "1234", &json, &error) == HOLDER_OK);
+  const std::string token = nlohmann::json::parse(json)["recovery_token"].get<std::string>();
+  holder_string_free(json);
+
+  const auto other_data_dir = holder::test::make_temp_dir();
+  holder_context* other_context = nullptr;
+  REQUIRE(
+      holder_context_open(other_data_dir.string().c_str(), schema.c_str(), &other_context, &error) ==
+      HOLDER_OK
+  );
+
+  json = nullptr;
+  REQUIRE(
+      holder_recovery_token_import_global(other_context, "1234", token.c_str(), &json, &error) ==
+      HOLDER_OK
+  );
+  const auto body = nlohmann::json::parse(json);
+  REQUIRE(body["remote_configured"] == true);
+  REQUIRE(body["pull_status"] == "failed");
+  REQUIRE_FALSE(body["pull_error"].is_null());
+  holder_string_free(json);
+
+  holder_context_destroy(other_context);
+  holder_context_destroy(context);
+}
+
 // ---------------------------------------------------------------------------
 // Argument validation for functions that had no coverage of it at all. Every
 // one of these follows holder.cpp's own convention: check first, mutate
@@ -2094,6 +2213,20 @@ TEST_CASE("C API reports invalid context_open arguments", "[capi]") {
   REQUIRE(holder_context_open("", schema.c_str(), &context, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
   REQUIRE(context == nullptr);
   REQUIRE(std::string(holder_error_message(error)).find("data_dir") != std::string::npos);
+  holder_error_destroy(error);
+}
+
+TEST_CASE("C API context_open reports a malformed schema_sql as a runtime error", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  holder_error* error = nullptr;
+  holder_context* context = nullptr;
+
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), "THIS IS NOT VALID SQL;", &context, &error) ==
+      HOLDER_ERROR_RUNTIME
+  );
+  REQUIRE(context == nullptr);
+  REQUIRE(error != nullptr);
   holder_error_destroy(error);
 }
 
@@ -2427,6 +2560,13 @@ TEST_CASE("C API reports remaining invalid git_test_remote arguments", "[capi]")
       HOLDER_ERROR_INVALID_ARGUMENT
   );
   REQUIRE(std::string(holder_error_message(error)).find("context") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_git_test_remote(context, "", nullptr, &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("project_id") != std::string::npos);
   holder_error_destroy(error);
   holder_context_destroy(context);
 }
