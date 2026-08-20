@@ -9,6 +9,7 @@
 #include "index/Reindexer.h"
 #include "model/ProjectSyncState.h"
 #include "platform/Db.h"
+#include "privacy/PlatformKeyring.h"
 #include "privacy/ProjectPrivacy.h"
 #include "project/DefaultProject.h"
 #include "project/ProjectRepo.h"
@@ -235,6 +236,111 @@ class CApiSshSignerHandle {
 
     std::vector<unsigned char> result(out_ptr, out_ptr + out_len);
     std::free(out_ptr);
+    return result;
+  }
+
+ private:
+  void* user_data_;
+  holder_destroy_fn destroy_user_data_;
+};
+
+int keyring_kind_to_int(holder::privacy::PlatformKeyringSecretKind kind) {
+  return kind == holder::privacy::PlatformKeyringSecretKind::ProjectKey ? 1 : 0;
+}
+
+// Owns the C-ABI keyring provider's user_data/destroy_user_data pair for exactly
+// as long as the external provider it's installed into (via
+// platform_keyring_set_external_provider) is alive -- see
+// holder_keyring_set_provider's ownership contract in holder.h.
+class CApiKeyringProviderHandle {
+ public:
+  CApiKeyringProviderHandle(void* user_data, holder_destroy_fn destroy_user_data)
+      : user_data_(user_data),
+        destroy_user_data_(destroy_user_data) {}
+
+  ~CApiKeyringProviderHandle() {
+    if (destroy_user_data_ != nullptr) {
+      destroy_user_data_(user_data_);
+    }
+  }
+
+  CApiKeyringProviderHandle(const CApiKeyringProviderHandle&) = delete;
+  CApiKeyringProviderHandle& operator=(const CApiKeyringProviderHandle&) = delete;
+
+  holder::privacy::PlatformKeyringLookupResult lookup(
+      holder_keyring_lookup_fn lookup_fn,
+      const holder::privacy::PlatformKeyringSecretRef& ref
+  ) const {
+    int found = 0;
+    char* secret_ptr = nullptr;
+    char* error_ptr = nullptr;
+    const int rc = lookup_fn(
+        user_data_,
+        keyring_kind_to_int(ref.kind),
+        ref.service.c_str(),
+        ref.account.c_str(),
+        ref.project_id.has_value() ? ref.project_id->c_str() : nullptr,
+        &found,
+        &secret_ptr,
+        &error_ptr
+    );
+
+    holder::privacy::PlatformKeyringLookupResult result;
+    if (rc != 0) {
+      result.error_message = error_ptr != nullptr ? std::string(error_ptr) : std::string("keyring lookup failed");
+    } else if (found != 0 && secret_ptr != nullptr) {
+      result.secret = std::string(secret_ptr);
+    }
+    if (secret_ptr != nullptr) std::free(secret_ptr);
+    if (error_ptr != nullptr) std::free(error_ptr);
+    return result;
+  }
+
+  std::optional<std::string> store(
+      holder_keyring_store_fn store_fn,
+      const holder::privacy::PlatformKeyringSecretRef& ref,
+      const std::string& label,
+      const std::string& secret
+  ) const {
+    char* error_ptr = nullptr;
+    const int rc = store_fn(
+        user_data_,
+        keyring_kind_to_int(ref.kind),
+        ref.service.c_str(),
+        ref.account.c_str(),
+        ref.project_id.has_value() ? ref.project_id->c_str() : nullptr,
+        label.c_str(),
+        secret.c_str(),
+        &error_ptr
+    );
+
+    std::optional<std::string> result;
+    if (rc != 0) {
+      result = error_ptr != nullptr ? std::string(error_ptr) : std::string("keyring store failed");
+    }
+    if (error_ptr != nullptr) std::free(error_ptr);
+    return result;
+  }
+
+  std::optional<std::string> remove(
+      holder_keyring_remove_fn remove_fn,
+      const holder::privacy::PlatformKeyringSecretRef& ref
+  ) const {
+    char* error_ptr = nullptr;
+    const int rc = remove_fn(
+        user_data_,
+        keyring_kind_to_int(ref.kind),
+        ref.service.c_str(),
+        ref.account.c_str(),
+        ref.project_id.has_value() ? ref.project_id->c_str() : nullptr,
+        &error_ptr
+    );
+
+    std::optional<std::string> result;
+    if (rc != 0) {
+      result = error_ptr != nullptr ? std::string(error_ptr) : std::string("keyring remove failed");
+    }
+    if (error_ptr != nullptr) std::free(error_ptr);
     return result;
   }
 
@@ -1376,6 +1482,57 @@ int holder_git_sync_if_due(
       return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
     }
     *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);
+  }
+}
+
+int holder_keyring_set_provider(
+    holder_keyring_lookup_fn lookup_fn,
+    holder_keyring_store_fn store_fn,
+    holder_keyring_remove_fn remove_fn,
+    void* user_data,
+    holder_destroy_fn destroy_user_data,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+
+  // Takes ownership of user_data unconditionally from this point on, exactly
+  // like holder_git_set_ssh_signer -- see that function's comment for why.
+  std::shared_ptr<CApiKeyringProviderHandle> handle;
+  try {
+    handle = std::make_shared<CApiKeyringProviderHandle>(user_data, destroy_user_data);
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+  }
+
+  if (lookup_fn == nullptr || store_fn == nullptr || remove_fn == nullptr) {
+    return set_error(
+        out_error,
+        HOLDER_ERROR_INVALID_ARGUMENT,
+        "lookup_fn, store_fn, and remove_fn must not be null"
+    );
+  }
+
+  try {
+    holder::privacy::platform_keyring_set_external_provider(
+        [handle, lookup_fn](const holder::privacy::PlatformKeyringSecretRef& ref) {
+          return handle->lookup(lookup_fn, ref);
+        },
+        [handle, store_fn](
+            const holder::privacy::PlatformKeyringSecretRef& ref,
+            const std::string& label,
+            const std::string& secret
+        ) { return handle->store(store_fn, ref, label, secret); },
+        [handle, remove_fn](const holder::privacy::PlatformKeyringSecretRef& ref) {
+          return handle->remove(remove_fn, ref);
+        }
+    );
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
     return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");

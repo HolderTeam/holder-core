@@ -10,14 +10,18 @@
 #include "model/Card.h"
 #include "model/Project.h"
 #include "platform/Db.h"
+#include "privacy/PlatformKeyring.h"
 #include "project/ProjectRepo.h"
 
 #include <git2.h>
 #include <holder/holder.h>
 #include <nlohmann/json.hpp>
 
+#include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <optional>
 #include <string>
 
@@ -1274,4 +1278,160 @@ TEST_CASE("C API git_sync_if_due reports invalid project arguments", "[capi][git
   holder_error_destroy(error);
 
   holder_context_destroy(context);
+}
+
+namespace {
+
+// A fake external keyring provider for the C ABI, backed by a plain in-memory
+// map passed as user_data -- exactly the shape Android's JNI bridge to
+// EncryptedSharedPreferences plays in production.
+int fake_keyring_lookup(
+    void* user_data,
+    int /*kind*/,
+    const char* /*service*/,
+    const char* account,
+    const char* /*project_id*/,
+    int* out_found,
+    char** out_secret,
+    char** /*out_error*/
+) {
+  auto* store = static_cast<std::map<std::string, std::string>*>(user_data);
+  const auto it = store->find(account);
+  if (it == store->end()) {
+    *out_found = 0;
+    return 0;
+  }
+  *out_found = 1;
+  auto* buf = static_cast<char*>(std::malloc(it->second.size() + 1));
+  std::memcpy(buf, it->second.c_str(), it->second.size() + 1);
+  *out_secret = buf;
+  return 0;
+}
+
+int fake_keyring_store(
+    void* user_data,
+    int /*kind*/,
+    const char* /*service*/,
+    const char* account,
+    const char* /*project_id*/,
+    const char* /*label*/,
+    const char* secret,
+    char** /*out_error*/
+) {
+  auto* store = static_cast<std::map<std::string, std::string>*>(user_data);
+  (*store)[account] = secret;
+  return 0;
+}
+
+int fake_keyring_remove(
+    void* user_data,
+    int /*kind*/,
+    const char* /*service*/,
+    const char* account,
+    const char* /*project_id*/,
+    char** /*out_error*/
+) {
+  auto* store = static_cast<std::map<std::string, std::string>*>(user_data);
+  store->erase(account);
+  return 0;
+}
+
+void noop_keyring_destroy(void*) {}
+
+} // namespace
+
+TEST_CASE("C API keyring_set_provider validates arguments, still destroying user_data exactly once", "[capi][privacy]") {
+  int destroy_count = 0;
+  auto destroy = [](void* user_data) {
+    *static_cast<int*>(user_data) += 1;
+  };
+  holder_error* error = nullptr;
+
+  REQUIRE(
+      holder_keyring_set_provider(
+          nullptr,
+          fake_keyring_store,
+          fake_keyring_remove,
+          &destroy_count,
+          destroy,
+          &error
+      ) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(destroy_count == 1);
+
+  holder::privacy::platform_keyring_clear_external_provider();
+}
+
+TEST_CASE("C API keyring_set_provider destroys user_data exactly once on replace and on clear", "[capi][privacy]") {
+  int first_destroy_count = 0;
+  int second_destroy_count = 0;
+  auto destroy_first = [](void* user_data) { *static_cast<int*>(user_data) += 1; };
+  auto destroy_second = [](void* user_data) { *static_cast<int*>(user_data) += 1; };
+  holder_error* error = nullptr;
+
+  // lookup_fn/store_fn/remove_fn are never actually invoked in this test (nothing here
+  // calls platform_keyring_lookup/store/remove_secret), so passing fake_keyring_lookup/
+  // store/remove here is only about satisfying holder_keyring_set_provider's non-null
+  // validation -- user_data is exercised solely by the destroy_* callbacks below.
+  REQUIRE(
+      holder_keyring_set_provider(
+          fake_keyring_lookup,
+          fake_keyring_store,
+          fake_keyring_remove,
+          &first_destroy_count,
+          destroy_first,
+          &error
+      ) == HOLDER_OK
+  );
+  REQUIRE(first_destroy_count == 0);
+
+  REQUIRE(
+      holder_keyring_set_provider(
+          fake_keyring_lookup,
+          fake_keyring_store,
+          fake_keyring_remove,
+          &second_destroy_count,
+          destroy_second,
+          &error
+      ) == HOLDER_OK
+  );
+  REQUIRE(first_destroy_count == 1);
+  REQUIRE(second_destroy_count == 0);
+
+  holder::privacy::platform_keyring_clear_external_provider();
+  REQUIRE(second_destroy_count == 1);
+  REQUIRE(first_destroy_count == 1); // unchanged
+}
+
+TEST_CASE("C API keyring_set_provider round-trips lookup/store/remove through the registered callbacks", "[capi][privacy]") {
+  std::map<std::string, std::string> store;
+  holder_error* error = nullptr;
+  REQUIRE(
+      holder_keyring_set_provider(
+          fake_keyring_lookup,
+          fake_keyring_store,
+          fake_keyring_remove,
+          &store,
+          noop_keyring_destroy,
+          &error
+      ) == HOLDER_OK
+  );
+
+  const holder::privacy::PlatformKeyringSecretRef ref{
+      .kind = holder::privacy::PlatformKeyringSecretKind::GenericSecret,
+      .service = "holder.test",
+      .account = "acct",
+      .project_id = std::nullopt,
+  };
+
+  REQUIRE_FALSE(holder::privacy::platform_keyring_lookup_secret(ref).secret.has_value());
+
+  holder::privacy::platform_keyring_store_secret(ref, "label", "secret-value");
+  REQUIRE(store.at("acct") == "secret-value");
+  REQUIRE(holder::privacy::platform_keyring_lookup_secret(ref).secret == "secret-value");
+
+  holder::privacy::platform_keyring_remove_secret(ref);
+  REQUIRE(store.find("acct") == store.end());
+
+  holder::privacy::platform_keyring_clear_external_provider();
 }

@@ -49,6 +49,21 @@ PlatformKeyringRemoveHook& remove_hook_storage() {
   return hook;
 }
 
+PlatformKeyringExternalLookupFn& external_lookup_storage() {
+  static PlatformKeyringExternalLookupFn fn;
+  return fn;
+}
+
+PlatformKeyringExternalStoreFn& external_store_storage() {
+  static PlatformKeyringExternalStoreFn fn;
+  return fn;
+}
+
+PlatformKeyringExternalRemoveFn& external_remove_storage() {
+  static PlatformKeyringExternalRemoveFn fn;
+  return fn;
+}
+
 std::string missing_project_id_message() {
   return "project key lookup missing project id";
 } // LCOV_EXCL_LINE
@@ -756,7 +771,9 @@ bool compiled_platform_keyring_supported() {
 
 } // namespace
 
-bool platform_keyring_supported() { return compiled_platform_keyring_supported(); }
+bool platform_keyring_supported() {
+  return compiled_platform_keyring_supported() || static_cast<bool>(external_lookup_storage());
+}
 
 PlatformKeyringLookupResult platform_keyring_lookup_secret(const PlatformKeyringSecretRef& ref) {
   if (const auto hook = lookup_hook_storage()) {
@@ -764,6 +781,9 @@ PlatformKeyringLookupResult platform_keyring_lookup_secret(const PlatformKeyring
   }
   if (ref.kind == PlatformKeyringSecretKind::ProjectKey && !ref.project_id.has_value()) {
     return {.secret = std::nullopt, .error_message = missing_project_id_message()};
+  }
+  if (const auto& external = external_lookup_storage()) {
+    return external(ref);
   }
 #if HOLDER_HAVE_LIBSECRET
   return libsecret_lookup_secret(ref);
@@ -786,6 +806,12 @@ void platform_keyring_store_secret(
 ) {
   if (const auto hook = store_hook_storage()) {
     if (const auto error = hook(ref, secret); error.has_value()) {
+      throw PrivacyError(PrivacyErrorCode::KeyringUnavailable, *error);
+    }
+    return;
+  }
+  if (const auto& external = external_store_storage()) {
+    if (const auto error = external(ref, label, secret); error.has_value()) {
       throw PrivacyError(PrivacyErrorCode::KeyringUnavailable, *error);
     }
     return;
@@ -814,6 +840,12 @@ void platform_keyring_remove_secret(const PlatformKeyringSecretRef& ref) {
     }
     return;
   }
+  if (const auto& external = external_remove_storage()) {
+    if (const auto error = external(ref); error.has_value()) {
+      throw PrivacyError(PrivacyErrorCode::KeyringUnavailable, *error);
+    }
+    return;
+  }
 #if HOLDER_HAVE_LIBSECRET
   libsecret_remove_secret(ref); // LCOV_EXCL_LINE
 #elif HOLDER_HAVE_MACOS_KEYCHAIN
@@ -827,6 +859,22 @@ void platform_keyring_remove_secret(const PlatformKeyringSecretRef& ref) {
       "platform keyring support not available and HOLDER_TEST_KEYSTORE_DIR not set"
   );
 #endif
+}
+
+void platform_keyring_set_external_provider(
+    PlatformKeyringExternalLookupFn lookup,
+    PlatformKeyringExternalStoreFn store,
+    PlatformKeyringExternalRemoveFn remove
+) {
+  external_lookup_storage() = std::move(lookup);
+  external_store_storage() = std::move(store);
+  external_remove_storage() = std::move(remove);
+}
+
+void platform_keyring_clear_external_provider() {
+  external_lookup_storage() = nullptr;
+  external_store_storage() = nullptr;
+  external_remove_storage() = nullptr;
 }
 
 void platform_keyring_set_lookup_hook_for_tests(PlatformKeyringLookupHook hook) {

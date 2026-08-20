@@ -277,6 +277,68 @@ int holder_git_sync_if_due(
     holder_error** out_error
 );
 
+// -- Platform keyring --
+//
+// Encrypted projects, and other secrets (e.g. AI provider credentials), are
+// stored via the host OS's own keyring on desktop (libsecret/Keychain/Windows
+// Credential Manager). Android has none of those; holder_keyring_set_provider
+// installs a substitute for the whole process, backed by whatever the caller
+// wants (Android: Keystore-backed EncryptedSharedPreferences via JNI).
+//
+// kind is 0 for a generic secret (identified by service+account) or 1 for a
+// project encryption key (identified by project_id+account; service is empty).
+
+// Must return 0 and set *out_found: 1 with *out_secret (malloc'd) set to the
+// secret's value if it exists, or 0 (leaving *out_secret untouched) if it does
+// not -- that is not a failure. Return nonzero, optionally setting *out_error
+// (malloc'd), to indicate a real failure.
+typedef int (*holder_keyring_lookup_fn)(
+    void* user_data,
+    int kind,
+    const char* service,
+    const char* account,
+    const char* project_id,
+    int* out_found,
+    char** out_secret,
+    char** out_error
+);
+
+typedef int (*holder_keyring_store_fn)(
+    void* user_data,
+    int kind,
+    const char* service,
+    const char* account,
+    const char* project_id,
+    const char* label,
+    const char* secret,
+    char** out_error
+);
+
+typedef int (*holder_keyring_remove_fn)(
+    void* user_data,
+    int kind,
+    const char* service,
+    const char* account,
+    const char* project_id,
+    char** out_error
+);
+
+// Installs a process-wide platform keyring provider -- not scoped to a
+// holder_context, since the platform keyring itself isn't either.
+//
+// OWNERSHIP: unconditional from the moment this is called, exactly like
+// holder_git_set_ssh_signer -- destroy_user_data runs exactly once, either
+// immediately if this call fails for any reason, or later when a subsequent
+// call to holder_keyring_set_provider replaces this provider.
+int holder_keyring_set_provider(
+    holder_keyring_lookup_fn lookup_fn,
+    holder_keyring_store_fn store_fn,
+    holder_keyring_remove_fn remove_fn,
+    void* user_data,
+    holder_destroy_fn destroy_user_data,
+    holder_error** out_error
+);
+
 #ifdef __cplusplus
 }
 #endif

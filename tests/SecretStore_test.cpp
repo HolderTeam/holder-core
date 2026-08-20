@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
@@ -341,6 +342,159 @@ TEST_CASE("PlatformKeyring project key lookup reports missing project id", "[pri
   REQUIRE(result.error_message.has_value());
 }
 #endif
+
+namespace {
+
+// A fake external keyring provider (what Android's JNI bridge to
+// EncryptedSharedPreferences plays the role of in production), backed by a
+// plain in-memory map so these tests exercise platform_keyring_set_external_provider
+// itself rather than any real OS keyring.
+class FakeExternalKeyring {
+ public:
+  ~FakeExternalKeyring() { holder::privacy::platform_keyring_clear_external_provider(); }
+
+  void install() {
+    holder::privacy::platform_keyring_set_external_provider(
+        [this](const holder::privacy::PlatformKeyringSecretRef& ref) {
+          return lookup(ref);
+        },
+        [this](
+            const holder::privacy::PlatformKeyringSecretRef& ref,
+            const std::string& label,
+            const std::string& secret
+        ) { return store(ref, label, secret); },
+        [this](const holder::privacy::PlatformKeyringSecretRef& ref) { return remove(ref); }
+    );
+  }
+
+  bool fail_next_store = false;
+
+ private:
+  static std::string key_for(const holder::privacy::PlatformKeyringSecretRef& ref) {
+    return ref.kind == holder::privacy::PlatformKeyringSecretKind::ProjectKey
+               ? "project:" + ref.project_id.value_or("") + ":" + ref.account
+               : "generic:" + ref.service + ":" + ref.account;
+  }
+
+  holder::privacy::PlatformKeyringLookupResult lookup(
+      const holder::privacy::PlatformKeyringSecretRef& ref
+  ) {
+    const auto it = values_.find(key_for(ref));
+    if (it == values_.end()) return {.secret = std::nullopt, .error_message = std::nullopt};
+    return {.secret = it->second, .error_message = std::nullopt};
+  }
+
+  std::optional<std::string> store(
+      const holder::privacy::PlatformKeyringSecretRef& ref,
+      const std::string& /*label*/,
+      const std::string& secret
+  ) {
+    if (fail_next_store) {
+      fail_next_store = false;
+      return std::string("forced external store failure");
+    }
+    values_[key_for(ref)] = secret;
+    return std::nullopt;
+  }
+
+  std::optional<std::string> remove(const holder::privacy::PlatformKeyringSecretRef& ref) {
+    values_.erase(key_for(ref));
+    return std::nullopt;
+  }
+
+  std::map<std::string, std::string> values_;
+};
+
+} // namespace
+
+TEST_CASE("PlatformKeyring external provider is used for lookup/store/remove", "[privacy]") {
+  FakeExternalKeyring fake;
+  // Not asserting platform_keyring_supported() is false before install(): on a build
+  // with a compiled platform branch (e.g. this dev machine's libsecret), it's already
+  // true. What's guaranteed regardless of platform is that it becomes true once an
+  // external provider is installed -- the property Android (no compiled branch at all)
+  // actually depends on.
+  fake.install();
+  REQUIRE(holder::privacy::platform_keyring_supported());
+
+  const holder::privacy::PlatformKeyringSecretRef ref{
+      .kind = holder::privacy::PlatformKeyringSecretKind::GenericSecret,
+      .service = "holder.test",
+      .account = "acct",
+      .project_id = std::nullopt,
+  };
+
+  REQUIRE_FALSE(holder::privacy::platform_keyring_lookup_secret(ref).secret.has_value());
+
+  holder::privacy::platform_keyring_store_secret(ref, "label", "secret-value");
+  const auto looked_up = holder::privacy::platform_keyring_lookup_secret(ref);
+  REQUIRE(looked_up.secret == "secret-value");
+
+  holder::privacy::platform_keyring_remove_secret(ref);
+  REQUIRE_FALSE(holder::privacy::platform_keyring_lookup_secret(ref).secret.has_value());
+}
+
+TEST_CASE("PlatformKeyring external provider store failure maps to PrivacyError", "[privacy]") {
+  FakeExternalKeyring fake;
+  fake.install();
+  fake.fail_next_store = true;
+
+  const holder::privacy::PlatformKeyringSecretRef ref{
+      .kind = holder::privacy::PlatformKeyringSecretKind::GenericSecret,
+      .service = "holder.test",
+      .account = "acct",
+      .project_id = std::nullopt,
+  };
+
+  try {
+    holder::privacy::platform_keyring_store_secret(ref, "label", "secret-value");
+    FAIL("Expected external provider store failure");
+  } catch (const holder::privacy::PrivacyError& ex) {
+    REQUIRE(ex.code() == holder::privacy::PrivacyErrorCode::KeyringUnavailable);
+  }
+}
+
+TEST_CASE("PlatformKeyring _for_tests hooks still take priority over an external provider", "[privacy]") {
+  FakeExternalKeyring fake;
+  fake.install();
+
+  holder::privacy::platform_keyring_set_store_hook_for_tests(
+      +[](const holder::privacy::PlatformKeyringSecretRef&, const std::string&) -> std::optional<std::string> {
+        return std::nullopt;
+      }
+  );
+
+  const holder::privacy::PlatformKeyringSecretRef ref{
+      .kind = holder::privacy::PlatformKeyringSecretKind::GenericSecret,
+      .service = "holder.test",
+      .account = "acct",
+      .project_id = std::nullopt,
+  };
+  holder::privacy::platform_keyring_store_secret(ref, "label", "secret-value");
+
+  // The _for_tests hook, not the external provider, handled the store above --
+  // the fake never recorded it, so a lookup through the fake finds nothing.
+  REQUIRE_FALSE(holder::privacy::platform_keyring_lookup_secret(ref).secret.has_value());
+
+  holder::privacy::platform_keyring_set_store_hook_for_tests(nullptr);
+}
+
+TEST_CASE("SecretStore selects the platform backend once an external keyring provider is installed", "[privacy]") {
+  const auto dir = holder::test::make_temp_dir();
+  EnvUnsetGuard unset_test_keystore("HOLDER_TEST_KEYSTORE_DIR");
+  FakeExternalKeyring fake;
+  fake.install();
+
+  auto store = holder::privacy::make_default_secret_store(dir / "server");
+  store->set("holder.ai_provider_credentials", "acct", "secret-value", "sec****", 1, 2);
+
+  const auto fetched = store->get("holder.ai_provider_credentials", "acct");
+  REQUIRE(fetched.has_value());
+  REQUIRE(fetched->secret == "secret-value");
+
+  store->remove("holder.ai_provider_credentials", "acct");
+  REQUIRE_FALSE(store->get("holder.ai_provider_credentials", "acct").has_value());
+}
 
 #if HOLDER_HAVE_LIBSECRET
 namespace {
