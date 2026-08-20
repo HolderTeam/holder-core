@@ -7,12 +7,14 @@
 #include "card/CardRepo.h"
 #include "core_test_helpers.h"
 #include "git/GitRepo.h"
+#include "index/FtsIndexer.h"
 #include "model/Card.h"
 #include "model/Project.h"
 #include "platform/Db.h"
 #include "privacy/PlatformKeyring.h"
 #include "privacy/ProjectPrivacy.h"
 #include "project/ProjectRepo.h"
+#include "project/Rebuilder.h"
 
 #include <git2.h>
 #include <holder/holder.h>
@@ -2543,4 +2545,324 @@ TEST_CASE("C API reports invalid recovery_token_import_global arguments", "[capi
   REQUIRE(std::string(holder_error_message(error)).find("recovery_token") != std::string::npos);
   holder_error_destroy(error);
   holder_context_destroy(context);
+}
+
+TEST_CASE("C API reports project not found for functions that had no coverage of it", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_project_update_git_remote(context, "missing", "ssh://x", &json, &error) ==
+      HOLDER_ERROR_RUNTIME
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("not found") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_git_test_remote(context, "missing", nullptr, &json, &error) == HOLDER_ERROR_RUNTIME
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("not found") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(holder_git_push(context, "missing", nullptr, 0, &json, &error) == HOLDER_ERROR_RUNTIME);
+  REQUIRE(std::string(holder_error_message(error)).find("not found") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(holder_git_pull(context, "missing", &json, &error) == HOLDER_ERROR_RUNTIME);
+  REQUIRE(std::string(holder_error_message(error)).find("not found") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(holder_git_sync_status(context, "missing", &json, &error) == HOLDER_ERROR_RUNTIME);
+  REQUIRE(std::string(holder_error_message(error)).find("not found") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(holder_encryption_check(context, "missing", &json, &error) == HOLDER_ERROR_RUNTIME);
+  REQUIRE(std::string(holder_error_message(error)).find("not found") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_recovery_token_export(context, "missing", "1234", &json, &error) == HOLDER_ERROR_RUNTIME
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("not found") != std::string::npos);
+  holder_error_destroy(error);
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API git_pull reports remote not configured", "[capi][git]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(holder_git_pull(context, "project-1", &json, &error) == HOLDER_OK);
+  const auto body = nlohmann::json::parse(json);
+  REQUIRE(body["status"] == "failed");
+  REQUIRE(body["error_message"] == "Remote URL is not configured.");
+  holder_string_free(json);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API card_get_content reports missing content file", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* created_json = nullptr;
+  REQUIRE(
+      holder_card_create(context, "project-1", "Title", "body", nullptr, &created_json, &error) ==
+      HOLDER_OK
+  );
+  const auto created = nlohmann::json::parse(created_json);
+  const std::string card_id = created["card_id"].get<std::string>();
+  const std::string rel_path = created["rel_path"].get<std::string>();
+  holder_string_free(created_json);
+
+  // Simulate the card file having vanished from disk without the DB row knowing.
+  REQUIRE(std::filesystem::remove(data_dir / "repo" / rel_path));
+
+  char* content = nullptr;
+  REQUIRE(holder_card_get_content(context, card_id.c_str(), &content, &error) == HOLDER_ERROR_RUNTIME);
+  REQUIRE(std::string(holder_error_message(error)).find("content missing") != std::string::npos);
+  holder_error_destroy(error);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API card_update_content reports card not found", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_card_update_content(context, "missing-card", "content", nullptr, &json, &error) ==
+      HOLDER_ERROR_RUNTIME
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("not found") != std::string::npos);
+  holder_error_destroy(error);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API git_sync_if_due succeeds on a real pull and rebuilds the index", "[capi][git]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto remote_dir = data_dir / "remote";
+  init_bare_repo(remote_dir);
+
+  seed_git_project(data_dir, "project-1", data_dir / "repo", remote_dir.string());
+  holder_context* writer_context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &writer_context, &error) == HOLDER_OK);
+  char* json = nullptr;
+  REQUIRE(
+      holder_card_create(writer_context, "project-1", "Seed", "body", nullptr, &json, &error) == HOLDER_OK
+  );
+  holder_string_free(json);
+  json = nullptr;
+  REQUIRE(holder_git_push(writer_context, "project-1", nullptr, 1, &json, &error) == HOLDER_OK);
+  holder_string_free(json);
+  holder_context_destroy(writer_context);
+
+  const auto reader_data_dir = holder::test::make_temp_dir();
+  seed_git_project(reader_data_dir, "project-1", reader_data_dir / "repo", remote_dir.string());
+  holder_context* reader_context = nullptr;
+  REQUIRE(
+      holder_context_open(reader_data_dir.string().c_str(), schema.c_str(), &reader_context, &error) ==
+      HOLDER_OK
+  );
+
+  json = nullptr;
+  REQUIRE(holder_git_sync_if_due(reader_context, "project-1", 3600, 3600, &json, &error) == HOLDER_OK);
+  const auto body = nlohmann::json::parse(json);
+  REQUIRE(body["pull_status"] == "succeeded");
+  REQUIRE(body["pull_conflicts_resolved"] == 0);
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(holder_card_list(reader_context, "project-1", &json, &error) == HOLDER_OK);
+  REQUIRE(nlohmann::json::parse(json).size() == 1);
+  holder_string_free(json);
+
+  holder_context_destroy(reader_context);
+}
+
+TEST_CASE("C API git_sync_if_due resolves a diverged pull card-level", "[capi][git]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto remote_dir = data_dir / "remote";
+  init_bare_repo(remote_dir);
+  const auto schema = read_schema_sql();
+  holder_error* error = nullptr;
+  char* json = nullptr;
+
+  seed_git_project(data_dir, "project-1", data_dir / "repo", remote_dir.string());
+  holder_context* peer_a = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &peer_a, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_card_create(peer_a, "project-1", "Shared Card", "v0", nullptr, &json, &error) == HOLDER_OK
+  );
+  const std::string shared_card_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
+  holder_string_free(json);
+  json = nullptr;
+  REQUIRE(holder_git_push(peer_a, "project-1", nullptr, 1, &json, &error) == HOLDER_OK);
+  holder_string_free(json);
+
+  // Clone peer_b's local working tree directly, bypassing the C ABI -- calling
+  // holder_git_pull here would record a pull result, and the sync_if_due call below (with a
+  // long interval, relying on "no prior state" to be due) needs there to be none yet.
+  const auto peer_b_data_dir = holder::test::make_temp_dir();
+  const auto peer_b_repo_dir = peer_b_data_dir / "repo";
+  holder::git::GitRepo peer_b_git;
+  peer_b_git.open_or_init(peer_b_repo_dir);
+  peer_b_git.set_remote("origin", remote_dir.string());
+  peer_b_git.pull_remote_ff_only("origin");
+
+  seed_git_project(peer_b_data_dir, "project-1", peer_b_repo_dir, remote_dir.string());
+  holder_context* peer_b = nullptr;
+  REQUIRE(
+      holder_context_open(peer_b_data_dir.string().c_str(), schema.c_str(), &peer_b, &error) == HOLDER_OK
+  );
+  {
+    holder::platform::Db peer_b_db;
+    peer_b_db.open(peer_b_data_dir / "server" / "holder.db");
+    holder::index::FtsIndexer peer_b_fts(peer_b_db);
+    holder::project::ProjectRepo peer_b_projects(peer_b_db);
+    const auto peer_b_project = peer_b_projects.get("project-1").value();
+    holder::store::Rebuilder(peer_b_db, &peer_b_fts).rebuild_project(peer_b_project);
+  }
+
+  json = nullptr;
+  REQUIRE(
+      holder_card_update_content(peer_a, shared_card_id.c_str(), "v1 from A", nullptr, &json, &error) ==
+      HOLDER_OK
+  );
+  holder_string_free(json);
+  json = nullptr;
+  REQUIRE(holder_git_push(peer_a, "project-1", nullptr, 1, &json, &error) == HOLDER_OK);
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(
+      holder_card_update_content(peer_b, shared_card_id.c_str(), "v1 from B", nullptr, &json, &error) ==
+      HOLDER_OK
+  );
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(holder_git_sync_if_due(peer_b, "project-1", 3600, 3600, &json, &error) == HOLDER_OK);
+  const auto body = nlohmann::json::parse(json);
+  REQUIRE(body["pull_status"] == "succeeded");
+  REQUIRE(body["pull_conflicts_resolved"] == 1);
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(holder_card_list(peer_b, "project-1", &json, &error) == HOLDER_OK);
+  REQUIRE(nlohmann::json::parse(json).size() == 2);
+  holder_string_free(json);
+
+  holder_context_destroy(peer_a);
+  holder_context_destroy(peer_b);
+}
+
+TEST_CASE("C API recovery_token_import_global resolves a diverged pull card-level", "[capi][privacy]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  holder::test::EnvGuard keystore_env("HOLDER_TEST_KEYSTORE_DIR", (data_dir / "keystore").string());
+  const auto remote_dir = data_dir / "remote";
+  init_bare_repo(remote_dir);
+
+  const auto key_id = seed_encrypted_project(
+      data_dir,
+      "project-1",
+      data_dir / "repo",
+      "Synced Notes",
+      remote_dir.string()
+  );
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_card_create(context, "project-1", "Shared", "v0", nullptr, &json, &error) == HOLDER_OK
+  );
+  const std::string shared_card_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
+  holder_string_free(json);
+  json = nullptr;
+  REQUIRE(holder_git_push(context, "project-1", nullptr, 1, &json, &error) == HOLDER_OK);
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(holder_recovery_token_export(context, "project-1", "1234", &json, &error) == HOLDER_OK);
+  const std::string token = nlohmann::json::parse(json)["recovery_token"].get<std::string>();
+  holder_string_free(json);
+
+  // Recover onto a second device, then diverge from what's already on the remote.
+  const auto other_data_dir = holder::test::make_temp_dir();
+  holder_context* other_context = nullptr;
+  REQUIRE(
+      holder_context_open(other_data_dir.string().c_str(), schema.c_str(), &other_context, &error) ==
+      HOLDER_OK
+  );
+  json = nullptr;
+  REQUIRE(
+      holder_recovery_token_import_global(other_context, "1234", token.c_str(), &json, &error) ==
+      HOLDER_OK
+  );
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(
+      holder_card_update_content(context, shared_card_id.c_str(), "v1 from original", nullptr, &json, &error) ==
+      HOLDER_OK
+  );
+  holder_string_free(json);
+  json = nullptr;
+  REQUIRE(holder_git_push(context, "project-1", nullptr, 1, &json, &error) == HOLDER_OK);
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(
+      holder_card_update_content(other_context, shared_card_id.c_str(), "v1 from recovered device", nullptr, &json, &error) ==
+      HOLDER_OK
+  );
+  holder_string_free(json);
+
+  // Re-importing the same token pulls again -- this time into a diverged history.
+  json = nullptr;
+  REQUIRE(
+      holder_recovery_token_import_global(other_context, "1234", token.c_str(), &json, &error) ==
+      HOLDER_OK
+  );
+  const auto body = nlohmann::json::parse(json);
+  REQUIRE(body["project_created"] == false);
+  REQUIRE(body["pull_status"] == "succeeded");
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(holder_card_list(other_context, "project-1", &json, &error) == HOLDER_OK);
+  const auto cards = nlohmann::json::parse(json);
+  REQUIRE(cards.size() == 2);
+  holder_string_free(json);
+
+  holder_context_destroy(context);
+  holder_context_destroy(other_context);
 }
