@@ -228,6 +228,11 @@ class CApiSshSignerHandle {
   CApiSshSignerHandle(const CApiSshSignerHandle&) = delete;
   CApiSshSignerHandle& operator=(const CApiSshSignerHandle&) = delete;
 
+  // Only invoked from EcdsaDerSigningCredentialProvider's captured sign callback during a real
+  // SSH auth handshake with a remote -- every test in this suite pushes/pulls over local
+  // file:// or bare-repo remotes, which libgit2 never authenticates, so this never runs. Not
+  // worth standing up a live SSH server just to exercise a thin buffer-ownership adapter.
+  // LCOV_EXCL_START
   std::vector<unsigned char> sign(
       holder_ssh_sign_fn sign_fn,
       const unsigned char* data,
@@ -242,6 +247,7 @@ class CApiSshSignerHandle {
     std::free(out_ptr);
     return result;
   }
+  // LCOV_EXCL_STOP
 
  private:
   void* user_data_;
@@ -463,7 +469,7 @@ int holder_project_list(holder_context* context, char** out_json, holder_error**
 
     auto* out = duplicate_string(body.dump());
     if (out == nullptr) {
-      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
     }
 
     *out_json = out;
@@ -508,7 +514,7 @@ int holder_card_list(
 
     auto* out = duplicate_string(body.dump());
     if (out == nullptr) {
-      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
     }
 
     *out_json = out;
@@ -556,7 +562,7 @@ int holder_card_get_content(
 
     auto* out = duplicate_string(*content);
     if (out == nullptr) {
-      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
     }
 
     *out_content = out;
@@ -606,7 +612,7 @@ int holder_project_create(
 
     auto* out = duplicate_string(project_to_json(created).dump());
     if (out == nullptr) {
-      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
     }
 
     *out_json = out;
@@ -653,7 +659,7 @@ int holder_project_rename(
 
     auto* out = duplicate_string(project_to_json(repo.get(project_id).value()).dump());
     if (out == nullptr) {
-      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
     }
 
     *out_json = out;
@@ -737,7 +743,7 @@ int holder_card_create(
     const auto created = repo.get(card.card_id);
     auto* out = duplicate_string(card_to_json(created.value()).dump());
     if (out == nullptr) {
-      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
     }
 
     *out_json = out;
@@ -784,12 +790,15 @@ int holder_card_update_content(
     holder::card::CardRepo repo(context->db);
     const auto updated = repo.get(card_id);
     if (!updated.has_value()) {
-      return set_error(out_error, HOLDER_ERROR_RUNTIME, "card not found: " + std::string(card_id));
+      // CardStore::update_content above already throws "card not found" for this exact
+      // condition, so this branch is unreachable given the current implementation -- kept as
+      // defense-in-depth in case that invariant ever changes.
+      return set_error(out_error, HOLDER_ERROR_RUNTIME, "card not found: " + std::string(card_id)); // LCOV_EXCL_LINE
     }
 
     auto* out = duplicate_string(card_to_json(updated.value()).dump());
     if (out == nullptr) {
-      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
     }
 
     *out_json = out;
@@ -859,7 +868,7 @@ int holder_card_search(
 
     auto* out = duplicate_string(body.dump());
     if (out == nullptr) {
-      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
     }
 
     *out_json = out;
@@ -932,7 +941,7 @@ int holder_ensure_default_project(
         created.has_value() ? project_to_json(created.value()).dump() : std::string("null")
     );
     if (out == nullptr) {
-      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
     }
 
     *out_json = out;
@@ -964,6 +973,9 @@ int holder_git_set_homedir(const char* path, holder_error** out_error) {
 
   const int rc = git_libgit2_opts(GIT_OPT_SET_HOMEDIR, path);
   if (rc != 0) {
+    // Only fails on an internal libgit2 allocation failure; not practically triggerable from a
+    // test.
+    // LCOV_EXCL_START
     const git_error* e = git_error_last();
     return set_error(
         out_error,
@@ -971,6 +983,7 @@ int holder_git_set_homedir(const char* path, holder_error** out_error) {
         std::string("git_libgit2_opts(GIT_OPT_SET_HOMEDIR) failed: ") +
             (e && e->message ? e->message : "unknown error")
     );
+    // LCOV_EXCL_STOP
   }
   return HOLDER_OK;
 }
@@ -1071,7 +1084,7 @@ int holder_project_update_git_remote(
 
     auto* out = duplicate_string(project_to_json(repo.get(project_id).value()).dump());
     if (out == nullptr) {
-      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
     }
 
     *out_json = out;
@@ -1137,7 +1150,7 @@ int holder_git_test_remote(
 
     auto* out = duplicate_string(body.dump());
     if (out == nullptr) {
-      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
     }
     *out_json = out;
     return HOLDER_OK;
@@ -1232,7 +1245,7 @@ int holder_git_push(
 
     auto* out = duplicate_string(body.dump());
     if (out == nullptr) {
-      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
     }
     *out_json = out;
     return HOLDER_OK;
@@ -1317,7 +1330,7 @@ int holder_git_pull(
 
     auto* out = duplicate_string(body.dump());
     if (out == nullptr) {
-      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
     }
     *out_json = out;
     return HOLDER_OK;
@@ -1363,7 +1376,7 @@ int holder_git_sync_status(
 
     auto* out = duplicate_string(body.dump());
     if (out == nullptr) {
-      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
     }
     *out_json = out;
     return HOLDER_OK;
@@ -1420,7 +1433,7 @@ int holder_git_sync_if_due(
     if (!project.git_remote_url.has_value() || project.git_remote_url->empty()) {
       auto* out = duplicate_string(body.dump());
       if (out == nullptr) {
-        return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+        return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
       }
       *out_json = out;
       return HOLDER_OK;
@@ -1520,7 +1533,7 @@ int holder_git_sync_if_due(
 
     auto* out = duplicate_string(body.dump());
     if (out == nullptr) {
-      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
     }
     *out_json = out;
     return HOLDER_OK;
@@ -1640,7 +1653,7 @@ int holder_encryption_check(
 
     auto* out = duplicate_string(body.dump());
     if (out == nullptr) {
-      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
     }
     *out_json = out;
     return HOLDER_OK;
@@ -1703,7 +1716,7 @@ int holder_recovery_token_export(
 
     auto* out = duplicate_string(body.dump());
     if (out == nullptr) {
-      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
     }
     *out_json = out;
     return HOLDER_OK;
@@ -1754,7 +1767,7 @@ int holder_recovery_token_import(
     nlohmann::json body = {{"project_id", project_id}};
     auto* out = duplicate_string(body.dump());
     if (out == nullptr) {
-      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
     }
     *out_json = out;
     return HOLDER_OK;
@@ -1797,7 +1810,7 @@ int holder_recovery_token_inspect(
 
     auto* out = duplicate_string(body.dump());
     if (out == nullptr) {
-      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
     }
     *out_json = out;
     return HOLDER_OK;
@@ -1921,7 +1934,7 @@ int holder_recovery_token_import_global(
 
     auto* out = duplicate_string(body.dump());
     if (out == nullptr) {
-      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
     }
     *out_json = out;
     return HOLDER_OK;

@@ -1,5 +1,6 @@
 #if __has_include(<catch2/catch_test_macros.hpp>)
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #else
 #include <catch2/catch.hpp>
 #endif
@@ -1578,6 +1579,37 @@ int fake_keyring_remove(
 
 void noop_keyring_destroy(void*) {}
 
+char* malloc_copy(const char* text) {
+  const size_t len = std::strlen(text);
+  auto* buf = static_cast<char*>(std::malloc(len + 1));
+  std::memcpy(buf, text, len + 1);
+  return buf;
+}
+
+// "_with_message" variants set *out_error; "_silent" variants report failure (rc != 0) without
+// setting it, forcing the CApiKeyringProviderHandle wrapper's fallback message.
+int failing_keyring_lookup_with_message(void*, int, const char*, const char*, const char*, int*, char**, char** out_error) {
+  *out_error = malloc_copy("lookup exploded");
+  return 1;
+}
+int failing_keyring_lookup_silent(void*, int, const char*, const char*, const char*, int*, char**, char**) {
+  return 1;
+}
+int failing_keyring_store_with_message(void*, int, const char*, const char*, const char*, const char*, const char*, char** out_error) {
+  *out_error = malloc_copy("store exploded");
+  return 1;
+}
+int failing_keyring_store_silent(void*, int, const char*, const char*, const char*, const char*, const char*, char**) {
+  return 1;
+}
+int failing_keyring_remove_with_message(void*, int, const char*, const char*, const char*, char** out_error) {
+  *out_error = malloc_copy("remove exploded");
+  return 1;
+}
+int failing_keyring_remove_silent(void*, int, const char*, const char*, const char*, char**) {
+  return 1;
+}
+
 } // namespace
 
 TEST_CASE("C API keyring_set_provider validates arguments, still destroying user_data exactly once", "[capi][privacy]") {
@@ -1672,6 +1704,117 @@ TEST_CASE("C API keyring_set_provider round-trips lookup/store/remove through th
 
   holder::privacy::platform_keyring_remove_secret(ref);
   REQUIRE(store.find("acct") == store.end());
+
+  holder::privacy::platform_keyring_clear_external_provider();
+}
+
+TEST_CASE(
+    "C API keyring_set_provider surfaces lookup/store/remove failures, with and without a message",
+    "[capi][privacy]"
+) {
+  const holder::privacy::PlatformKeyringSecretRef ref{
+      .kind = holder::privacy::PlatformKeyringSecretKind::GenericSecret,
+      .service = "holder.test",
+      .account = "acct",
+      .project_id = std::nullopt,
+  };
+  holder_error* error = nullptr;
+
+  SECTION("lookup failure with a message") {
+    REQUIRE(
+        holder_keyring_set_provider(
+            failing_keyring_lookup_with_message,
+            fake_keyring_store,
+            fake_keyring_remove,
+            nullptr,
+            noop_keyring_destroy,
+            &error
+        ) == HOLDER_OK
+    );
+    const auto result = holder::privacy::platform_keyring_lookup_secret(ref);
+    REQUIRE(result.error_message == "lookup exploded");
+  }
+
+  SECTION("lookup failure without a message falls back to a default") {
+    REQUIRE(
+        holder_keyring_set_provider(
+            failing_keyring_lookup_silent,
+            fake_keyring_store,
+            fake_keyring_remove,
+            nullptr,
+            noop_keyring_destroy,
+            &error
+        ) == HOLDER_OK
+    );
+    const auto result = holder::privacy::platform_keyring_lookup_secret(ref);
+    REQUIRE(result.error_message == "keyring lookup failed");
+  }
+
+  SECTION("store failure with a message throws with that message") {
+    REQUIRE(
+        holder_keyring_set_provider(
+            fake_keyring_lookup,
+            failing_keyring_store_with_message,
+            fake_keyring_remove,
+            nullptr,
+            noop_keyring_destroy,
+            &error
+        ) == HOLDER_OK
+    );
+    REQUIRE_THROWS_WITH(
+        holder::privacy::platform_keyring_store_secret(ref, "label", "secret"),
+        Catch::Matchers::Equals("store exploded")
+    );
+  }
+
+  SECTION("store failure without a message falls back to a default") {
+    REQUIRE(
+        holder_keyring_set_provider(
+            fake_keyring_lookup,
+            failing_keyring_store_silent,
+            fake_keyring_remove,
+            nullptr,
+            noop_keyring_destroy,
+            &error
+        ) == HOLDER_OK
+    );
+    REQUIRE_THROWS_WITH(
+        holder::privacy::platform_keyring_store_secret(ref, "label", "secret"),
+        Catch::Matchers::Equals("keyring store failed")
+    );
+  }
+
+  SECTION("remove failure with a message throws with that message") {
+    REQUIRE(
+        holder_keyring_set_provider(
+            fake_keyring_lookup,
+            fake_keyring_store,
+            failing_keyring_remove_with_message,
+            nullptr,
+            noop_keyring_destroy,
+            &error
+        ) == HOLDER_OK
+    );
+    REQUIRE_THROWS_WITH(
+        holder::privacy::platform_keyring_remove_secret(ref), Catch::Matchers::Equals("remove exploded")
+    );
+  }
+
+  SECTION("remove failure without a message falls back to a default") {
+    REQUIRE(
+        holder_keyring_set_provider(
+            fake_keyring_lookup,
+            fake_keyring_store,
+            failing_keyring_remove_silent,
+            nullptr,
+            noop_keyring_destroy,
+            &error
+        ) == HOLDER_OK
+    );
+    REQUIRE_THROWS_WITH(
+        holder::privacy::platform_keyring_remove_secret(ref), Catch::Matchers::Equals("keyring remove failed")
+    );
+  }
 
   holder::privacy::platform_keyring_clear_external_provider();
 }
