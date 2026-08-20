@@ -1412,6 +1412,35 @@ TEST_CASE("C API git_set_ssh_signer validates arguments and destroys user_data e
   }
 }
 
+TEST_CASE("C API git_set_ssh_signer's provider is actually wired into git operations", "[capi][git]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto remote_dir = data_dir / "remote";
+  init_bare_repo(remote_dir);
+  seed_git_project(data_dir, "project-1", data_dir / "repo", remote_dir.string());
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  const unsigned char pubkey[] = {0x01, 0x02, 0x03};
+  REQUIRE(
+      holder_git_set_ssh_signer(
+          context, "git", pubkey, sizeof(pubkey), fake_sign_ok, nullptr, nullptr, &error
+      ) == HOLDER_OK
+  );
+
+  // A local-path remote never actually calls back into the signer, but this still exercises
+  // open_project_git's "context has a credential provider installed" branch.
+  char* json = nullptr;
+  REQUIRE(holder_git_test_remote(context, "project-1", nullptr, &json, &error) == HOLDER_OK);
+  const auto body = nlohmann::json::parse(json);
+  REQUIRE(body["status"] == "reachable");
+  holder_string_free(json);
+
+  holder_context_destroy(context);
+}
+
 TEST_CASE("C API git_sync_if_due is a no-op when no remote is configured", "[capi][git]") {
   const auto data_dir = holder::test::make_temp_dir();
   seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
@@ -2865,4 +2894,224 @@ TEST_CASE("C API recovery_token_import_global resolves a diverged pull card-leve
 
   holder_context_destroy(context);
   holder_context_destroy(other_context);
+}
+
+TEST_CASE(
+    "C API reports the underlying sqlite error when the projects table is missing",
+    "[capi]"
+) {
+  // Every function below starts its try block by touching the "projects" table (directly or via
+  // ProjectRepo::get), so dropping it out from under an already-open context is the cheapest way
+  // to exercise each one's generic catch(const std::exception&) branch for real, rather than via
+  // the "project not found" early-return path.
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  {
+    holder::platform::Db raw_db;
+    raw_db.open(data_dir / "server" / "holder.db");
+    raw_db.exec("DROP TABLE projects;");
+  }
+
+  char* json = nullptr;
+  REQUIRE(holder_project_list(context, &json, &error) == HOLDER_ERROR_RUNTIME);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_project_create(context, "Name", nullptr, nullptr, &json, &error) == HOLDER_ERROR_RUNTIME
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_project_rename(context, "project-1", "New name", &json, &error) == HOLDER_ERROR_RUNTIME
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(holder_project_delete(context, "project-1", &error) == HOLDER_ERROR_RUNTIME);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_ensure_default_project(context, "Home", "Welcome", nullptr, &json, &error) ==
+      HOLDER_ERROR_RUNTIME
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_project_update_git_remote(context, "project-1", "ssh://x", &json, &error) ==
+      HOLDER_ERROR_RUNTIME
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_git_test_remote(context, "project-1", nullptr, &json, &error) == HOLDER_ERROR_RUNTIME
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(holder_git_push(context, "project-1", nullptr, 0, &json, &error) == HOLDER_ERROR_RUNTIME);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(holder_git_pull(context, "project-1", &json, &error) == HOLDER_ERROR_RUNTIME);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(holder_git_sync_status(context, "project-1", &json, &error) == HOLDER_ERROR_RUNTIME);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_git_sync_if_due(context, "project-1", 0, 0, &json, &error) == HOLDER_ERROR_RUNTIME
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(holder_encryption_check(context, "project-1", &json, &error) == HOLDER_ERROR_RUNTIME);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_recovery_token_export(context, "project-1", "1234", &json, &error) ==
+      HOLDER_ERROR_RUNTIME
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_recovery_token_import(context, "project-1", "1234", "not-a-real-token", &json, &error) ==
+      HOLDER_ERROR_RUNTIME
+  );
+  holder_error_destroy(error);
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE(
+    "C API reports the underlying sqlite error when the cards table is missing",
+    "[capi]"
+) {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_card_create(context, "project-1", "Title", "content", nullptr, &json, &error) == HOLDER_OK
+  );
+  const std::string card_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
+  holder_string_free(json);
+
+  {
+    holder::platform::Db raw_db;
+    raw_db.open(data_dir / "server" / "holder.db");
+    raw_db.exec("DROP TABLE cards;");
+  }
+
+  json = nullptr;
+  REQUIRE(holder_card_list(context, "project-1", &json, &error) == HOLDER_ERROR_RUNTIME);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(holder_card_get_content(context, card_id.c_str(), &json, &error) == HOLDER_ERROR_RUNTIME);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_card_create(context, "project-1", "Another", "content", nullptr, &json, &error) ==
+      HOLDER_ERROR_RUNTIME
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_card_update_content(context, card_id.c_str(), "new content", nullptr, &json, &error) ==
+      HOLDER_ERROR_RUNTIME
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(holder_card_delete(context, card_id.c_str(), &error) == HOLDER_ERROR_RUNTIME);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(holder_reindex(context, &error) == HOLDER_ERROR_RUNTIME);
+  holder_error_destroy(error);
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE(
+    "C API card_search reports the underlying sqlite error when cards_fts is missing",
+    "[capi]"
+) {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  {
+    holder::platform::Db raw_db;
+    raw_db.open(data_dir / "server" / "holder.db");
+    raw_db.exec("DROP TABLE cards_fts;");
+  }
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_card_search(context, "project-1", "query", 10, 0, &json, &error) == HOLDER_ERROR_RUNTIME
+  );
+  holder_error_destroy(error);
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE(
+    "C API recovery_token_inspect and recovery_token_import_global report a wrong pin as a runtime error",
+    "[capi][privacy]"
+) {
+  const auto data_dir = holder::test::make_temp_dir();
+  holder::test::EnvGuard keystore_env("HOLDER_TEST_KEYSTORE_DIR", (data_dir / "keystore").string());
+  seed_encrypted_project(data_dir, "project-1", data_dir / "repo", "My Notes");
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(holder_recovery_token_export(context, "project-1", "1234", &json, &error) == HOLDER_OK);
+  const std::string token = nlohmann::json::parse(json)["recovery_token"].get<std::string>();
+  holder_string_free(json);
+
+  // The wrong pin fails to decrypt the token's envelope -- a genuine std::exception, not a
+  // validation early-return, since inspect_recovery_token/import_recovery_token don't know the
+  // pin is wrong until decryption itself fails.
+  json = nullptr;
+  REQUIRE(holder_recovery_token_inspect("0000", token.c_str(), &json, &error) == HOLDER_ERROR_RUNTIME);
+  REQUIRE(json == nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  json = nullptr;
+  REQUIRE(
+      holder_recovery_token_import_global(context, "0000", token.c_str(), &json, &error) ==
+      HOLDER_ERROR_RUNTIME
+  );
+  REQUIRE(json == nullptr);
+  holder_error_destroy(error);
+
+  holder_context_destroy(context);
 }

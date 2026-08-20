@@ -1029,7 +1029,10 @@ int holder_git_set_ssh_signer(
   } catch (const std::bad_alloc&) {
     return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
   } catch (const std::exception& e) {
-    return set_exception(out_error, e);
+    // EcdsaDerSigningCredentialProvider's constructor never throws anything but bad_alloc
+    // (already handled above); this arm is unreachable given the current implementation, kept
+    // only as the same defense-in-depth boilerplate every other C ABI function uses.
+    return set_exception(out_error, e);  // LCOV_EXCL_LINE
   } catch (...) {
     return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }
@@ -1575,7 +1578,10 @@ int holder_keyring_set_provider(
   } catch (const std::bad_alloc&) {
     return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
   } catch (const std::exception& e) {
-    return set_exception(out_error, e);
+    // platform_keyring_set_external_provider only moves std::functions into storage; it never
+    // throws anything but bad_alloc (handled above). Unreachable given the current
+    // implementation, kept only as the same defense-in-depth boilerplate as elsewhere.
+    return set_exception(out_error, e);  // LCOV_EXCL_LINE
   } catch (...) {
     return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }
