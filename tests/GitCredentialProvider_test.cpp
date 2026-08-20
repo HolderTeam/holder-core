@@ -101,6 +101,11 @@ TEST_CASE("EcdsaDerSigningCredentialProvider reshapes DER signature to SSH mpint
 }
 
 TEST_CASE("EcdsaDerSigningCredentialProvider only handles GIT_CREDENTIAL_SSH_CUSTOM", "[git]") {
+  // git_credential_ssh_custom_new (reached via acquire()) needs libgit2 initialized. Other test
+  // files get this for free by constructing a GitRepo first (its constructor calls this), but
+  // when Catch2/CTest runs this test case on its own -- as ctest does, one process per test --
+  // nothing else has done that yet.
+  git_libgit2_init();
   using holder::git::EcdsaDerSigningCredentialProvider;
 
   bool sign_called = false;
@@ -133,6 +138,8 @@ TEST_CASE("EcdsaDerSigningCredentialProvider only handles GIT_CREDENTIAL_SSH_CUS
 }
 
 TEST_CASE("EcdsaDerSigningCredentialProvider prefers the URL's username over its default", "[git]") {
+  // See the identical comment in the "only handles GIT_CREDENTIAL_SSH_CUSTOM" test above.
+  git_libgit2_init();
   using holder::git::EcdsaDerSigningCredentialProvider;
 
   EcdsaDerSigningCredentialProvider provider(
