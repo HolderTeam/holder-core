@@ -351,11 +351,107 @@ TEST_CASE("GitRepo pull_remote_ff_only rejects non-fast-forward updates", "[git]
   try {
     local_repo.pull_remote_ff_only("origin");
     FAIL("Expected non-fast-forward pull to throw");
-  } catch (const std::runtime_error& e) {
+  } catch (const holder::git::NonFastForwardPullError& e) {
     REQUIRE(
         std::string(e.what()).find("Non-fast-forward pull is not supported") != std::string::npos
     );
+    REQUIRE_FALSE(e.local_oid_hex.empty());
+    REQUIRE_FALSE(e.remote_oid_hex.empty());
+    REQUIRE(e.local_oid_hex != e.remote_oid_hex);
+    REQUIRE(e.remote_name == "origin");
   }
+}
+
+TEST_CASE("GitRepo pull_remote_ff_only is a no-op when local is strictly ahead of remote", "[git]") {
+  // Not a divergence -- remote simply hasn't moved since local's last pull (e.g. right after a
+  // local commit that hasn't been pushed yet). There's nothing to pull, so this should succeed
+  // silently rather than being treated as a conflict.
+  const auto dir = make_temp_dir();
+  const auto remote_dir = dir / "remote";
+  const auto local_dir = dir / "local";
+
+  holder::git::GitRepo remote_repo;
+  remote_repo.open_or_init(remote_dir);
+  remote_repo.write_file("cards/a.md", "base");
+  remote_repo.stage_path("cards/a.md");
+  remote_repo.commit("seed");
+
+  holder::git::GitRepo local_repo;
+  local_repo.open_or_init(local_dir);
+  local_repo.set_remote("origin", remote_dir.string());
+  local_repo.pull_remote_ff_only("origin");
+
+  local_repo.write_file("cards/local-only.md", "local");
+  local_repo.stage_path("cards/local-only.md");
+  local_repo.commit("local commit");
+
+  REQUIRE_NOTHROW(local_repo.pull_remote_ff_only("origin"));
+}
+
+TEST_CASE(
+    "GitRepo merge_remote_taking_theirs_for_conflicts resolves file-level divergence without "
+    "line-level merging",
+    "[git]"
+) {
+  const auto dir = make_temp_dir();
+  const auto remote_dir = dir / "remote";
+  const auto local_dir = dir / "local";
+
+  holder::git::GitRepo remote_repo;
+  remote_repo.open_or_init(remote_dir);
+  remote_repo.write_file("cards/shared.md", "base");
+  remote_repo.stage_path("cards/shared.md");
+  remote_repo.commit("seed");
+
+  holder::git::GitRepo local_repo;
+  local_repo.open_or_init(local_dir);
+  local_repo.set_remote("origin", remote_dir.string());
+  local_repo.pull_remote_ff_only("origin");
+
+  local_repo.write_file("cards/shared.md", "local edit");
+  local_repo.stage_path("cards/shared.md");
+  local_repo.write_file("cards/local-only.md", "local");
+  local_repo.stage_path("cards/local-only.md");
+  local_repo.commit("local commit");
+
+  remote_repo.write_file("cards/shared.md", "remote edit");
+  remote_repo.stage_path("cards/shared.md");
+  remote_repo.write_file("cards/remote-only.md", "remote");
+  remote_repo.stage_path("cards/remote-only.md");
+  remote_repo.commit("remote commit");
+
+  std::string captured_local_oid;
+  std::string captured_remote_oid;
+  try {
+    local_repo.pull_remote_ff_only("origin");
+    FAIL("Expected non-fast-forward pull to throw");
+  } catch (const holder::git::NonFastForwardPullError& e) {
+    captured_local_oid = e.local_oid_hex;
+    captured_remote_oid = e.remote_oid_hex;
+  }
+
+  const auto result = local_repo.merge_remote_taking_theirs_for_conflicts(
+      "origin",
+      captured_local_oid,
+      captured_remote_oid
+  );
+  REQUIRE(result.conflicted_paths == std::vector<std::string>{"cards/shared.md"});
+
+  // Remote wins the conflicted path outright -- no diff3/line-level merge attempted. Checked via
+  // the actual checked-out working tree, since that's what the merge is supposed to leave behind.
+  REQUIRE(read_text_file(local_dir / "cards" / "shared.md") == "remote edit");
+
+  // The pre-merge local content is still readable by OID for a caller that wants to preserve it.
+  const auto pre_merge_local = local_repo.read_blob_at(captured_local_oid, "cards/shared.md");
+  REQUIRE(pre_merge_local.has_value());
+  REQUIRE(*pre_merge_local == "local edit");
+
+  // Local-only and remote-only changes both survive the merge untouched.
+  REQUIRE(read_text_file(local_dir / "cards" / "local-only.md") == "local");
+  REQUIRE(read_text_file(local_dir / "cards" / "remote-only.md") == "remote");
+
+  // The merge landed a real two-parent commit that a subsequent pull sees as already current.
+  REQUIRE_NOTHROW(local_repo.pull_remote_ff_only("origin"));
 }
 
 TEST_CASE("GitRepo commit falls back to placeholder signature without git config", "[git]") {

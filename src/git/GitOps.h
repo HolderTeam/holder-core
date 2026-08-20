@@ -7,6 +7,7 @@
 
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace holder::git {
@@ -56,6 +57,19 @@ class RealGitOps final : public GitOps {
   PushResult push_branch(const std::string& name, const std::string& branch, bool set_upstream)
       override;
   std::filesystem::path repo_dir() const override;
+
+  // Not part of the GitOps interface: only the C ABI's pull orchestration (which already holds
+  // a concrete RealGitOps, not a GitOps*) needs these, and every GitOps fake across the test
+  // suite would otherwise need a pointless stub override for methods it never exercises.
+  GitRepo::DivergedMergeResult merge_remote_taking_theirs_for_conflicts(
+      const std::string& name,
+      const std::string& local_oid_hex,
+      const std::string& remote_oid_hex
+  );
+  std::optional<std::string> read_blob_at(
+      const std::string& commit_oid_hex,
+      const std::filesystem::path& relative_path
+  );
 
  private:
   GitRepo repo_;

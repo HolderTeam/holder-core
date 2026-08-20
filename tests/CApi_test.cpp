@@ -24,6 +24,7 @@
 #include <fstream>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 
 namespace {
@@ -1063,12 +1064,6 @@ TEST_CASE("C API git_push and git_pull round-trip through a local remote", "[cap
   init_bare_repo(remote_dir);
 
   const auto local_dir = data_dir / "repo";
-  holder::git::GitRepo local_repo;
-  local_repo.open_or_init(local_dir);
-  local_repo.write_file("cards/a.md", "v1");
-  local_repo.stage_path("cards/a.md");
-  local_repo.commit("seed");
-
   seed_git_project(data_dir, "project-1", local_dir, remote_dir.string());
 
   holder_context* context = nullptr;
@@ -1077,6 +1072,10 @@ TEST_CASE("C API git_push and git_pull round-trip through a local remote", "[cap
   REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
 
   char* json = nullptr;
+  REQUIRE(holder_card_create(context, "project-1", "Seed", "v1", nullptr, &json, &error) == HOLDER_OK);
+  holder_string_free(json);
+
+  json = nullptr;
   REQUIRE(holder_git_push(context, "project-1", nullptr, 1, &json, &error) == HOLDER_OK);
   auto body = nlohmann::json::parse(json);
   REQUIRE(body["status"] == "pushed");
@@ -1097,6 +1096,171 @@ TEST_CASE("C API git_push and git_pull round-trip through a local remote", "[cap
 
   holder_string_free(json);
   holder_context_destroy(context);
+}
+
+TEST_CASE("C API git_pull makes a card written by another peer actually visible", "[capi][git]") {
+  // holder_git_pull's job is "content written elsewhere becomes visible here" -- fetching and
+  // checking out the git working tree isn't enough to prove that; the pulled card must actually
+  // show up in holder_card_list, which reads the SQLite index rather than the working tree.
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto remote_dir = data_dir / "remote";
+  init_bare_repo(remote_dir);
+
+  seed_git_project(data_dir, "project-1", data_dir / "repo", remote_dir.string());
+  holder_context* writer_context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &writer_context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_card_create(writer_context, "project-1", "From another peer", "body", nullptr, &json, &error) ==
+      HOLDER_OK
+  );
+  holder_string_free(json);
+  json = nullptr;
+  REQUIRE(holder_git_push(writer_context, "project-1", nullptr, 1, &json, &error) == HOLDER_OK);
+  holder_string_free(json);
+  holder_context_destroy(writer_context);
+
+  // A second, independent peer: its own data dir, its own empty local working tree, the same
+  // remote -- exactly the "desktop wrote it, phone pulls it" scenario.
+  const auto reader_data_dir = holder::test::make_temp_dir();
+  seed_git_project(reader_data_dir, "project-1", reader_data_dir / "repo", remote_dir.string());
+  holder_context* reader_context = nullptr;
+  REQUIRE(
+      holder_context_open(reader_data_dir.string().c_str(), schema.c_str(), &reader_context, &error) ==
+      HOLDER_OK
+  );
+
+  json = nullptr;
+  REQUIRE(holder_card_list(reader_context, "project-1", &json, &error) == HOLDER_OK);
+  REQUIRE(nlohmann::json::parse(json).empty());
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(holder_git_pull(reader_context, "project-1", &json, &error) == HOLDER_OK);
+  REQUIRE(nlohmann::json::parse(json)["status"] == "succeeded");
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(holder_card_list(reader_context, "project-1", &json, &error) == HOLDER_OK);
+  const auto cards = nlohmann::json::parse(json);
+  REQUIRE(cards.size() == 1);
+  REQUIRE(cards[0]["title"] == "From another peer");
+  holder_string_free(json);
+
+  holder_context_destroy(reader_context);
+}
+
+TEST_CASE(
+    "C API git_pull resolves a diverged pull card-level: remote wins the shared card, local "
+    "becomes a conflicted copy, unrelated cards on both sides survive",
+    "[capi][git]"
+) {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto remote_dir = data_dir / "remote";
+  init_bare_repo(remote_dir);
+  const auto schema = read_schema_sql();
+  holder_error* error = nullptr;
+  char* json = nullptr;
+
+  // Peer A creates the card both sides will later edit, and pushes.
+  seed_git_project(data_dir, "project-1", data_dir / "repo", remote_dir.string());
+  holder_context* peer_a = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &peer_a, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_card_create(peer_a, "project-1", "Shared Card", "v0", nullptr, &json, &error) == HOLDER_OK
+  );
+  const std::string shared_card_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
+  holder_string_free(json);
+  json = nullptr;
+  REQUIRE(holder_git_push(peer_a, "project-1", nullptr, 1, &json, &error) == HOLDER_OK);
+  holder_string_free(json);
+
+  // Peer B: a second, independent peer that pulls the shared card before diverging from it, so
+  // both sides end up editing the exact same card_id -- the scenario this resolution exists for.
+  const auto peer_b_data_dir = holder::test::make_temp_dir();
+  seed_git_project(peer_b_data_dir, "project-1", peer_b_data_dir / "repo", remote_dir.string());
+  holder_context* peer_b = nullptr;
+  REQUIRE(
+      holder_context_open(peer_b_data_dir.string().c_str(), schema.c_str(), &peer_b, &error) == HOLDER_OK
+  );
+  json = nullptr;
+  REQUIRE(holder_git_pull(peer_b, "project-1", &json, &error) == HOLDER_OK);
+  holder_string_free(json);
+
+  // Now diverge: each peer edits the shared card differently, and each creates a card the other
+  // has never seen. Peer A pushes first.
+  json = nullptr;
+  REQUIRE(
+      holder_card_update_content(peer_a, shared_card_id.c_str(), "v1 from A", nullptr, &json, &error) ==
+      HOLDER_OK
+  );
+  holder_string_free(json);
+  json = nullptr;
+  REQUIRE(holder_card_create(peer_a, "project-1", "A only", "a-only", nullptr, &json, &error) == HOLDER_OK);
+  holder_string_free(json);
+  json = nullptr;
+  REQUIRE(holder_git_push(peer_a, "project-1", nullptr, 1, &json, &error) == HOLDER_OK);
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(
+      holder_card_update_content(peer_b, shared_card_id.c_str(), "v1 from B", nullptr, &json, &error) ==
+      HOLDER_OK
+  );
+  holder_string_free(json);
+  json = nullptr;
+  REQUIRE(holder_card_create(peer_b, "project-1", "B only", "b-only", nullptr, &json, &error) == HOLDER_OK);
+  holder_string_free(json);
+
+  // Peer B pulls into a now-diverged history: it has an unpushed edit to the shared card and an
+  // unpushed new card, while remote has its own independent edit to the same shared card and its
+  // own new card.
+  json = nullptr;
+  REQUIRE(holder_git_pull(peer_b, "project-1", &json, &error) == HOLDER_OK);
+  auto pull_body = nlohmann::json::parse(json);
+  REQUIRE(pull_body["status"] == "succeeded");
+  REQUIRE(pull_body["conflicts_resolved"] == 1);
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(holder_card_list(peer_b, "project-1", &json, &error) == HOLDER_OK);
+  const auto cards = nlohmann::json::parse(json);
+  REQUIRE(cards.size() == 4);
+
+  std::optional<std::string> conflicted_copy_id;
+  std::set<std::string> titles;
+  for (const auto& card : cards) {
+    titles.insert(card["title"].get<std::string>());
+    if (card["title"] == "Shared Card (conflicted copy)") {
+      conflicted_copy_id = card["card_id"].get<std::string>();
+    }
+  }
+  REQUIRE(titles == std::set<std::string>{"Shared Card", "Shared Card (conflicted copy)", "A only", "B only"});
+  REQUIRE(conflicted_copy_id.has_value());
+
+  // Remote (A's edit) wins the original card_id; B's pre-merge edit survives as the duplicate.
+  char* content = nullptr;
+  REQUIRE(holder_card_get_content(peer_b, shared_card_id.c_str(), &content, &error) == HOLDER_OK);
+  REQUIRE(std::string(content) == "v1 from A");
+  holder_string_free(content);
+
+  content = nullptr;
+  REQUIRE(holder_card_get_content(peer_b, conflicted_copy_id->c_str(), &content, &error) == HOLDER_OK);
+  REQUIRE(std::string(content) == "v1 from B");
+  holder_string_free(content);
+
+  // The resolution must actually unblock syncing, not just avoid crashing: peer B's merge commit
+  // has remote's pre-pull HEAD as a parent, so pushing it back should be a plain fast-forward.
+  json = nullptr;
+  REQUIRE(holder_git_push(peer_b, "project-1", nullptr, 1, &json, &error) == HOLDER_OK);
+  REQUIRE(nlohmann::json::parse(json)["status"] == "pushed");
+  holder_string_free(json);
+
+  holder_context_destroy(peer_a);
+  holder_context_destroy(peer_b);
 }
 
 TEST_CASE("C API git_sync_status reports a null sync object before any activity", "[capi][git]") {
@@ -1725,6 +1889,16 @@ TEST_CASE("C API recovery_token_import_global configures and pulls a remote hint
   REQUIRE(body["remote_hint_present"] == true);
   REQUIRE(body["remote_configured"] == true);
   REQUIRE(body["pull_status"] == "succeeded");
+  holder_string_free(json);
+
+  // The pulled card must actually be visible, not just present in git's working tree --
+  // holder_card_list reads from the SQLite index, which nothing but a rebuild after pull
+  // keeps in sync with content that arrived from a remote.
+  json = nullptr;
+  REQUIRE(holder_card_list(other_context, "project-1", &json, &error) == HOLDER_OK);
+  const auto cards = nlohmann::json::parse(json);
+  REQUIRE(cards.size() == 1);
+  REQUIRE(cards[0]["title"] == "Secret");
   holder_string_free(json);
 
   holder_context_destroy(other_context);

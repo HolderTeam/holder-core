@@ -9,6 +9,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <fstream>
+#include <set>
 #include <stdexcept>
 #include <system_error>
 
@@ -24,6 +25,10 @@ static std::runtime_error git_err(const std::string& what, int rc) {
     msg += e->message;
   }
   return std::runtime_error(msg);
+}
+
+static std::string oid_to_hex(const git_oid& oid) {
+  return std::string(git_oid_tostr_s(&oid));
 }
 
 static std::string git_error_message_or_default(const std::string& fallback) {
@@ -249,6 +254,69 @@ static void checkout_commit_oid(git_repository* repo, const git_oid& oid) {
   rc = git_checkout_tree(repo, commit_obj, &checkout_opts);
   git_object_free(commit_obj);
   if (rc != 0) throw git_err("git_checkout_tree failed", rc);
+}
+
+enum class ChangeType { AddedOrModified, Deleted };
+struct ChangedPath {
+  std::string path;
+  ChangeType type;
+};
+
+// Relative paths that differ between two commits' trees -- used to classify a diverged pull's
+// changes into "local-only", "remote-only" and "both" (the conflict set), never to attempt a
+// line-level content merge.
+static std::vector<ChangedPath> diff_changed_paths(
+    git_repository* repo,
+    const git_oid& from_oid,
+    const git_oid& to_oid
+) {
+  git_commit* from_commit = nullptr;
+  int rc = git_commit_lookup(&from_commit, repo, &from_oid);
+  if (rc != 0) throw git_err("git_commit_lookup (diff from) failed", rc);
+  git_commit* to_commit = nullptr;
+  rc = git_commit_lookup(&to_commit, repo, &to_oid);
+  if (rc != 0) {
+    git_commit_free(from_commit);
+    throw git_err("git_commit_lookup (diff to) failed", rc);
+  }
+
+  git_tree* from_tree = nullptr;
+  rc = git_commit_tree(&from_tree, from_commit);
+  if (rc != 0) {
+    git_commit_free(from_commit);
+    git_commit_free(to_commit);
+    throw git_err("git_commit_tree (diff from) failed", rc); // LCOV_EXCL_LINE
+  }
+  git_tree* to_tree = nullptr;
+  rc = git_commit_tree(&to_tree, to_commit);
+  if (rc != 0) {
+    git_tree_free(from_tree);
+    git_commit_free(from_commit);
+    git_commit_free(to_commit);
+    throw git_err("git_commit_tree (diff to) failed", rc); // LCOV_EXCL_LINE
+  }
+
+  git_diff_options diff_opts{};
+  rc = git_diff_options_init(&diff_opts, GIT_DIFF_OPTIONS_VERSION);
+  git_diff* diff = nullptr;
+  if (rc == 0) rc = git_diff_tree_to_tree(&diff, repo, from_tree, to_tree, &diff_opts);
+
+  git_tree_free(from_tree);
+  git_tree_free(to_tree);
+  git_commit_free(from_commit);
+  git_commit_free(to_commit);
+  if (rc != 0) throw git_err("git_diff_tree_to_tree failed", rc); // LCOV_EXCL_LINE
+
+  std::vector<ChangedPath> result;
+  const size_t n = git_diff_num_deltas(diff);
+  for (size_t i = 0; i < n; ++i) {
+    const git_diff_delta* delta = git_diff_get_delta(diff, i);
+    const char* path = delta->new_file.path ? delta->new_file.path : delta->old_file.path;
+    const auto type = delta->status == GIT_DELTA_DELETED ? ChangeType::Deleted : ChangeType::AddedOrModified;
+    result.push_back({std::string(path), type});
+  }
+  git_diff_free(diff);
+  return result;
 }
 
 GitRepo::GitRepo() : credential_provider_(std::make_shared<SshAgentAndFileCredentialProvider>()) {
@@ -784,7 +852,14 @@ void GitRepo::pull_remote_ff_only(const std::string& name) {
   const int ff_ok = git_graph_descendant_of(repo, &remote_oid, &local_oid);
   if (ff_ok != 1) {
     git_reference_free(head_resolved);
-    throw std::runtime_error("Non-fast-forward pull is not supported");
+    // Local being strictly ahead (remote hasn't moved since local's last pull) isn't a
+    // divergence -- there's nothing to pull, and it's a routine state (e.g. right after a local
+    // commit that hasn't been pushed yet), not an error.
+    if (git_graph_descendant_of(repo, &local_oid, &remote_oid) == 1) {
+      spdlog::info("Pull {} skipped (local already ahead)", name);
+      return;
+    }
+    throw NonFastForwardPullError(oid_to_hex(local_oid), oid_to_hex(remote_oid), name);
   }
 
   git_reference* updated = nullptr;
@@ -799,6 +874,186 @@ void GitRepo::pull_remote_ff_only(const std::string& name) {
 
   checkout_commit_oid(repo, remote_oid);
   spdlog::info("Pulled {} (fast-forward)", name);
+}
+
+GitRepo::DivergedMergeResult GitRepo::merge_remote_taking_theirs_for_conflicts(
+    const std::string& name,
+    const std::string& local_oid_hex,
+    const std::string& remote_oid_hex
+) {
+  ensure_open();
+  auto* repo = reinterpret_cast<git_repository*>(repo_);
+
+  git_oid local_oid{};
+  if (git_oid_fromstr(&local_oid, local_oid_hex.c_str()) != 0) {
+    throw std::runtime_error("invalid local oid: " + local_oid_hex); // LCOV_EXCL_LINE
+  }
+  git_oid remote_oid{};
+  if (git_oid_fromstr(&remote_oid, remote_oid_hex.c_str()) != 0) {
+    throw std::runtime_error("invalid remote oid: " + remote_oid_hex); // LCOV_EXCL_LINE
+  }
+
+  git_oid merge_base_oid{};
+  int rc = git_merge_base(&merge_base_oid, repo, &local_oid, &remote_oid);
+  if (rc != 0) throw git_err("git_merge_base failed", rc);
+
+  const auto local_changes = diff_changed_paths(repo, merge_base_oid, local_oid);
+  const auto remote_changes = diff_changed_paths(repo, merge_base_oid, remote_oid);
+
+  std::set<std::string> remote_changed_set;
+  for (const auto& c : remote_changes) remote_changed_set.insert(c.path);
+
+  std::vector<std::string> conflicted;
+  std::vector<ChangedPath> local_only;
+  for (const auto& c : local_changes) {
+    if (remote_changed_set.count(c.path) != 0) {
+      conflicted.push_back(c.path);
+    } else {
+      local_only.push_back(c);
+    }
+  }
+
+  // Remote is the baseline: correct as-is for remote-only changes, and (deliberately, per this
+  // strategy) for conflicted paths too -- the pre-merge local content at those paths is not
+  // lost, just no longer live here; the caller reads it via read_blob_at(local_oid_hex, path)
+  // to preserve it separately (e.g. as a duplicate card) if it wants to.
+  checkout_commit_oid(repo, remote_oid);
+
+  const char* wd = git_repository_workdir(repo);
+  if (!wd) throw std::runtime_error("Repository has no working directory (bare?)"); // LCOV_EXCL_LINE
+
+  for (const auto& c : local_only) {
+    if (c.type == ChangeType::Deleted) {
+      std::error_code ec;
+      fs::remove(fs::path(wd) / c.path, ec);
+      remove_path(c.path);
+    } else {
+      const auto content = read_blob_at(local_oid_hex, c.path);
+      if (content.has_value()) {
+        write_file(c.path, *content);
+        stage_path(c.path);
+      }
+    }
+  }
+
+  git_commit* local_parent = nullptr;
+  rc = git_commit_lookup(&local_parent, repo, &local_oid);
+  if (rc != 0) throw git_err("git_commit_lookup (local parent) failed", rc); // LCOV_EXCL_LINE
+  git_commit* remote_parent = nullptr;
+  rc = git_commit_lookup(&remote_parent, repo, &remote_oid);
+  if (rc != 0) {
+    git_commit_free(local_parent); // LCOV_EXCL_LINE
+    throw git_err("git_commit_lookup (remote parent) failed", rc); // LCOV_EXCL_LINE
+  }
+
+  git_index* index = nullptr;
+  rc = git_repository_index(&index, repo);
+  if (rc != 0) {
+    git_commit_free(local_parent); // LCOV_EXCL_LINE
+    git_commit_free(remote_parent); // LCOV_EXCL_LINE
+    throw git_err("git_repository_index failed", rc); // LCOV_EXCL_LINE
+  }
+
+  git_oid tree_oid{};
+  rc = git_index_write_tree(&tree_oid, index);
+  if (rc != 0) {
+    git_index_free(index); // LCOV_EXCL_LINE
+    git_commit_free(local_parent); // LCOV_EXCL_LINE
+    git_commit_free(remote_parent); // LCOV_EXCL_LINE
+    throw git_err("git_index_write_tree failed", rc); // LCOV_EXCL_LINE
+  }
+  rc = git_index_write(index);
+  git_index_free(index);
+  if (rc != 0) {
+    git_commit_free(local_parent); // LCOV_EXCL_LINE
+    git_commit_free(remote_parent); // LCOV_EXCL_LINE
+    throw git_err("git_index_write failed", rc); // LCOV_EXCL_LINE
+  }
+
+  git_tree* merged_tree = nullptr;
+  rc = git_tree_lookup(&merged_tree, repo, &tree_oid);
+  if (rc != 0) {
+    git_commit_free(local_parent); // LCOV_EXCL_LINE
+    git_commit_free(remote_parent); // LCOV_EXCL_LINE
+    throw git_err("git_tree_lookup failed", rc); // LCOV_EXCL_LINE
+  }
+
+  git_signature* sig = nullptr;
+  make_signature(reinterpret_cast<void**>(&sig));
+
+  const std::string message = "Merge " + name + ": keep remote for " +
+      std::to_string(conflicted.size()) + " conflicting card(s)";
+
+  git_oid merge_commit_oid{};
+  rc = git_commit_create_v(
+      &merge_commit_oid,
+      repo,
+      "HEAD",
+      sig,
+      sig,
+      nullptr,
+      message.c_str(),
+      merged_tree,
+      2,
+      local_parent,
+      remote_parent
+  );
+
+  git_tree_free(merged_tree);
+  git_signature_free(sig);
+  git_commit_free(local_parent);
+  git_commit_free(remote_parent);
+
+  if (rc != 0) throw git_err("git_commit_create_v (merge) failed", rc); // LCOV_EXCL_LINE
+
+  spdlog::info(
+      "Merged {} (kept remote for {} conflicting path(s), preserved {} local-only change(s))",
+      name,
+      conflicted.size(),
+      local_only.size()
+  );
+
+  return {conflicted};
+}
+
+std::optional<std::string> GitRepo::read_blob_at(
+    const std::string& commit_oid_hex,
+    const fs::path& relative_path
+) {
+  ensure_open();
+  auto* repo = reinterpret_cast<git_repository*>(repo_);
+
+  git_oid commit_oid{};
+  if (git_oid_fromstr(&commit_oid, commit_oid_hex.c_str()) != 0) {
+    throw std::runtime_error("invalid commit oid: " + commit_oid_hex); // LCOV_EXCL_LINE
+  }
+
+  git_commit* commit = nullptr;
+  int rc = git_commit_lookup(&commit, repo, &commit_oid);
+  if (rc != 0) throw git_err("git_commit_lookup failed", rc); // LCOV_EXCL_LINE
+
+  git_tree* tree = nullptr;
+  rc = git_commit_tree(&tree, commit);
+  git_commit_free(commit);
+  if (rc != 0) throw git_err("git_commit_tree failed", rc); // LCOV_EXCL_LINE
+
+  const std::string p = relative_path.generic_string();
+  git_tree_entry* entry = nullptr;
+  rc = git_tree_entry_bypath(&entry, tree, p.c_str());
+  git_tree_free(tree);
+  if (rc == GIT_ENOTFOUND) return std::nullopt;
+  if (rc != 0) throw git_err("git_tree_entry_bypath failed", rc); // LCOV_EXCL_LINE
+
+  git_blob* blob = nullptr;
+  rc = git_blob_lookup(&blob, repo, git_tree_entry_id(entry));
+  git_tree_entry_free(entry);
+  if (rc != 0) throw git_err("git_blob_lookup failed", rc); // LCOV_EXCL_LINE
+
+  const char* data = static_cast<const char*>(git_blob_rawcontent(blob));
+  const auto size = static_cast<size_t>(git_blob_rawsize(blob));
+  std::string content(data, size);
+  git_blob_free(blob);
+  return content;
 }
 
 int GitRepo::credential_callback_for_tests(

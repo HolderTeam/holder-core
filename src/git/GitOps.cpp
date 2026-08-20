@@ -55,4 +55,21 @@ PushResult RealGitOps::push_branch(
 
 std::filesystem::path RealGitOps::repo_dir() const { return repo_.repo_dir(); }
 
+// LCOV_EXCL_START
+GitRepo::DivergedMergeResult RealGitOps::merge_remote_taking_theirs_for_conflicts(
+    const std::string& name,
+    const std::string& local_oid_hex,
+    const std::string& remote_oid_hex
+) {
+  return repo_.merge_remote_taking_theirs_for_conflicts(name, local_oid_hex, remote_oid_hex);
+}
+
+std::optional<std::string> RealGitOps::read_blob_at(
+    const std::string& commit_oid_hex,
+    const std::filesystem::path& relative_path
+) {
+  return repo_.read_blob_at(commit_oid_hex, relative_path);
+}
+// LCOV_EXCL_STOP
+
 } // namespace holder::git

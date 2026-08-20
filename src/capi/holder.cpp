@@ -1,5 +1,6 @@
 #include "holder/holder.h"
 
+#include "card/CardFrontMatter.h"
 #include "card/CardRepo.h"
 #include "card/CardStore.h"
 #include "git/EcdsaDerSigningCredentialProvider.h"
@@ -16,6 +17,7 @@
 #include "project/ProjectRepo.h"
 #include "project/ProjectStore.h"
 #include "project/ProjectSyncRepo.h"
+#include "project/Rebuilder.h"
 #include "sync/ProjectSyncPolicy.h"
 
 #include <git2.h>
@@ -207,6 +209,17 @@ void refresh_sync_activity_counts(
   );
 }
 
+// A pull only fetches and checks out git's working tree; nothing else keeps the SQLite card
+// index (what card listing/search actually read) in sync with content that arrived from a
+// remote rather than through CardStore's own create/update calls. Reconciling it is exactly
+// what Rebuilder already does for StartupRecovery, so every successful pull runs it too. This
+// throws on failure by design: if pull's git state moved but the index didn't, the pull hasn't
+// actually delivered on its purpose (new content becoming visible), so it should report failed
+// rather than a silent, wrong "succeeded".
+void rebuild_project_index(holder_context* context, const holder::model::Project& project) {
+  holder::store::Rebuilder(context->db, &context->fts).rebuild_project(project);
+}
+
 // Owns the C-ABI signer's user_data/destroy_user_data pair for exactly as
 // long as some EcdsaDerSigningCredentialProvider's captured lambda keeps it
 // alive -- see holder_git_set_ssh_signer's ownership contract in holder.h.
@@ -377,6 +390,67 @@ std::string uuid_v4() {
     }
   }
   return out;
+}
+
+// Called after GitRepo::merge_remote_taking_theirs_for_conflicts has already resolved a
+// diverged pull at the git level (remote wins for any card touched on both sides since the
+// merge-base). This preserves the pre-merge LOCAL version of each such card by re-creating it
+// as a brand new card titled "<original title> (conflicted copy)" -- the Dropbox-style
+// resolution: never a line-level merge, always both full versions kept, nothing silently lost.
+// A card whose pre-merge content can't be read/decrypted/parsed is skipped rather than failing
+// the whole pull -- a partial resolution beats losing an otherwise-successful pull over one
+// unreadable conflict. Returns how many conflicts were resolved this way.
+int resolve_pull_conflicts(
+    holder_context* context,
+    const holder::model::Project& project,
+    holder::git::RealGitOps& git,
+    const holder::git::NonFastForwardPullError& diverged,
+    long long now
+) {
+  const auto merge_result = git.merge_remote_taking_theirs_for_conflicts(
+      "origin",
+      diverged.local_oid_hex,
+      diverged.remote_oid_hex
+  );
+
+  holder::card::CardStore store(context->db, &context->fts);
+  int resolved = 0;
+  for (const auto& path : merge_result.conflicted_paths) {
+    const auto blob = git.read_blob_at(diverged.local_oid_hex, path);
+    if (!blob.has_value()) continue;
+
+    std::string plain;
+    try {
+      plain = project.privacy_mode == "encrypted_git" && project.project_key_id.has_value()
+                  ? holder::privacy::decrypt_project_blob(
+                        project.project_id,
+                        *project.project_key_id,
+                        *blob
+                    )
+                  : *blob;
+    } catch (const std::exception&) {
+      continue;
+    }
+
+    const auto parsed = holder::core::parse_card_file(plain);
+    if (!parsed.has_front_matter) continue;
+
+    holder::model::Card duplicate;
+    duplicate.card_id = uuid_v4();
+    duplicate.project_id = project.project_id;
+    duplicate.title = parsed.card.title + " (conflicted copy)";
+    duplicate.parent_card_id = parsed.card.parent_card_id;
+    duplicate.created_at = now;
+    duplicate.updated_at = now;
+
+    try {
+      store.create(duplicate, parsed.body);
+      resolved++;
+    } catch (const std::exception&) {
+      // e.g. id collision (vanishingly unlikely) -- skip rather than fail the whole pull.
+    }
+  }
+  return resolved;
 }
 
 } // namespace
@@ -1267,9 +1341,18 @@ int holder_git_pull(
       git->set_remote("origin", project.git_remote_url.value());
       try {
         git->pull_remote_ff_only("origin");
+        rebuild_project_index(context, project);
         sync_repo.record_pull_result(project_id, "succeeded", true, std::nullopt, now);
         body["status"] = "succeeded";
         body["error_message"] = nullptr;
+        body["conflicts_resolved"] = 0;
+      } catch (const holder::git::NonFastForwardPullError& diverged) {
+        const int resolved = resolve_pull_conflicts(context, project, *git, diverged, now);
+        rebuild_project_index(context, project);
+        sync_repo.record_pull_result(project_id, "succeeded", true, std::nullopt, now);
+        body["status"] = "succeeded";
+        body["error_message"] = nullptr;
+        body["conflicts_resolved"] = resolved;
       } catch (const std::exception& e) {
         sync_repo.record_pull_result(project_id, "failed", false, std::optional<std::string>(e.what()), now);
         body["status"] = "failed";
@@ -1378,6 +1461,7 @@ int holder_git_sync_if_due(
         {"pull_attempted", false},
         {"pull_status", nullptr},
         {"pull_error", nullptr},
+        {"pull_conflicts_resolved", 0},
         {"push_attempted", false},
         {"push_status", nullptr},
         {"push_error", nullptr},
@@ -1408,6 +1492,12 @@ int holder_git_sync_if_due(
       body["pull_attempted"] = true;
       try {
         git->pull_remote_ff_only("origin");
+        rebuild_project_index(context, project);
+        sync_repo.record_pull_result(project_id, "succeeded", true, std::nullopt, now);
+        body["pull_status"] = "succeeded";
+      } catch (const holder::git::NonFastForwardPullError& diverged) {
+        body["pull_conflicts_resolved"] = resolve_pull_conflicts(context, project, *git, diverged, now);
+        rebuild_project_index(context, project);
         sync_repo.record_pull_result(project_id, "succeeded", true, std::nullopt, now);
         body["pull_status"] = "succeeded";
       } catch (const std::exception& e) {
@@ -1838,6 +1928,12 @@ int holder_recovery_token_import_global(
         if (remote_configured) {
           try {
             git->pull_remote_ff_only("origin");
+            rebuild_project_index(context, refreshed.value());
+            pull_status = "succeeded";
+            sync_repo.record_pull_result(metadata.project_id, pull_status, true, std::nullopt, now);
+          } catch (const holder::git::NonFastForwardPullError& diverged) {
+            resolve_pull_conflicts(context, refreshed.value(), *git, diverged, now);
+            rebuild_project_index(context, refreshed.value());
             pull_status = "succeeded";
             sync_repo.record_pull_result(metadata.project_id, pull_status, true, std::nullopt, now);
           } catch (const std::exception& ex) {
