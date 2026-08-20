@@ -59,8 +59,10 @@ int set_error(holder_error** out_error, int code, std::string message) {
     try {
       *out_error = new holder_error{std::move(message)};
     } catch (...) {
+      // LCOV_EXCL_START
       *out_error = nullptr;
       return HOLDER_ERROR_ALLOCATION;
+      // LCOV_EXCL_STOP
     }
   }
   return code;
@@ -71,13 +73,13 @@ int set_exception(holder_error** out_error, const std::exception& e) {
 }
 
 int set_unknown_exception(holder_error** out_error) {
-  return set_error(out_error, HOLDER_ERROR_RUNTIME, "unknown holder error");
+  return set_error(out_error, HOLDER_ERROR_RUNTIME, "unknown holder error"); // LCOV_EXCL_LINE
 }
 
 char* duplicate_string(const std::string& value) {
   auto* out = static_cast<char*>(std::malloc(value.size() + 1));
   if (out == nullptr) {
-    return nullptr;
+    return nullptr; // LCOV_EXCL_LINE
   }
   std::memcpy(out, value.c_str(), value.size() + 1);
   return out;
@@ -429,7 +431,7 @@ int holder_context_open(
     *out_context = context.release();
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
-    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
@@ -467,7 +469,7 @@ int holder_project_list(holder_context* context, char** out_json, holder_error**
     *out_json = out;
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
-    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
@@ -512,7 +514,7 @@ int holder_card_list(
     *out_json = out;
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
-    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
@@ -560,7 +562,7 @@ int holder_card_get_content(
     *out_content = out;
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
-    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
@@ -610,7 +612,7 @@ int holder_project_create(
     *out_json = out;
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
-    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
@@ -657,7 +659,7 @@ int holder_project_rename(
     *out_json = out;
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
-    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
@@ -684,7 +686,7 @@ int holder_project_delete(holder_context* context, const char* project_id, holde
     holder::project::ProjectSyncRepo(context->db).remove(project_id);
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
-    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
@@ -741,7 +743,7 @@ int holder_card_create(
     *out_json = out;
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
-    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
@@ -793,7 +795,7 @@ int holder_card_update_content(
     *out_json = out;
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
-    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
@@ -815,7 +817,7 @@ int holder_card_delete(holder_context* context, const char* card_id, holder_erro
     store.trash(card_id, now_epoch_seconds());
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
-    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
@@ -863,7 +865,7 @@ int holder_card_search(
     *out_json = out;
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
-    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
@@ -882,7 +884,7 @@ int holder_reindex(holder_context* context, holder_error** out_error) {
     reindexer.run();
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
-    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
@@ -936,7 +938,7 @@ int holder_ensure_default_project(
     *out_json = out;
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
-    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
@@ -997,7 +999,7 @@ int holder_git_set_ssh_signer(
     handle = std::make_shared<CApiSshSignerHandle>(user_data, destroy_user_data);
   } catch (const std::bad_alloc&) {
     // user_data was never captured; nothing to release.
-    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed"); // LCOV_EXCL_LINE
   }
 
   if (context == nullptr) {
@@ -1025,7 +1027,7 @@ int holder_git_set_ssh_signer(
     );
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
-    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
@@ -1072,7 +1074,7 @@ int holder_project_update_git_remote(
     *out_json = out;
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
-    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
@@ -1137,7 +1139,7 @@ int holder_git_test_remote(
     *out_json = out;
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
-    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
@@ -1232,7 +1234,7 @@ int holder_git_push(
     *out_json = out;
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
-    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
@@ -1317,7 +1319,7 @@ int holder_git_pull(
     *out_json = out;
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
-    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
@@ -1363,7 +1365,7 @@ int holder_git_sync_status(
     *out_json = out;
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
-    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
@@ -1520,7 +1522,7 @@ int holder_git_sync_if_due(
     *out_json = out;
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
-    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
@@ -1544,7 +1546,7 @@ int holder_keyring_set_provider(
   try {
     handle = std::make_shared<CApiKeyringProviderHandle>(user_data, destroy_user_data);
   } catch (const std::bad_alloc&) {
-    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
   }
 
   if (lookup_fn == nullptr || store_fn == nullptr || remove_fn == nullptr) {
@@ -1571,7 +1573,7 @@ int holder_keyring_set_provider(
     );
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
-    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
@@ -1637,7 +1639,7 @@ int holder_encryption_check(
     *out_json = out;
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
-    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
@@ -1700,7 +1702,7 @@ int holder_recovery_token_export(
     *out_json = out;
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
-    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
@@ -1751,7 +1753,7 @@ int holder_recovery_token_import(
     *out_json = out;
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
-    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
@@ -1794,7 +1796,7 @@ int holder_recovery_token_inspect(
     *out_json = out;
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
-    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
@@ -1918,7 +1920,7 @@ int holder_recovery_token_import_global(
     *out_json = out;
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
-    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
