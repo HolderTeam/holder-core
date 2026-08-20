@@ -10,8 +10,9 @@
 
 #include <git2.h>
 #include <openssl/bn.h>
+#include <openssl/core_names.h>
 #include <openssl/ecdsa.h>
-#include <openssl/obj_mac.h>
+#include <openssl/evp.h>
 
 #include <memory>
 #include <vector>
@@ -39,14 +40,12 @@ std::vector<unsigned char> der_signature_from_hex_rs(const char* r_hex, const ch
 // git_credential_ssh_custom_new's own validation, never actually signs
 // anything in these tests.
 std::vector<unsigned char> dummy_p256_ssh_pubkey_blob() {
-  EC_KEY* key = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1);
-  EC_KEY_generate_key(key);
-  const EC_GROUP* group = EC_KEY_get0_group(key);
-  const EC_POINT* point = EC_KEY_get0_public_key(key);
+  EVP_PKEY* key = EVP_EC_gen("P-256");
 
   std::vector<unsigned char> q(65);
-  EC_POINT_point2oct(group, point, POINT_CONVERSION_UNCOMPRESSED, q.data(), q.size(), nullptr);
-  EC_KEY_free(key);
+  size_t q_len = 0;
+  EVP_PKEY_get_octet_string_param(key, OSSL_PKEY_PARAM_PUB_KEY, q.data(), q.size(), &q_len);
+  EVP_PKEY_free(key);
 
   auto append_ssh_string = [](std::vector<unsigned char>& out, const unsigned char* data, size_t len) {
     out.push_back(static_cast<unsigned char>((len >> 24) & 0xFF));
