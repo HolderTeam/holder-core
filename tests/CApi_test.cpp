@@ -5,6 +5,7 @@
 #include <catch2/catch.hpp>
 #endif
 
+#include "card/CardPaths.h"
 #include "card/CardRepo.h"
 #include "core_test_helpers.h"
 #include "git/GitRepo.h"
@@ -29,6 +30,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -729,6 +731,238 @@ TEST_CASE("C API reports invalid card delete arguments", "[capi]") {
   REQUIRE(error != nullptr);
 
   holder_error_destroy(error);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API reports invalid card list_trashed/restore/purge arguments", "[capi]") {
+  holder_error* error = nullptr;
+  char* json = nullptr;
+
+  REQUIRE(holder_card_list_trashed(nullptr, "project-1", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(json == nullptr);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(holder_card_restore(nullptr, "card-1", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(json == nullptr);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(holder_card_purge(nullptr, "card-1", &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(holder_card_list_trashed(nullptr, "project-1", nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(holder_card_restore(nullptr, "card-1", nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  REQUIRE(holder_card_list_trashed(context, "", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(holder_card_restore(context, "", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(holder_card_purge(context, "", &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(holder_card_restore(context, "missing-card", &json, &error) == HOLDER_ERROR_RUNTIME);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(holder_card_purge(context, "missing-card", &error) == HOLDER_ERROR_RUNTIME);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API card_list_trashed lists only soft-deleted cards", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_card_create(context, "project-1", "Keep", "keep me", nullptr, &json, &error) == HOLDER_OK
+  );
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(
+      holder_card_create(context, "project-1", "Trash me", "bye", nullptr, &json, &error) == HOLDER_OK
+  );
+  const std::string trashed_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
+  holder_string_free(json);
+
+  REQUIRE(holder_card_delete(context, trashed_id.c_str(), &error) == HOLDER_OK);
+
+  json = nullptr;
+  REQUIRE(holder_card_list(context, "project-1", &json, &error) == HOLDER_OK);
+  auto active = nlohmann::json::parse(json);
+  REQUIRE(active.size() == 1);
+  REQUIRE(active[0]["title"] == "Keep");
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(holder_card_list_trashed(context, "project-1", &json, &error) == HOLDER_OK);
+  auto trashed = nlohmann::json::parse(json);
+  REQUIRE(trashed.size() == 1);
+  REQUIRE(trashed[0]["card_id"] == trashed_id);
+  REQUIRE(trashed[0]["title"] == "Trash me");
+  REQUIRE_FALSE(trashed[0]["deleted_at"].is_null());
+  holder_string_free(json);
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API card_restore brings a trashed card back with its content intact", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_card_create(context, "project-1", "Undo me", "original content", nullptr, &json, &error) ==
+      HOLDER_OK
+  );
+  const std::string card_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
+  holder_string_free(json);
+
+  REQUIRE(holder_card_delete(context, card_id.c_str(), &error) == HOLDER_OK);
+
+  // Restoring a card that isn't trashed is rejected.
+  json = nullptr;
+  REQUIRE(holder_card_restore(context, card_id.c_str(), &json, &error) == HOLDER_OK);
+  auto restored = nlohmann::json::parse(json);
+  REQUIRE(restored["card_id"] == card_id);
+  REQUIRE(restored["deleted_at"].is_null());
+  holder_string_free(json);
+  json = nullptr;
+
+  REQUIRE(holder_card_restore(context, card_id.c_str(), &json, &error) == HOLDER_ERROR_RUNTIME);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  char* content = nullptr;
+  REQUIRE(holder_card_get_content(context, card_id.c_str(), &content, &error) == HOLDER_OK);
+  REQUIRE(std::string(content) == "original content");
+  holder_string_free(content);
+
+  json = nullptr;
+  REQUIRE(holder_card_list(context, "project-1", &json, &error) == HOLDER_OK);
+  REQUIRE(nlohmann::json::parse(json).size() == 1);
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(holder_card_list_trashed(context, "project-1", &json, &error) == HOLDER_OK);
+  REQUIRE(nlohmann::json::parse(json).empty());
+  holder_string_free(json);
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API card_purge permanently removes a trashed card", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_card_create(context, "project-1", "Gone for good", "content", nullptr, &json, &error) ==
+      HOLDER_OK
+  );
+  const std::string card_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
+  holder_string_free(json);
+
+  // Purging a card that isn't trashed is rejected.
+  REQUIRE(holder_card_purge(context, card_id.c_str(), &error) == HOLDER_ERROR_RUNTIME);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(holder_card_delete(context, card_id.c_str(), &error) == HOLDER_OK);
+  REQUIRE(holder_card_purge(context, card_id.c_str(), &error) == HOLDER_OK);
+
+  json = nullptr;
+  REQUIRE(holder_card_list_trashed(context, "project-1", &json, &error) == HOLDER_OK);
+  REQUIRE(nlohmann::json::parse(json).empty());
+  holder_string_free(json);
+
+  char* content = nullptr;
+  REQUIRE(holder_card_get_content(context, card_id.c_str(), &content, &error) == HOLDER_ERROR_RUNTIME);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  // Gone -- not even restorable any more.
+  REQUIRE(holder_card_restore(context, card_id.c_str(), &json, &error) == HOLDER_ERROR_RUNTIME);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API card_restore reports missing trash content", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto repo_dir = data_dir / "repo";
+  seed_git_project(data_dir, "project-1", repo_dir, std::nullopt);
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_card_create(context, "project-1", "Doomed", "content", nullptr, &json, &error) == HOLDER_OK
+  );
+  const std::string card_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
+  holder_string_free(json);
+
+  REQUIRE(holder_card_delete(context, card_id.c_str(), &error) == HOLDER_OK);
+  REQUIRE(std::filesystem::remove(repo_dir / holder::core::card_trash_rel_path(card_id)));
+
+  json = nullptr;
+  REQUIRE(holder_card_restore(context, card_id.c_str(), &json, &error) == HOLDER_ERROR_RUNTIME);
+  REQUIRE(json == nullptr);
+  REQUIRE(error != nullptr);
+  REQUIRE(std::string(holder_error_message(error)).find("content missing") != std::string::npos);
+  holder_error_destroy(error);
+
   holder_context_destroy(context);
 }
 
@@ -1628,22 +1862,32 @@ TEST_CASE("C API git_sync_if_due reports invalid project arguments", "[capi][git
 
 namespace {
 
-// A fake external keyring provider for the C ABI, backed by a plain in-memory
-// map passed as user_data -- exactly the shape Android's JNI bridge to
+// A fake external keyring provider for the C ABI, backed by plain in-memory
+// state passed as user_data -- exactly the shape Android's JNI bridge to
 // EncryptedSharedPreferences plays in production.
+struct FakeKeyringState {
+  std::map<std::string, std::string> secrets;
+  std::vector<std::string> observed_project_ids;
+};
+
+void record_project_id(FakeKeyringState& state, const char* project_id) {
+  state.observed_project_ids.emplace_back(project_id != nullptr ? project_id : "");
+}
+
 int fake_keyring_lookup(
     void* user_data,
     int /*kind*/,
     const char* /*service*/,
     const char* account,
-    const char* /*project_id*/,
+    const char* project_id,
     int* out_found,
     char** out_secret,
     char** /*out_error*/
 ) {
-  auto* store = static_cast<std::map<std::string, std::string>*>(user_data);
-  const auto it = store->find(account);
-  if (it == store->end()) {
+  auto* state = static_cast<FakeKeyringState*>(user_data);
+  record_project_id(*state, project_id);
+  const auto it = state->secrets.find(account);
+  if (it == state->secrets.end()) {
     *out_found = 0;
     return 0;
   }
@@ -1659,13 +1903,14 @@ int fake_keyring_store(
     int /*kind*/,
     const char* /*service*/,
     const char* account,
-    const char* /*project_id*/,
+    const char* project_id,
     const char* /*label*/,
     const char* secret,
     char** /*out_error*/
 ) {
-  auto* store = static_cast<std::map<std::string, std::string>*>(user_data);
-  (*store)[account] = secret;
+  auto* state = static_cast<FakeKeyringState*>(user_data);
+  record_project_id(*state, project_id);
+  state->secrets[account] = secret;
   return 0;
 }
 
@@ -1674,11 +1919,12 @@ int fake_keyring_remove(
     int /*kind*/,
     const char* /*service*/,
     const char* account,
-    const char* /*project_id*/,
+    const char* project_id,
     char** /*out_error*/
 ) {
-  auto* store = static_cast<std::map<std::string, std::string>*>(user_data);
-  store->erase(account);
+  auto* state = static_cast<FakeKeyringState*>(user_data);
+  record_project_id(*state, project_id);
+  state->secrets.erase(account);
   return 0;
 }
 
@@ -1781,14 +2027,14 @@ TEST_CASE("C API keyring_set_provider destroys user_data exactly once on replace
 }
 
 TEST_CASE("C API keyring_set_provider round-trips lookup/store/remove through the registered callbacks", "[capi][privacy]") {
-  std::map<std::string, std::string> store;
+  FakeKeyringState state;
   holder_error* error = nullptr;
   REQUIRE(
       holder_keyring_set_provider(
           fake_keyring_lookup,
           fake_keyring_store,
           fake_keyring_remove,
-          &store,
+          &state,
           noop_keyring_destroy,
           &error
       ) == HOLDER_OK
@@ -1798,17 +2044,18 @@ TEST_CASE("C API keyring_set_provider round-trips lookup/store/remove through th
       .kind = holder::privacy::PlatformKeyringSecretKind::GenericSecret,
       .service = "holder.test",
       .account = "acct",
-      .project_id = std::nullopt,
+      .project_id = "project-1",
   };
 
   REQUIRE_FALSE(holder::privacy::platform_keyring_lookup_secret(ref).secret.has_value());
 
   holder::privacy::platform_keyring_store_secret(ref, "label", "secret-value");
-  REQUIRE(store.at("acct") == "secret-value");
+  REQUIRE(state.secrets.at("acct") == "secret-value");
   REQUIRE(holder::privacy::platform_keyring_lookup_secret(ref).secret == "secret-value");
 
   holder::privacy::platform_keyring_remove_secret(ref);
-  REQUIRE(store.find("acct") == store.end());
+  REQUIRE(state.secrets.find("acct") == state.secrets.end());
+  REQUIRE(state.observed_project_ids == std::vector<std::string>(4, "project-1"));
 
   holder::privacy::platform_keyring_clear_external_provider();
 }
@@ -3359,6 +3606,10 @@ TEST_CASE(
   error = nullptr;
 
   REQUIRE(holder_card_delete(context, card_id.c_str(), &error) == HOLDER_ERROR_RUNTIME);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(holder_card_list_trashed(context, "project-1", &json, &error) == HOLDER_ERROR_RUNTIME);
   holder_error_destroy(error);
   error = nullptr;
 

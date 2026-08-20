@@ -109,6 +109,29 @@ int holder_card_update_content(
 // Soft-deletes (trashes) a card; it stops appearing in holder_card_list.
 int holder_card_delete(holder_context* context, const char* card_id, holder_error** out_error);
 
+// Lists project_id's trashed (soft-deleted) cards, same JSON card-array shape as
+// holder_card_list.
+int holder_card_list_trashed(
+    holder_context* context,
+    const char* project_id,
+    char** out_json,
+    holder_error** out_error
+);
+
+// Restores a trashed card; it reappears in holder_card_list. Sets *out_json to
+// the restored card. Fails if card_id isn't currently trashed.
+int holder_card_restore(
+    holder_context* context,
+    const char* card_id,
+    char** out_json,
+    holder_error** out_error
+);
+
+// Permanently deletes a trashed card: removes its database row and its file
+// from the git working tree. Irreversible. Fails if card_id isn't currently
+// trashed -- restore it first, or use holder_card_delete to trash it.
+int holder_card_purge(holder_context* context, const char* card_id, holder_error** out_error);
+
 // Full-text searches a project's (non-deleted) cards. Sets *out_json to a JSON
 // array of {card_id, title, snippet, rank, created_at, updated_at}, ranked
 // best-match first.

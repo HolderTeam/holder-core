@@ -72,9 +72,12 @@ int set_exception(holder_error** out_error, const std::exception& e) {
   return set_error(out_error, HOLDER_ERROR_RUNTIME, e.what());
 }
 
+// LCOV_EXCL_START -- all production throw sites use std::exception-derived types; this is the
+// C ABI's final defense against a foreign/non-standard exception crossing the boundary.
 int set_unknown_exception(holder_error** out_error) {
-  return set_error(out_error, HOLDER_ERROR_RUNTIME, "unknown holder error"); // LCOV_EXCL_LINE
+  return set_error(out_error, HOLDER_ERROR_RUNTIME, "unknown holder error");
 }
+// LCOV_EXCL_STOP
 
 char* duplicate_string(const std::string& value) {
   auto* out = static_cast<char*>(std::malloc(value.size() + 1));
@@ -834,6 +837,114 @@ int holder_card_delete(holder_context* context, const char* card_id, holder_erro
   }  // LCOV_EXCL_LINE
 }
 
+int holder_card_list_trashed(
+    holder_context* context,
+    const char* project_id,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (project_id == nullptr || project_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "project_id must not be empty");
+  }
+
+  try {
+    holder::card::CardRepo repo(context->db);
+    nlohmann::json body = nlohmann::json::array();
+    for (const auto& card : repo.list_all(project_id)) {
+      if (!card.deleted_at.has_value()) {
+        continue;
+      }
+      body.push_back(card_to_json(card));
+    }
+
+    auto* out = duplicate_string(body.dump());
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+    }
+
+    *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
+  }  // LCOV_EXCL_LINE
+}
+
+int holder_card_restore(
+    holder_context* context,
+    const char* card_id,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (card_id == nullptr || card_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "card_id must not be empty");
+  }
+
+  try {
+    holder::card::CardStore store(context->db, &context->fts);
+    store.restore(card_id, now_epoch_seconds());
+
+    holder::card::CardRepo repo(context->db);
+    const auto restored = repo.get(card_id);
+    auto* out = duplicate_string(card_to_json(restored.value()).dump());
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+    }
+
+    *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
+  }  // LCOV_EXCL_LINE
+}
+
+int holder_card_purge(holder_context* context, const char* card_id, holder_error** out_error) {
+  clear_error(out_error);
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (card_id == nullptr || card_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "card_id must not be empty");
+  }
+
+  try {
+    holder::card::CardStore store(context->db, &context->fts);
+    store.hard_delete(card_id);
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
+  }  // LCOV_EXCL_LINE
+}
+
 int holder_card_search(
     holder_context* context,
     const char* project_id,
@@ -1036,9 +1147,11 @@ int holder_git_set_ssh_signer(
     context->credential_provider = std::make_shared<holder::git::EcdsaDerSigningCredentialProvider>(
         std::string(username),
         std::move(pubkey),
-        [handle, sign_fn](const unsigned char* data, size_t data_len) {
-          return handle->sign(sign_fn, data, data_len); // LCOV_EXCL_LINE -- see CApiSshSignerHandle::sign
-        }
+        [handle, sign_fn](const unsigned char* data, size_t data_len) { // LCOV_EXCL_START
+          // Invoked only by a real SSH server's authentication challenge; local-remotes tests
+          // verify provider wiring without requiring network credentials or an SSH daemon.
+          return handle->sign(sign_fn, data, data_len);
+        } // LCOV_EXCL_STOP
     );
     return HOLDER_OK;
   // EcdsaDerSigningCredentialProvider's constructor never throws anything but bad_alloc, so
@@ -1507,7 +1620,7 @@ int holder_git_sync_if_due(
         .next_retry_at = state_for_push.has_value() ? state_for_push->next_retry_at
                                                      : std::optional<long long>{},
         .now = now,
-    };
+    }; // LCOV_EXCL_LINE -- GCC attributes the already-executed aggregate initialization here.
     if (push_interval_seconds > 0) push_input.push_interval_seconds = push_interval_seconds;
 
     if (holder::sync::should_attempt_push(push_input)) {
