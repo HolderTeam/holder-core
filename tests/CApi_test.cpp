@@ -1904,3 +1904,643 @@ TEST_CASE("C API recovery_token_import_global configures and pulls a remote hint
   holder_context_destroy(other_context);
   holder_context_destroy(context);
 }
+
+// ---------------------------------------------------------------------------
+// Argument validation for functions that had no coverage of it at all. Every
+// one of these follows holder.cpp's own convention: check first, mutate
+// *out_json to null (if applicable), return HOLDER_ERROR_INVALID_ARGUMENT
+// with a message naming the bad field.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("C API reports invalid context_open arguments", "[capi]") {
+  holder_error* error = nullptr;
+  holder_context* context = nullptr;
+  const auto schema = read_schema_sql();
+
+  REQUIRE(holder_context_open("", schema.c_str(), &context, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(context == nullptr);
+  REQUIRE(std::string(holder_error_message(error)).find("data_dir") != std::string::npos);
+  holder_error_destroy(error);
+}
+
+TEST_CASE("C API reports invalid project_list arguments", "[capi]") {
+  holder_error* error = nullptr;
+  char* json = nullptr;
+
+  REQUIRE(holder_project_list(nullptr, &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(json == nullptr);
+  REQUIRE(std::string(holder_error_message(error)).find("context") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(holder_project_list(nullptr, nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(std::string(holder_error_message(error)).find("out_json") != std::string::npos);
+  holder_error_destroy(error);
+}
+
+TEST_CASE("C API reports remaining invalid card_list argument", "[capi]") {
+  holder_error* error = nullptr;
+  REQUIRE(holder_card_list(nullptr, "project-1", nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(std::string(holder_error_message(error)).find("out_json") != std::string::npos);
+  holder_error_destroy(error);
+}
+
+TEST_CASE("C API reports remaining invalid card_get_content argument", "[capi]") {
+  holder_error* error = nullptr;
+  REQUIRE(holder_card_get_content(nullptr, "card-1", nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(std::string(holder_error_message(error)).find("out_content") != std::string::npos);
+  holder_error_destroy(error);
+}
+
+TEST_CASE("C API reports remaining invalid project_create argument", "[capi]") {
+  holder_error* error = nullptr;
+  REQUIRE(
+      holder_project_create(nullptr, "Home", nullptr, nullptr, nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("out_json") != std::string::npos);
+  holder_error_destroy(error);
+}
+
+TEST_CASE("C API creates a project with an explicit root_path", "[capi]") {
+  // holder_project_create's "caller supplied root_path" branch -- every other project-create
+  // test leaves this null and lets it default.
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  const auto explicit_root = (data_dir / "custom-root").string();
+  char* json = nullptr;
+  REQUIRE(
+      holder_project_create(context, "Custom", explicit_root.c_str(), nullptr, &json, &error) == HOLDER_OK
+  );
+  REQUIRE(nlohmann::json::parse(json)["root_path"] == explicit_root);
+  holder_string_free(json);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API reports invalid project_rename arguments", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_project_rename(context, "project-1", "New Name", nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("out_json") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_project_rename(context, "", "New Name", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("project_id") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_project_rename(context, "project-1", "", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("name") != std::string::npos);
+  holder_error_destroy(error);
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API reports remaining invalid project_delete argument", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  REQUIRE(holder_project_delete(context, "", &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(std::string(holder_error_message(error)).find("project_id") != std::string::npos);
+  holder_error_destroy(error);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API reports remaining invalid card_create arguments", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  REQUIRE(
+      holder_card_create(context, "project-1", "Title", "body", nullptr, nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("out_json") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_card_create(context, "", "Title", "body", nullptr, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("project_id") != std::string::npos);
+  holder_error_destroy(error);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API creates a card with an explicit parent_card_id", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* parent_json = nullptr;
+  REQUIRE(
+      holder_card_create(context, "project-1", "Parent", "body", nullptr, &parent_json, &error) ==
+      HOLDER_OK
+  );
+  const std::string parent_id = nlohmann::json::parse(parent_json)["card_id"].get<std::string>();
+  holder_string_free(parent_json);
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_card_create(context, "project-1", "Child", "body", parent_id.c_str(), &json, &error) ==
+      HOLDER_OK
+  );
+  REQUIRE(nlohmann::json::parse(json)["parent_card_id"] == parent_id);
+  holder_string_free(json);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API reports invalid card_update_content arguments", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_card_update_content(context, "card-1", "content", nullptr, nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("out_json") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_card_update_content(context, "", "content", nullptr, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("card_id") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_card_update_content(context, "card-1", nullptr, nullptr, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("content") != std::string::npos);
+  holder_error_destroy(error);
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API reports remaining invalid card_delete argument", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  REQUIRE(holder_card_delete(context, "", &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(std::string(holder_error_message(error)).find("card_id") != std::string::npos);
+  holder_error_destroy(error);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API reports remaining invalid card_search arguments", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  REQUIRE(
+      holder_card_search(context, "project-1", "q", 20, 0, nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("out_json") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_card_search(context, "", "q", 20, 0, &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("project_id") != std::string::npos);
+  holder_error_destroy(error);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API reports remaining invalid ensure_default_project arguments", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  REQUIRE(
+      holder_ensure_default_project(context, "Home", "Welcome", "body", nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("out_json") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_ensure_default_project(context, "", "Welcome", "body", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("name") != std::string::npos);
+  holder_error_destroy(error);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API reports remaining invalid git_set_ssh_signer arguments", "[capi]") {
+  holder_error* error = nullptr;
+  REQUIRE(
+      holder_git_set_ssh_signer(nullptr, "git", nullptr, 0, nullptr, nullptr, nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("context") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  const unsigned char blob[] = {0x01};
+  REQUIRE(
+      holder_git_set_ssh_signer(context, "git", nullptr, 0, nullptr, nullptr, nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("public_key_blob") != std::string::npos);
+  holder_error_destroy(error);
+  (void)blob;
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API reports invalid project_update_git_remote arguments", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  REQUIRE(
+      holder_project_update_git_remote(context, "project-1", "ssh://x", nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("out_json") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_project_update_git_remote(nullptr, "project-1", "ssh://x", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("context") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_project_update_git_remote(context, "", "ssh://x", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("project_id") != std::string::npos);
+  holder_error_destroy(error);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API reports remaining invalid git_test_remote arguments", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  REQUIRE(
+      holder_git_test_remote(context, "project-1", nullptr, nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("out_json") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_git_test_remote(nullptr, "project-1", nullptr, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("context") != std::string::npos);
+  holder_error_destroy(error);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API reports invalid git_push arguments", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  REQUIRE(
+      holder_git_push(context, "project-1", nullptr, 0, nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("out_json") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_git_push(nullptr, "project-1", nullptr, 0, &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("context") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_git_push(context, "", nullptr, 0, &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("project_id") != std::string::npos);
+  holder_error_destroy(error);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API reports invalid git_pull arguments", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  REQUIRE(holder_git_pull(context, "project-1", nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(std::string(holder_error_message(error)).find("out_json") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  char* json = nullptr;
+  REQUIRE(holder_git_pull(nullptr, "project-1", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(std::string(holder_error_message(error)).find("context") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(holder_git_pull(context, "", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(std::string(holder_error_message(error)).find("project_id") != std::string::npos);
+  holder_error_destroy(error);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API reports invalid git_sync_status arguments", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  REQUIRE(
+      holder_git_sync_status(context, "project-1", nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("out_json") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_git_sync_status(nullptr, "project-1", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("context") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(holder_git_sync_status(context, "", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(std::string(holder_error_message(error)).find("project_id") != std::string::npos);
+  holder_error_destroy(error);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API reports invalid git_sync_if_due arguments", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  REQUIRE(
+      holder_git_sync_if_due(context, "project-1", 0, 0, nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("out_json") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_git_sync_if_due(nullptr, "project-1", 0, 0, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("context") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_git_sync_if_due(context, "", 0, 0, &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("project_id") != std::string::npos);
+  holder_error_destroy(error);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API reports invalid encryption_check arguments", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  REQUIRE(
+      holder_encryption_check(context, "project-1", nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("out_json") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_encryption_check(nullptr, "project-1", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("context") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(holder_encryption_check(context, "", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(std::string(holder_error_message(error)).find("project_id") != std::string::npos);
+  holder_error_destroy(error);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API reports remaining invalid recovery_token_export arguments", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  REQUIRE(
+      holder_recovery_token_export(context, "project-1", "1234", nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("out_json") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_recovery_token_export(nullptr, "project-1", "1234", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("context") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_recovery_token_export(context, "", "1234", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("project_id") != std::string::npos);
+  holder_error_destroy(error);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API reports invalid recovery_token_import arguments", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  REQUIRE(
+      holder_recovery_token_import(context, "project-1", "1234", "token", nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("out_json") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_recovery_token_import(nullptr, "project-1", "1234", "token", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("context") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_recovery_token_import(context, "", "1234", "token", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("project_id") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_recovery_token_import(context, "project-1", "", "token", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("pin") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_recovery_token_import(context, "project-1", "1234", "", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("recovery_token") != std::string::npos);
+  holder_error_destroy(error);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API reports invalid recovery_token_inspect arguments", "[capi]") {
+  holder_error* error = nullptr;
+  REQUIRE(
+      holder_recovery_token_inspect("1234", "token", nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("out_json") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_recovery_token_inspect("", "token", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("pin") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_recovery_token_inspect("1234", "", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("recovery_token") != std::string::npos);
+  holder_error_destroy(error);
+}
+
+TEST_CASE("C API reports invalid recovery_token_import_global arguments", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  REQUIRE(
+      holder_recovery_token_import_global(context, "1234", "token", nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("out_json") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_recovery_token_import_global(nullptr, "1234", "token", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("context") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_recovery_token_import_global(context, "", "token", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("pin") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_recovery_token_import_global(context, "1234", "", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("recovery_token") != std::string::npos);
+  holder_error_destroy(error);
+  holder_context_destroy(context);
+}
