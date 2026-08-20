@@ -3431,3 +3431,7 @@ TEST_CASE(
 
   holder_context_destroy(context);
 }
+
+TEST_CASE("C API error_message returns an empty string for a null error", "[capi]") {
+  REQUIRE(std::string(holder_error_message(nullptr)) == "");
+}
