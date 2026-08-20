@@ -149,6 +149,7 @@ add_library(holder STATIC
   src/project/StartupRecovery.cpp
   src/resource/ResourceRepo.cpp
   src/sync/ProjectSyncPolicy.cpp
+  src/sync/PullConflictResolution.cpp
 )
 add_library(Holder::Core ALIAS holder)
 set_target_properties(holder PROPERTIES
