@@ -65,6 +65,19 @@ class EcdsaDerSigningCredentialProvider final : public GitCredentialProvider {
       const std::vector<unsigned char>& der
   );
 
+  // Exposed for unit tests: sign_trampoline never dereferences its
+  // LIBSSH2_SESSION* (an opaque type here), so it can be exercised directly
+  // without a real libssh2 session -- this just forwards to it.
+  static int sign_trampoline_for_tests(
+      unsigned char** sig,
+      size_t* sig_len,
+      const unsigned char* data,
+      size_t data_len,
+      void** abstract
+  ) {
+    return sign_trampoline(nullptr, sig, sig_len, data, data_len, abstract);
+  }
+
  private:
   static int sign_trampoline(
       LIBSSH2_SESSION* session,

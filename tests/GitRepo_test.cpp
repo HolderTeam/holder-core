@@ -454,6 +454,53 @@ TEST_CASE(
   REQUIRE_NOTHROW(local_repo.pull_remote_ff_only("origin"));
 }
 
+TEST_CASE(
+    "GitRepo merge_remote_taking_theirs_for_conflicts reapplies a local-only deletion",
+    "[git]"
+) {
+  const auto dir = make_temp_dir();
+  const auto remote_dir = dir / "remote";
+  const auto local_dir = dir / "local";
+
+  holder::git::GitRepo remote_repo;
+  remote_repo.open_or_init(remote_dir);
+  remote_repo.write_file("cards/shared.md", "base");
+  remote_repo.write_file("cards/doomed.md", "will be deleted locally");
+  remote_repo.stage_path("cards/shared.md");
+  remote_repo.stage_path("cards/doomed.md");
+  remote_repo.commit("seed");
+
+  holder::git::GitRepo local_repo;
+  local_repo.open_or_init(local_dir);
+  local_repo.set_remote("origin", remote_dir.string());
+  local_repo.pull_remote_ff_only("origin");
+
+  local_repo.write_file("cards/shared.md", "local edit");
+  local_repo.stage_path("cards/shared.md");
+  local_repo.remove_path("cards/doomed.md");
+  std::filesystem::remove(local_dir / "cards" / "doomed.md");
+  local_repo.commit("local commit: edit shared, delete doomed");
+
+  remote_repo.write_file("cards/shared.md", "remote edit");
+  remote_repo.stage_path("cards/shared.md");
+  remote_repo.commit("remote commit");
+
+  std::string captured_local_oid;
+  std::string captured_remote_oid;
+  try {
+    local_repo.pull_remote_ff_only("origin");
+    FAIL("Expected non-fast-forward pull to throw");
+  } catch (const holder::git::NonFastForwardPullError& e) {
+    captured_local_oid = e.local_oid_hex;
+    captured_remote_oid = e.remote_oid_hex;
+  }
+
+  local_repo.merge_remote_taking_theirs_for_conflicts("origin", captured_local_oid, captured_remote_oid);
+
+  REQUIRE_FALSE(std::filesystem::exists(local_dir / "cards" / "doomed.md"));
+  REQUIRE(read_text_file(local_dir / "cards" / "shared.md") == "remote edit");
+}
+
 TEST_CASE("GitRepo commit falls back to placeholder signature without git config", "[git]") {
   const auto dir = make_temp_dir();
   const auto fake_home = dir / "fake_home";

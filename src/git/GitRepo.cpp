@@ -276,24 +276,31 @@ static std::vector<ChangedPath> diff_changed_paths(
   git_commit* to_commit = nullptr;
   rc = git_commit_lookup(&to_commit, repo, &to_oid);
   if (rc != 0) {
+    // LCOV_EXCL_START -- to_oid was already resolved once by the caller; a lookup failure here
+    // means the object database changed or was corrupted between the two calls.
     git_commit_free(from_commit);
     throw git_err("git_commit_lookup (diff to) failed", rc);
+    // LCOV_EXCL_STOP
   }
 
   git_tree* from_tree = nullptr;
   rc = git_commit_tree(&from_tree, from_commit);
   if (rc != 0) {
+    // LCOV_EXCL_START
     git_commit_free(from_commit);
     git_commit_free(to_commit);
-    throw git_err("git_commit_tree (diff from) failed", rc); // LCOV_EXCL_LINE
+    throw git_err("git_commit_tree (diff from) failed", rc);
+    // LCOV_EXCL_STOP
   }
   git_tree* to_tree = nullptr;
   rc = git_commit_tree(&to_tree, to_commit);
   if (rc != 0) {
+    // LCOV_EXCL_START
     git_tree_free(from_tree);
     git_commit_free(from_commit);
     git_commit_free(to_commit);
-    throw git_err("git_commit_tree (diff to) failed", rc); // LCOV_EXCL_LINE
+    throw git_err("git_commit_tree (diff to) failed", rc);
+    // LCOV_EXCL_STOP
   }
 
   git_diff_options diff_opts{};

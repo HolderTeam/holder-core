@@ -10,6 +10,7 @@
 #include "project/ProjectStore.h"
 
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <stdexcept>
 #include <string>
@@ -77,6 +78,50 @@ TEST_CASE(
     threw = true;
   }
   REQUIRE(threw);
+
+  holder::project::ProjectRepo repo(db);
+  REQUIRE(repo.list().empty());
+}
+
+TEST_CASE("ProjectStore create configures a git remote when one is provided", "[project_store]") {
+  const auto dir = holder::test::make_temp_dir();
+  auto db = holder::test::open_db_with_schema(dir / "holder.db");
+
+  holder::project::ProjectStore store(db);
+  holder::model::Project input;
+  input.name = "Home";
+  input.privacy_mode = "plain";
+  input.git_remote_url = (dir / "remote.git").string();
+
+  const auto created = store.create(input, counting_uuid_v4("id"), dir / "projects");
+
+  std::ifstream config_file(std::filesystem::path(created.root_path) / ".git" / "config");
+  const std::string config(
+      (std::istreambuf_iterator<char>(config_file)), std::istreambuf_iterator<char>()
+  );
+  REQUIRE(config.find(input.git_remote_url.value()) != std::string::npos);
+}
+
+TEST_CASE(
+    "ProjectStore create removes the project row and rethrows when git setup fails",
+    "[project_store]"
+) {
+  const auto dir = holder::test::make_temp_dir();
+  auto db = holder::test::open_db_with_schema(dir / "holder.db");
+
+  // A regular file sitting where the repo directory needs to go makes
+  // GitRepo::open_or_init's create_directories fail.
+  const auto blocked_root = dir / "blocked-root";
+  std::ofstream(blocked_root) << "not a directory";
+
+  holder::project::ProjectStore store(db);
+  holder::model::Project input;
+  input.name = "Home";
+  input.privacy_mode = "plain";
+  input.root_path = blocked_root.string();
+  input.git_remote_url = "https://example.invalid/repo.git";
+
+  REQUIRE_THROWS_AS(store.create(input, counting_uuid_v4("id"), std::nullopt), std::runtime_error);
 
   holder::project::ProjectRepo repo(db);
   REQUIRE(repo.list().empty());

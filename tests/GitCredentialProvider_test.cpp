@@ -14,7 +14,9 @@
 #include <openssl/ecdsa.h>
 #include <openssl/evp.h>
 
+#include <cstdlib>
 #include <memory>
+#include <stdexcept>
 #include <vector>
 
 namespace {
@@ -97,6 +99,75 @@ TEST_CASE("EcdsaDerSigningCredentialProvider reshapes DER signature to SSH mpint
     const std::vector<unsigned char> not_der = {0xDE, 0xAD, 0xBE, 0xEF};
     const auto wire = EcdsaDerSigningCredentialProvider::der_to_ssh_wire_signature_for_tests(not_der);
     REQUIRE(wire.empty());
+  }
+}
+
+TEST_CASE("EcdsaDerSigningCredentialProvider::sign_trampoline bridges sign_raw_ to libssh2's callback contract", "[git]") {
+  // sign_trampoline never dereferences its LIBSSH2_SESSION* (the type is opaque -- see the
+  // header's forward declaration), so it can be called directly without a real libssh2 session.
+  using holder::git::EcdsaDerSigningCredentialProvider;
+
+  const unsigned char data[] = {0xAA};
+
+  SECTION("converts a valid signature to SSH wire format and mallocs the output") {
+    EcdsaDerSigningCredentialProvider provider(
+        "git",
+        {0x01},
+        [](const unsigned char*, size_t) { return der_signature_from_hex_rs("0102030405", "0605040302"); }
+    );
+    void* abstract = &provider;
+    unsigned char* sig = nullptr;
+    size_t sig_len = 0;
+    const int rc =
+        EcdsaDerSigningCredentialProvider::sign_trampoline_for_tests(&sig, &sig_len, data, sizeof(data), &abstract);
+    REQUIRE(rc == 0);
+    REQUIRE(sig != nullptr);
+    REQUIRE(sig_len > 0);
+    std::free(sig);
+  }
+
+  SECTION("sign_raw_ throwing is reported as a failure, not propagated") {
+    EcdsaDerSigningCredentialProvider provider(
+        "git",
+        {0x01},
+        [](const unsigned char*, size_t) -> std::vector<unsigned char> {
+          throw std::runtime_error("signer exploded");
+        }
+    );
+    void* abstract = &provider;
+    unsigned char* sig = nullptr;
+    size_t sig_len = 0;
+    const int rc =
+        EcdsaDerSigningCredentialProvider::sign_trampoline_for_tests(&sig, &sig_len, data, sizeof(data), &abstract);
+    REQUIRE(rc == -1);
+  }
+
+  SECTION("sign_raw_ returning an empty signature is reported as a failure") {
+    EcdsaDerSigningCredentialProvider provider(
+        "git",
+        {0x01},
+        [](const unsigned char*, size_t) -> std::vector<unsigned char> { return {}; }
+    );
+    void* abstract = &provider;
+    unsigned char* sig = nullptr;
+    size_t sig_len = 0;
+    const int rc =
+        EcdsaDerSigningCredentialProvider::sign_trampoline_for_tests(&sig, &sig_len, data, sizeof(data), &abstract);
+    REQUIRE(rc == -1);
+  }
+
+  SECTION("sign_raw_ returning malformed DER is reported as a failure") {
+    EcdsaDerSigningCredentialProvider provider(
+        "git",
+        {0x01},
+        [](const unsigned char*, size_t) -> std::vector<unsigned char> { return {0xDE, 0xAD, 0xBE, 0xEF}; }
+    );
+    void* abstract = &provider;
+    unsigned char* sig = nullptr;
+    size_t sig_len = 0;
+    const int rc =
+        EcdsaDerSigningCredentialProvider::sign_trampoline_for_tests(&sig, &sig_len, data, sizeof(data), &abstract);
+    REQUIRE(rc == -1);
   }
 }
 
