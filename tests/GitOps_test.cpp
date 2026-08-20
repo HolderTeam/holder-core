@@ -7,6 +7,11 @@
 #include "git/GitOps.h"
 #include "core_test_helpers.h"
 
+TEST_CASE("GitOps default credential-provider hook is a no-op", "[git]") {
+  holder::git::RealGitOps ops;
+  REQUIRE_NOTHROW(ops.GitOps::set_credential_provider(nullptr));
+}
+
 TEST_CASE("RealGitOps probe_remote throws when repo is not opened", "[git]") {
   holder::git::RealGitOps ops;
   REQUIRE_THROWS(ops.probe_remote("origin"));
