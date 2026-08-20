@@ -435,7 +435,7 @@ int holder_context_open(
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
-    return set_unknown_exception(out_error);
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }
 }
 
@@ -473,7 +473,7 @@ int holder_project_list(holder_context* context, char** out_json, holder_error**
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
-    return set_unknown_exception(out_error);
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }
 }
 
@@ -518,7 +518,7 @@ int holder_card_list(
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
-    return set_unknown_exception(out_error);
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }
 }
 
@@ -566,7 +566,7 @@ int holder_card_get_content(
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
-    return set_unknown_exception(out_error);
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }
 }
 
@@ -616,7 +616,7 @@ int holder_project_create(
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
-    return set_unknown_exception(out_error);
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }
 }
 
@@ -663,7 +663,7 @@ int holder_project_rename(
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
-    return set_unknown_exception(out_error);
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }
 }
 
@@ -690,7 +690,7 @@ int holder_project_delete(holder_context* context, const char* project_id, holde
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
-    return set_unknown_exception(out_error);
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }
 }
 
@@ -747,7 +747,7 @@ int holder_card_create(
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
-    return set_unknown_exception(out_error);
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }
 }
 
@@ -799,7 +799,7 @@ int holder_card_update_content(
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
-    return set_unknown_exception(out_error);
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }
 }
 
@@ -821,7 +821,7 @@ int holder_card_delete(holder_context* context, const char* card_id, holder_erro
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
-    return set_unknown_exception(out_error);
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }
 }
 
@@ -869,7 +869,7 @@ int holder_card_search(
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
-    return set_unknown_exception(out_error);
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }
 }
 
@@ -888,7 +888,7 @@ int holder_reindex(holder_context* context, holder_error** out_error) {
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
-    return set_unknown_exception(out_error);
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }
 }
 
@@ -942,7 +942,7 @@ int holder_ensure_default_project(
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
-    return set_unknown_exception(out_error);
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }
 }
 
@@ -1031,7 +1031,7 @@ int holder_git_set_ssh_signer(
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
-    return set_unknown_exception(out_error);
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }
 }
 
@@ -1078,7 +1078,7 @@ int holder_project_update_git_remote(
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
-    return set_unknown_exception(out_error);
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }
 }
 
@@ -1143,7 +1143,7 @@ int holder_git_test_remote(
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
-    return set_unknown_exception(out_error);
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }
 }
 
@@ -1238,7 +1238,7 @@ int holder_git_push(
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
-    return set_unknown_exception(out_error);
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }
 }
 
@@ -1323,7 +1323,7 @@ int holder_git_pull(
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
-    return set_unknown_exception(out_error);
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }
 }
 
@@ -1369,7 +1369,7 @@ int holder_git_sync_status(
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
-    return set_unknown_exception(out_error);
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }
 }
 
@@ -1526,7 +1526,7 @@ int holder_git_sync_if_due(
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
-    return set_unknown_exception(out_error);
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }
 }
 
@@ -1577,7 +1577,7 @@ int holder_keyring_set_provider(
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
-    return set_unknown_exception(out_error);
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }
 }
 
@@ -1643,7 +1643,7 @@ int holder_encryption_check(
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
-    return set_unknown_exception(out_error);
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }
 }
 
@@ -1706,7 +1706,7 @@ int holder_recovery_token_export(
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
-    return set_unknown_exception(out_error);
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }
 }
 
@@ -1757,7 +1757,7 @@ int holder_recovery_token_import(
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
-    return set_unknown_exception(out_error);
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }
 }
 
@@ -1800,7 +1800,7 @@ int holder_recovery_token_inspect(
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
-    return set_unknown_exception(out_error);
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }
 }
 
@@ -1924,7 +1924,7 @@ int holder_recovery_token_import_global(
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
-    return set_unknown_exception(out_error);
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }
 }
 
