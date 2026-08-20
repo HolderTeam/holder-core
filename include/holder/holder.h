@@ -283,7 +283,7 @@ int holder_git_sync_if_due(
 // stored via the host OS's own keyring on desktop (libsecret/Keychain/Windows
 // Credential Manager). Android has none of those; holder_keyring_set_provider
 // installs a substitute for the whole process, backed by whatever the caller
-// wants (Android: Keystore-backed EncryptedSharedPreferences via JNI).
+// wants (Android: an AndroidKeyStore-encrypted store, via JNI).
 //
 // kind is 0 for a generic secret (identified by service+account) or 1 for a
 // project encryption key (identified by project_id+account; service is empty).
@@ -336,6 +336,79 @@ int holder_keyring_set_provider(
     holder_keyring_remove_fn remove_fn,
     void* user_data,
     holder_destroy_fn destroy_user_data,
+    holder_error** out_error
+);
+
+// -- Encryption / recovery --
+
+// Runs the encrypted_git safety check (verifies every file under the
+// project's cards/ directory has an encryption envelope header) and reports
+// the project's privacy mode. For a "plain" project, *out_json's "check" is
+// always {ok: true, ...} without touching disk -- there's nothing to check.
+// Sets *out_json to {project_id, privacy_mode,
+// check: {ok, checked_files, unsafe_files, unsafe_paths, message}}.
+int holder_encryption_check(
+    holder_context* context,
+    const char* project_id,
+    char** out_json,
+    holder_error** out_error
+);
+
+// Exports a PIN-protected recovery token for project_id's encryption key,
+// name, and configured git remote -- meant to be moved to another device
+// (physically or otherwise) and consumed by holder_recovery_token_import or
+// holder_recovery_token_import_global there. Fails if the project has no
+// key material configured (i.e. isn't encrypted_git).
+// Sets *out_json to {project_id, key_id, recovery_token}.
+int holder_recovery_token_export(
+    holder_context* context,
+    const char* project_id,
+    const char* pin,
+    char** out_json,
+    holder_error** out_error
+);
+
+// Imports a recovery token into an *existing* project (project_id must
+// already match the token's own project_id, or this fails) -- e.g. to
+// recover after this device's own copy of the key was lost without losing
+// the project itself. See holder_recovery_token_import_global for the
+// device-setup case where the project doesn't exist yet.
+// Sets *out_json to {project_id}.
+int holder_recovery_token_import(
+    holder_context* context,
+    const char* project_id,
+    const char* pin,
+    const char* recovery_token,
+    char** out_json,
+    holder_error** out_error
+);
+
+// Decrypts and returns a recovery token's metadata without importing
+// anything -- lets a caller show the user what they're about to recover
+// (project name, whether a remote is included) before committing. Not
+// scoped to a context, since it has no side effects at all.
+// Sets *out_json to {project_id, project_key_id, project_name,
+// git_remote_url}, where project_name/git_remote_url are null if the token
+// didn't include them.
+int holder_recovery_token_inspect(
+    const char* pin,
+    const char* recovery_token,
+    char** out_json,
+    holder_error** out_error
+);
+
+// The device-setup path: given just a PIN and a recovery token (no known
+// project_id), recovers the project -- creating it first if this device has
+// never seen it before -- and, if the token includes a remote hint,
+// configures that remote and attempts an initial pull.
+// Sets *out_json to {project_id, project_created, remote_hint_present,
+// remote_configured, remote_error, pull_status, pull_error}, mirroring
+// holder-daemon's POST /recovery-token/import response shape.
+int holder_recovery_token_import_global(
+    holder_context* context,
+    const char* pin,
+    const char* recovery_token,
+    char** out_json,
     holder_error** out_error
 );
 

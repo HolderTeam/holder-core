@@ -11,6 +11,7 @@
 #include "model/Project.h"
 #include "platform/Db.h"
 #include "privacy/PlatformKeyring.h"
+#include "privacy/ProjectPrivacy.h"
 #include "project/ProjectRepo.h"
 
 #include <git2.h>
@@ -113,6 +114,50 @@ void seed_git_project(
 
   holder::project::ProjectRepo repo(db);
   repo.create(project);
+}
+
+// Seeds an encrypted_git project with real key material (generating it via
+// ensure_encrypted_project_ready, exactly like a real project creation
+// would), so recovery-token tests have something real to export/import.
+// Callers must set HOLDER_TEST_KEYSTORE_DIR (e.g. via EnvGuard) so key
+// storage doesn't touch a real platform keyring.
+std::string seed_encrypted_project(
+    const std::filesystem::path& data_dir,
+    const std::string& project_id,
+    const std::filesystem::path& root_path,
+    const std::string& name = "Encrypted Project",
+    const std::optional<std::string>& remote_url = std::nullopt
+) {
+  const auto db_path = data_dir / "server" / "holder.db";
+  std::filesystem::create_directories(db_path.parent_path());
+  holder::platform::Db db;
+  db.open(db_path);
+  db.exec(read_schema_sql());
+
+  holder::model::Project project;
+  project.project_id = project_id;
+  project.name = name;
+  project.root_path = root_path.string();
+  project.git_remote_url = remote_url;
+  project.privacy_mode = "encrypted_git";
+  project.created_at = 10;
+  project.updated_at = 20;
+
+  holder::project::ProjectRepo repo(db);
+  repo.create(project);
+
+  holder::git::RealGitOps git;
+  holder::privacy::ensure_encrypted_project_ready(
+      git,
+      repo,
+      project_id,
+      project.root_path,
+      std::nullopt,
+      20,
+      [project_id]() { return "key-" + project_id; }
+  );
+
+  return repo.get(project_id).value().project_key_id.value();
 }
 
 // A bare repo, unlike GitRepo::open_or_init, accepts a non-force push to its
@@ -1434,4 +1479,254 @@ TEST_CASE("C API keyring_set_provider round-trips lookup/store/remove through th
   REQUIRE(store.find("acct") == store.end());
 
   holder::privacy::platform_keyring_clear_external_provider();
+}
+
+TEST_CASE("C API encryption_check reports plain projects safe without touching disk", "[capi][privacy]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(holder_encryption_check(context, "project-1", &json, &error) == HOLDER_OK);
+  const auto body = nlohmann::json::parse(json);
+  REQUIRE(body["privacy_mode"] == "plain");
+  REQUIRE(body["check"]["ok"] == true);
+  REQUIRE(body["check"]["checked_files"] == 0);
+
+  holder_string_free(json);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API encryption_check finds encrypted cards safe", "[capi][privacy]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  holder::test::EnvGuard keystore_env("HOLDER_TEST_KEYSTORE_DIR", (data_dir / "keystore").string());
+  seed_encrypted_project(data_dir, "project-1", data_dir / "repo");
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(holder_card_create(context, "project-1", "Secret", "hidden", nullptr, &json, &error) == HOLDER_OK);
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(holder_encryption_check(context, "project-1", &json, &error) == HOLDER_OK);
+  const auto body = nlohmann::json::parse(json);
+  REQUIRE(body["privacy_mode"] == "encrypted_git");
+  REQUIRE(body["check"]["ok"] == true);
+  REQUIRE(body["check"]["checked_files"] == 1);
+  REQUIRE(body["check"]["unsafe_files"] == 0);
+
+  holder_string_free(json);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API recovery_token_export requires key material and a non-empty pin", "[capi][privacy]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(holder_recovery_token_export(context, "project-1", "", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+
+  REQUIRE(
+      holder_recovery_token_export(context, "project-1", "1234", &json, &error) == HOLDER_ERROR_RUNTIME
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("no key material") != std::string::npos);
+  holder_error_destroy(error);
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API recovery_token_export/inspect/import round-trip through a real encrypted project", "[capi][privacy]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  holder::test::EnvGuard keystore_env("HOLDER_TEST_KEYSTORE_DIR", (data_dir / "keystore").string());
+  const auto key_id = seed_encrypted_project(
+      data_dir,
+      "project-1",
+      data_dir / "repo",
+      "My Notes",
+      "git@example.com:org/repo.git"
+  );
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(holder_recovery_token_export(context, "project-1", "1234", &json, &error) == HOLDER_OK);
+  const auto exported = nlohmann::json::parse(json);
+  REQUIRE(exported["project_id"] == "project-1");
+  REQUIRE(exported["key_id"] == key_id);
+  const std::string token = exported["recovery_token"].get<std::string>();
+  REQUIRE_FALSE(token.empty());
+  holder_string_free(json);
+
+  SECTION("inspect reports the token's metadata without importing anything") {
+    json = nullptr;
+    REQUIRE(holder_recovery_token_inspect("1234", token.c_str(), &json, &error) == HOLDER_OK);
+    const auto metadata = nlohmann::json::parse(json);
+    REQUIRE(metadata["project_id"] == "project-1");
+    REQUIRE(metadata["project_key_id"] == key_id);
+    REQUIRE(metadata["project_name"] == "My Notes");
+    REQUIRE(metadata["git_remote_url"] == "git@example.com:org/repo.git");
+    holder_string_free(json);
+  }
+
+  SECTION("inspect with the wrong pin fails") {
+    json = nullptr;
+    REQUIRE(holder_recovery_token_inspect("0000", token.c_str(), &json, &error) == HOLDER_ERROR_RUNTIME);
+    REQUIRE(error != nullptr);
+    holder_error_destroy(error);
+  }
+
+  SECTION("import into the same existing project succeeds") {
+    json = nullptr;
+    REQUIRE(
+        holder_recovery_token_import(context, "project-1", "1234", token.c_str(), &json, &error) ==
+        HOLDER_OK
+    );
+    const auto body = nlohmann::json::parse(json);
+    REQUIRE(body["project_id"] == "project-1");
+    holder_string_free(json);
+  }
+
+  SECTION("import into a nonexistent project fails") {
+    json = nullptr;
+    REQUIRE(
+        holder_recovery_token_import(context, "does-not-exist", "1234", token.c_str(), &json, &error) ==
+        HOLDER_ERROR_RUNTIME
+    );
+    REQUIRE(error != nullptr);
+    holder_error_destroy(error);
+  }
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API recovery_token_import_global creates a project when none exists, with no remote hint", "[capi][privacy]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  holder::test::EnvGuard keystore_env("HOLDER_TEST_KEYSTORE_DIR", (data_dir / "keystore").string());
+  const auto key_id =
+      seed_encrypted_project(data_dir, "project-1", data_dir / "repo", "Recovered Notes");
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(holder_recovery_token_export(context, "project-1", "1234", &json, &error) == HOLDER_OK);
+  const std::string token = nlohmann::json::parse(json)["recovery_token"].get<std::string>();
+  holder_string_free(json);
+
+  // A fresh context/data_dir, as if this were a different device that has
+  // never heard of project-1.
+  const auto other_data_dir = holder::test::make_temp_dir();
+  holder_context* other_context = nullptr;
+  REQUIRE(
+      holder_context_open(other_data_dir.string().c_str(), schema.c_str(), &other_context, &error) ==
+      HOLDER_OK
+  );
+
+  json = nullptr;
+  REQUIRE(
+      holder_recovery_token_import_global(other_context, "1234", token.c_str(), &json, &error) ==
+      HOLDER_OK
+  );
+  const auto body = nlohmann::json::parse(json);
+  REQUIRE(body["project_id"] == "project-1");
+  REQUIRE(body["project_created"] == true);
+  REQUIRE(body["remote_hint_present"] == false);
+  REQUIRE(body["remote_configured"] == false);
+  REQUIRE(body["pull_status"] == "not_attempted");
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(holder_project_list(other_context, &json, &error) == HOLDER_OK);
+  const auto projects = nlohmann::json::parse(json);
+  REQUIRE(projects.size() == 1);
+  REQUIRE(projects[0]["project_id"] == "project-1");
+  REQUIRE(projects[0]["name"] == "Recovered Notes");
+  REQUIRE(projects[0]["privacy_mode"] == "encrypted_git");
+  holder_string_free(json);
+
+  // Calling it again with an already-recovered project reports project_created=false.
+  json = nullptr;
+  REQUIRE(
+      holder_recovery_token_import_global(other_context, "1234", token.c_str(), &json, &error) ==
+      HOLDER_OK
+  );
+  REQUIRE(nlohmann::json::parse(json)["project_created"] == false);
+  holder_string_free(json);
+
+  holder_context_destroy(other_context);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API recovery_token_import_global configures and pulls a remote hint", "[capi][privacy]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  holder::test::EnvGuard keystore_env("HOLDER_TEST_KEYSTORE_DIR", (data_dir / "keystore").string());
+
+  const auto remote_dir = data_dir / "remote";
+  init_bare_repo(remote_dir);
+
+  const auto key_id = seed_encrypted_project(
+      data_dir,
+      "project-1",
+      data_dir / "repo",
+      "Synced Notes",
+      remote_dir.string()
+  );
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  // Seed the remote with the project's (encrypted) content so the recovering
+  // device has something to pull.
+  char* json = nullptr;
+  REQUIRE(holder_card_create(context, "project-1", "Secret", "hidden", nullptr, &json, &error) == HOLDER_OK);
+  holder_string_free(json);
+  REQUIRE(holder_git_push(context, "project-1", nullptr, 1, &json, &error) == HOLDER_OK);
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(holder_recovery_token_export(context, "project-1", "1234", &json, &error) == HOLDER_OK);
+  const std::string token = nlohmann::json::parse(json)["recovery_token"].get<std::string>();
+  holder_string_free(json);
+
+  const auto other_data_dir = holder::test::make_temp_dir();
+  holder_context* other_context = nullptr;
+  REQUIRE(
+      holder_context_open(other_data_dir.string().c_str(), schema.c_str(), &other_context, &error) ==
+      HOLDER_OK
+  );
+
+  json = nullptr;
+  REQUIRE(
+      holder_recovery_token_import_global(other_context, "1234", token.c_str(), &json, &error) ==
+      HOLDER_OK
+  );
+  const auto body = nlohmann::json::parse(json);
+  REQUIRE(body["project_created"] == true);
+  REQUIRE(body["remote_hint_present"] == true);
+  REQUIRE(body["remote_configured"] == true);
+  REQUIRE(body["pull_status"] == "succeeded");
+  holder_string_free(json);
+
+  holder_context_destroy(other_context);
+  holder_context_destroy(context);
 }

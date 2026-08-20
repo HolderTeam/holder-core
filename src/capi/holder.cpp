@@ -12,6 +12,7 @@
 #include "privacy/PlatformKeyring.h"
 #include "privacy/ProjectPrivacy.h"
 #include "project/DefaultProject.h"
+#include "project/ProjectPaths.h"
 #include "project/ProjectRepo.h"
 #include "project/ProjectStore.h"
 #include "project/ProjectSyncRepo.h"
@@ -1533,6 +1534,347 @@ int holder_keyring_set_provider(
           return handle->remove(remove_fn, ref);
         }
     );
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);
+  }
+}
+
+int holder_encryption_check(
+    holder_context* context,
+    const char* project_id,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (project_id == nullptr || project_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "project_id must not be empty");
+  }
+
+  try {
+    holder::project::ProjectRepo repo(context->db);
+    const auto project_opt = repo.get(project_id);
+    if (!project_opt.has_value()) {
+      return set_error(out_error, HOLDER_ERROR_RUNTIME, "project not found: " + std::string(project_id));
+    }
+    const auto& project = project_opt.value();
+
+    nlohmann::json body = {
+        {"project_id", project_id},
+        {"privacy_mode", project.privacy_mode},
+    };
+
+    if (project.privacy_mode != "encrypted_git") {
+      body["check"] = {
+          {"ok", true},
+          {"checked_files", 0},
+          {"unsafe_files", 0},
+          {"unsafe_paths", nlohmann::json::array()},
+          {"message", "Project is plain mode; privacy check not required."},
+      };
+    } else {
+      const auto check = holder::privacy::run_encryption_safety_check(project.root_path);
+      body["check"] = {
+          {"ok", check.ok},
+          {"checked_files", check.checked_files},
+          {"unsafe_files", check.unsafe_paths.size()},
+          {"unsafe_paths", check.unsafe_paths},
+          {"message", check.message},
+      };
+    }
+
+    auto* out = duplicate_string(body.dump());
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    }
+    *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);
+  }
+}
+
+int holder_recovery_token_export(
+    holder_context* context,
+    const char* project_id,
+    const char* pin,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (project_id == nullptr || project_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "project_id must not be empty");
+  }
+  if (pin == nullptr || pin[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "pin must not be empty");
+  }
+
+  try {
+    holder::project::ProjectRepo repo(context->db);
+    const auto project_opt = repo.get(project_id);
+    if (!project_opt.has_value()) {
+      return set_error(out_error, HOLDER_ERROR_RUNTIME, "project not found: " + std::string(project_id));
+    }
+    const auto& project = project_opt.value();
+    if (!project.project_key_id.has_value()) {
+      return set_error(out_error, HOLDER_ERROR_RUNTIME, "project has no key material configured");
+    }
+
+    const std::string token = holder::privacy::export_recovery_token(
+        project_id,
+        project.project_key_id.value(),
+        pin,
+        project.name,
+        project.git_remote_url
+    );
+
+    nlohmann::json body = {
+        {"project_id", project_id},
+        {"key_id", project.project_key_id.value()},
+        {"recovery_token", token},
+    };
+
+    auto* out = duplicate_string(body.dump());
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    }
+    *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);
+  }
+}
+
+int holder_recovery_token_import(
+    holder_context* context,
+    const char* project_id,
+    const char* pin,
+    const char* recovery_token,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (project_id == nullptr || project_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "project_id must not be empty");
+  }
+  if (pin == nullptr || pin[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "pin must not be empty");
+  }
+  if (recovery_token == nullptr || recovery_token[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "recovery_token must not be empty");
+  }
+
+  try {
+    holder::project::ProjectRepo repo(context->db);
+    if (!repo.get(project_id).has_value()) {
+      return set_error(out_error, HOLDER_ERROR_RUNTIME, "project not found: " + std::string(project_id));
+    }
+
+    holder::privacy::import_recovery_token(repo, project_id, pin, recovery_token, now_epoch_seconds());
+
+    nlohmann::json body = {{"project_id", project_id}};
+    auto* out = duplicate_string(body.dump());
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    }
+    *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);
+  }
+}
+
+int holder_recovery_token_inspect(
+    const char* pin,
+    const char* recovery_token,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  if (pin == nullptr || pin[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "pin must not be empty");
+  }
+  if (recovery_token == nullptr || recovery_token[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "recovery_token must not be empty");
+  }
+
+  try {
+    const auto metadata = holder::privacy::inspect_recovery_token(pin, recovery_token);
+    nlohmann::json body = {
+        {"project_id", metadata.project_id},
+        {"project_key_id", metadata.project_key_id},
+        {"project_name", optional_json(metadata.project_name)},
+        {"git_remote_url", optional_json(metadata.git_remote_url)},
+    };
+
+    auto* out = duplicate_string(body.dump());
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    }
+    *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);
+  }
+}
+
+int holder_recovery_token_import_global(
+    holder_context* context,
+    const char* pin,
+    const char* recovery_token,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (pin == nullptr || pin[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "pin must not be empty");
+  }
+  if (recovery_token == nullptr || recovery_token[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "recovery_token must not be empty");
+  }
+
+  try {
+    const auto metadata = holder::privacy::inspect_recovery_token(pin, recovery_token);
+
+    holder::project::ProjectRepo repo(context->db);
+    holder::project::ProjectSyncRepo sync_repo(context->db);
+    const auto now = now_epoch_seconds();
+
+    bool project_created = false;
+    auto project_opt = repo.get(metadata.project_id);
+    if (!project_opt.has_value()) {
+      holder::model::Project project;
+      project.project_id = metadata.project_id;
+      project.name = metadata.project_name.has_value() && !metadata.project_name->empty()
+                         ? metadata.project_name.value()
+                         : "Recovered Project";
+      project.privacy_mode = "encrypted_git";
+      project.created_at = now;
+      project.updated_at = now;
+      const auto slug = holder::core::slugify(project.name);
+      project.root_path = holder::core::unique_project_root(context->data_dir / "projects", slug, repo.list());
+      repo.create(project);
+      project_created = true;
+      project_opt = repo.get(metadata.project_id);
+    }
+
+    holder::privacy::import_recovery_token(repo, metadata.project_id, pin, recovery_token, now);
+
+    const bool remote_hint_present =
+        metadata.git_remote_url.has_value() && !metadata.git_remote_url->empty();
+    bool remote_configured = false;
+    std::string pull_status = "not_attempted";
+    std::string remote_error;
+    std::string pull_error;
+
+    if (remote_hint_present) {
+      const auto refreshed = repo.get(metadata.project_id);
+      if (refreshed.has_value()) {
+        auto git = open_project_git(context, refreshed.value());
+        try {
+          git->set_remote("origin", metadata.git_remote_url.value());
+          remote_configured = true;
+        } catch (const std::exception& ex) {
+          remote_error = ex.what();
+        }
+
+        if (remote_configured) {
+          try {
+            git->pull_remote_ff_only("origin");
+            pull_status = "succeeded";
+            sync_repo.record_pull_result(metadata.project_id, pull_status, true, std::nullopt, now);
+          } catch (const std::exception& ex) {
+            pull_status = "failed";
+            pull_error = ex.what();
+            sync_repo.record_pull_result(
+                metadata.project_id,
+                pull_status,
+                false,
+                std::optional<std::string>(pull_error),
+                now
+            );
+          }
+        }
+        try {
+          refresh_sync_activity_counts(context->db, metadata.project_id, refreshed->root_path, now);
+        } catch (const std::exception&) {
+          // Best-effort only; metrics refresh failure does not fail import.
+        }
+      }
+    }
+
+    nlohmann::json body = {
+        {"project_id", metadata.project_id},
+        {"project_created", project_created},
+        {"remote_hint_present", remote_hint_present},
+        {"remote_configured", remote_configured},
+        {"remote_error", remote_error.empty() ? nlohmann::json(nullptr) : nlohmann::json(remote_error)},
+        {"pull_status", pull_status},
+        {"pull_error", pull_error.empty() ? nlohmann::json(nullptr) : nlohmann::json(pull_error)},
+    };
+
+    auto* out = duplicate_string(body.dump());
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+    }
+    *out_json = out;
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
     return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
