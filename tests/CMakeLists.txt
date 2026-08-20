@@ -41,6 +41,7 @@ add_executable(holder_core_tests
   ProjectStore_test.cpp
   ProjectSyncPolicy_test.cpp
   ProjectSyncRepo_test.cpp
+  PullConflictResolution_test.cpp
   PushResult_test.cpp
   RealFs_test.cpp
   Reindexer_test.cpp
