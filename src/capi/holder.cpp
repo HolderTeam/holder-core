@@ -2,6 +2,7 @@
 
 #include "card/CardRepo.h"
 #include "card/CardStore.h"
+#include "card/LinkKindCatalog.h"
 #include "card/LinkRepo.h"
 #include "card/TagRepo.h"
 #include "git/EcdsaDerSigningCredentialProvider.h"
@@ -1352,6 +1353,35 @@ int holder_project_list_tags(
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
   } catch (...) {
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
+  }  // LCOV_EXCL_LINE
+}
+
+int holder_link_kind_list(char** out_json, holder_error** out_error) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  try {
+    nlohmann::json body = nlohmann::json::array();
+    for (const auto& entry : holder::core::link_kind_catalog()) {
+      body.push_back({{"id", entry.id}, {"forward", entry.forward_label}, {"reverse", entry.reverse_label}});
+    }
+
+    auto* out = duplicate_string(body.dump());
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+    }
+
+    *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {  // LCOV_EXCL_LINE
+    return set_exception(out_error, e);  // LCOV_EXCL_LINE
+  } catch (...) {  // LCOV_EXCL_LINE
     return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }  // LCOV_EXCL_LINE
 }

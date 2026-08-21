@@ -217,6 +217,16 @@ int holder_project_list_tags(
     holder_error** out_error
 );
 
+// Lists Holder's full built-in vocabulary of card_links.kind values with
+// curated English labels: *out_json becomes [{"id": "depends_on",
+// "forward": "Depends on", "reverse": "Required by"}, ...]. forward is how
+// the relationship reads from the linking (outgoing) card's side, reverse
+// from the linked-to (backlink) card's side. kind on a link isn't
+// constrained to this list -- a kind outside it just has no known label
+// here; callers should fall back to a humanized display of the raw string.
+// Not scoped to a context, since this is static reference data.
+int holder_link_kind_list(char** out_json, holder_error** out_error);
+
 // Rebuilds the full-text search index from the database. Safe to call anytime;
 // mainly useful to backfill data written before FTS indexing was wired up.
 int holder_reindex(holder_context* context, holder_error** out_error);

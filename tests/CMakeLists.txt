@@ -31,6 +31,7 @@ add_executable(holder_core_tests
   GitCredentialProvider_test.cpp
   GitOps_test.cpp
   GitRepo_test.cpp
+  LinkKindCatalog_test.cpp
   LinkRepo_test.cpp
   Migrations_test.cpp
   PrivacyCryptoService_test.cpp

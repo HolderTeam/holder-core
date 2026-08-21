@@ -129,6 +129,7 @@ add_library(holder STATIC
   src/card/CardPaths.cpp
   src/card/CardRepo.cpp
   src/card/CardStore.cpp
+  src/card/LinkKindCatalog.cpp
   src/card/LinkRepo.cpp
   src/card/TagExtractor.cpp
   src/card/TagRepo.cpp

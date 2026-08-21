@@ -4221,3 +4221,34 @@ TEST_CASE(
 TEST_CASE("C API error_message returns an empty string for a null error", "[capi]") {
   REQUIRE(std::string(holder_error_message(nullptr)) == "");
 }
+
+TEST_CASE("C API link_kind_list returns the full catalog, no context required", "[capi]") {
+  holder_error* error = nullptr;
+  char* json = nullptr;
+
+  REQUIRE(holder_link_kind_list(&json, &error) == HOLDER_OK);
+  REQUIRE(error == nullptr);
+  REQUIRE(json != nullptr);
+
+  const auto body = nlohmann::json::parse(json);
+  REQUIRE(body.size() == 100);
+
+  bool found_depends_on = false;
+  for (const auto& entry : body) {
+    if (entry.at("id") == "depends_on") {
+      found_depends_on = true;
+      REQUIRE(entry.at("forward") == "Depends on");
+      REQUIRE(entry.at("reverse") == "Required by");
+    }
+  }
+  REQUIRE(found_depends_on);
+
+  holder_string_free(json);
+}
+
+TEST_CASE("C API link_kind_list reports a null out_json", "[capi]") {
+  holder_error* error = nullptr;
+  REQUIRE(holder_link_kind_list(nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+}
