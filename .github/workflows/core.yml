@@ -46,6 +46,7 @@ jobs:
             libsqlite3-dev \
             libsodium-dev \
             libgit2-dev \
+            libmd4c-dev \
             libsecret-1-dev \
             lcov \
             gcovr
@@ -102,6 +103,7 @@ jobs:
             sqlite \
             libsodium \
             libgit2 \
+            md4c \
             openssl@3
 
       - name: Configure
