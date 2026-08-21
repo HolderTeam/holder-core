@@ -7,7 +7,10 @@
 namespace holder::core {
 namespace {
 
-constexpr std::string_view kDelimiter = "---\n";
+constexpr std::string_view kLfOpeningDelimiter = "---\n";
+constexpr std::string_view kLfClosingDelimiter = "\n---\n";
+constexpr std::string_view kCrlfOpeningDelimiter = "---\r\n";
+constexpr std::string_view kCrlfClosingDelimiter = "\r\n---\r\n";
 
 } // namespace
 
@@ -61,16 +64,25 @@ ParsedCardFile parse_card_file(const std::string& raw) {
   ParsedCardFile parsed;
   parsed.body = raw;
 
-  if (raw.rfind(kDelimiter, 0) != 0) {
+  std::string_view opening_delimiter;
+  std::string_view closing_delimiter;
+  if (raw.rfind(kCrlfOpeningDelimiter, 0) == 0) {
+    opening_delimiter = kCrlfOpeningDelimiter;
+    closing_delimiter = kCrlfClosingDelimiter;
+  } else if (raw.rfind(kLfOpeningDelimiter, 0) == 0) {
+    opening_delimiter = kLfOpeningDelimiter;
+    closing_delimiter = kLfClosingDelimiter;
+  } else {
     return parsed;
   }
 
-  const auto end = raw.find("\n---\n", kDelimiter.size());
+  const auto end = raw.find(closing_delimiter, opening_delimiter.size());
   if (end == std::string::npos) {
     return parsed;
   }
 
-  const std::string yaml_text = raw.substr(kDelimiter.size(), end - kDelimiter.size());
+  const std::string yaml_text =
+      raw.substr(opening_delimiter.size(), end - opening_delimiter.size());
   try {
     const auto node = YAML::Load(yaml_text);
     if (!node || !node.IsMap()) {
@@ -118,7 +130,7 @@ ParsedCardFile parse_card_file(const std::string& raw) {
       }
     }
 
-    parsed.body = raw.substr(end + 5);
+    parsed.body = raw.substr(end + closing_delimiter.size());
     return parsed;
   } catch (const std::exception&) {
     return parsed;

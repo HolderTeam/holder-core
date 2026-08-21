@@ -17,6 +17,12 @@ constexpr const char* kEnvelopeMagic = "HolderPriv1";
 constexpr unsigned char kEnvelopeVersion = 1;
 constexpr const char* kCipherName = "xchacha20poly1305";
 
+void strip_trailing_carriage_return(std::string& line) {
+  if (!line.empty() && line.back() == '\r') {
+    line.pop_back();
+  }
+}
+
 void ensure_sodium_ready() {
   if (sodium_init() < 0) {
     throw holder::privacy::PrivacyError(
@@ -63,7 +69,14 @@ EnvelopeParts parse_envelope(const std::string& envelope) {
   std::string meta_line;
   std::string cipher_line;
 
-  if (!std::getline(in, magic) || magic != kEnvelopeMagic) {
+  if (!std::getline(in, magic)) {
+    throw holder::privacy::PrivacyError(
+        holder::privacy::PrivacyErrorCode::EnvelopeInvalid,
+        "invalid privacy envelope magic"
+    );
+  }
+  strip_trailing_carriage_return(magic);
+  if (magic != kEnvelopeMagic) {
     throw holder::privacy::PrivacyError(
         holder::privacy::PrivacyErrorCode::EnvelopeInvalid,
         "invalid privacy envelope magic"
@@ -81,6 +94,8 @@ EnvelopeParts parse_envelope(const std::string& envelope) {
         "privacy envelope ciphertext missing"
     );
   }
+  strip_trailing_carriage_return(meta_line);
+  strip_trailing_carriage_return(cipher_line);
 
   const auto meta = nlohmann::json::parse(meta_line);
   if (!meta.is_object()) {

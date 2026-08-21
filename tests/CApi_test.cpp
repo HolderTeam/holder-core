@@ -309,7 +309,9 @@ TEST_CASE("C API creates a plain project defaulting root_path and privacy_mode",
   REQUIRE_FALSE(body["project_id"].get<std::string>().empty());
   const std::string project_id = body["project_id"].get<std::string>();
   const std::string root_path = body["root_path"].get<std::string>();
-  REQUIRE(root_path.find("projects/home") != std::string::npos);
+  const std::filesystem::path project_root(root_path);
+  REQUIRE(project_root.filename() == "home");
+  REQUIRE(project_root.parent_path().filename() == "projects");
   // A plain project with no remote is not git-initialized until its first
   // write (e.g. a card create), to avoid creating empty repos up front.
   REQUIRE_FALSE(std::filesystem::exists(root_path));

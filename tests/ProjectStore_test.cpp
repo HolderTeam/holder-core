@@ -91,7 +91,7 @@ TEST_CASE("ProjectStore create configures a git remote when one is provided", "[
   holder::model::Project input;
   input.name = "Home";
   input.privacy_mode = "plain";
-  input.git_remote_url = (dir / "remote.git").string();
+  input.git_remote_url = "https://example.invalid/repo.git";
 
   const auto created = store.create(input, counting_uuid_v4("id"), dir / "projects");
 

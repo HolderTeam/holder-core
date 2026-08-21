@@ -31,6 +31,19 @@ std::string join_lines3(const std::vector<std::string>& lines) {
   return lines[0] + "\n" + lines[1] + "\n" + lines[2] + "\n";
 }
 
+std::string with_crlf_line_endings(const std::string& text) {
+  std::string result;
+  result.reserve(text.size());
+  for (const char ch : text) {
+    if (ch == '\n') {
+      result += "\r\n";
+    } else {
+      result += ch;
+    }
+  }
+  return result;
+}
+
 } // namespace
 
 TEST_CASE("PrivacyCryptoService envelope round-trip", "[privacy]") {
@@ -42,6 +55,17 @@ TEST_CASE("PrivacyCryptoService envelope round-trip", "[privacy]") {
   REQUIRE(envelope.rfind("HolderPriv1\n", 0) == 0);
 
   const std::string decrypted = holder::privacy::decrypt_envelope_v1(envelope, key, key_id);
+  REQUIRE(decrypted == plaintext);
+}
+
+TEST_CASE("PrivacyCryptoService decrypts an envelope checked out with CRLF", "[privacy]") {
+  const auto key = holder::privacy::generate_random_key();
+  const std::string plaintext = "# Card\nBody\n";
+  const auto envelope = holder::privacy::encrypt_envelope_v1(plaintext, key, "key-123");
+
+  const auto decrypted = holder::privacy::decrypt_envelope_v1(
+      with_crlf_line_endings(envelope), key, "key-123"
+  );
   REQUIRE(decrypted == plaintext);
 }
 

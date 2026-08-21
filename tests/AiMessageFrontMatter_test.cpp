@@ -56,6 +56,24 @@ TEST_CASE("parse_ai_message_file falls back when no front matter", "[ai_message_
   REQUIRE(parsed.body == raw);
 }
 
+TEST_CASE("parse_ai_message_file accepts CRLF front matter", "[ai_message_front_matter]") {
+  const std::string raw = "---\r\n"
+                          "message_id: msg-1\r\n"
+                          "project_id: proj-1\r\n"
+                          "thread_id: thread-1\r\n"
+                          "role: user\r\n"
+                          "source: manual\r\n"
+                          "created_at: 10\r\n"
+                          "---\r\n"
+                          "Hello from Windows\r\n";
+
+  const auto parsed = holder::core::parse_ai_message_file(raw);
+  REQUIRE(parsed.has_front_matter);
+  REQUIRE(parsed.message.message_id == "msg-1");
+  REQUIRE(parsed.project_id == "proj-1");
+  REQUIRE(parsed.body == "Hello from Windows\r\n");
+}
+
 TEST_CASE(
     "render_ai_message_front_matter includes optional link label",
     "[ai_message_front_matter]"

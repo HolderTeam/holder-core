@@ -63,6 +63,25 @@ TEST_CASE("parse_card_file falls back when no front matter", "[card_front_matter
   REQUIRE(parsed.body == raw);
 }
 
+TEST_CASE("parse_card_file accepts CRLF front matter", "[card_front_matter]") {
+  const std::string raw = "---\r\n"
+                          "card_id: abcd1234\r\n"
+                          "project_id: proj-1\r\n"
+                          "title: Windows checkout\r\n"
+                          "created_at: 10\r\n"
+                          "updated_at: 20\r\n"
+                          "sort_key: 1.5\r\n"
+                          "rel_path: cards/ab/cd/abcd1234.md\r\n"
+                          "---\r\n"
+                          "Body text\r\n";
+
+  const auto parsed = holder::core::parse_card_file(raw);
+  REQUIRE(parsed.has_front_matter);
+  REQUIRE(parsed.card.card_id == "abcd1234");
+  REQUIRE(parsed.card.title == "Windows checkout");
+  REQUIRE(parsed.body == "Body text\r\n");
+}
+
 TEST_CASE("render_card_front_matter includes links", "[card_front_matter]") {
   holder::model::Card card;
   card.card_id = "abcd1234";
