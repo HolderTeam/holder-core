@@ -130,6 +130,8 @@ add_library(holder STATIC
   src/card/CardRepo.cpp
   src/card/CardStore.cpp
   src/card/LinkRepo.cpp
+  src/card/TagExtractor.cpp
+  src/card/TagRepo.cpp
   src/git/EcdsaDerSigningCredentialProvider.cpp
   src/git/GitOps.cpp
   src/git/GitRepo.cpp

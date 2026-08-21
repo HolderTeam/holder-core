@@ -50,6 +50,8 @@ add_executable(holder_core_tests
   ResourceRepo_test.cpp
   SecretStore_test.cpp
   StartupRecovery_test.cpp
+  TagExtractor_test.cpp
+  TagRepo_test.cpp
 )
 
 target_link_libraries(holder_core_tests PRIVATE

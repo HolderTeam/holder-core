@@ -7,6 +7,8 @@
 #include "card/CardPaths.h"
 #include "card/CardRepo.h"
 #include "card/LinkRepo.h"
+#include "card/TagExtractor.h"
+#include "card/TagRepo.h"
 #include "platform/Fs.h"
 #include "platform/Tx.h"
 #include "privacy/ProjectPrivacy.h"
@@ -176,6 +178,7 @@ Rebuilder::RebuildStats Rebuilder::rebuild_project(const holder::model::Project&
 
   holder::card::CardRepo card_repo(db_);
   holder::card::LinkRepo link_repo(db_);
+  holder::card::TagRepo tag_repo(db_);
 
   auto collect_files = [&](const std::filesystem::path& base) {
     std::vector<std::filesystem::path> out;
@@ -277,13 +280,20 @@ Rebuilder::RebuildStats Rebuilder::rebuild_project(const holder::model::Project&
       }
 
       card_repo.create(record.card);
-      if (fts_ && !record.card.deleted_at.has_value()) {
-        fts_->upsert_card(
-            record.card.card_id,
-            record.card.project_id,
-            record.card.title,
-            record.body
+      if (!record.card.deleted_at.has_value()) {
+        if (fts_) {
+          fts_->upsert_card(
+              record.card.card_id,
+              record.card.project_id,
+              record.card.title,
+              record.body
+          );
+        }
+        const auto extracted_tags = holder::core::extract_tags(record.body);
+        tag_repo.set_tags_for_card(
+            record.card.project_id, record.card.card_id, extracted_tags, record.card.created_at
         );
+        stats.tags += extracted_tags.size();
       }
       inserted_cards.insert(record.card.card_id);
       inserted[i] = true;

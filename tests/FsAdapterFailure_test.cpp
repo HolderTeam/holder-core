@@ -363,12 +363,13 @@ TEST_CASE("Rebuilder rebuilds cards/messages with defaults, links, trash and FTS
   card_link.created_at = 0; // rebuilt default path
   write_file(
       root / card_b.rel_path,
-      holder::core::render_card_front_matter(card_b, {card_link}) + "linked body\n"
+      holder::core::render_card_front_matter(card_b, {card_link}) + "linked body #todo\n"
   );
 
-  // Trash card without front matter -> deleted_at gets mtime.
+  // Trash card without front matter -> deleted_at gets mtime. Its #ghost tag must not surface
+  // in the rebuilt index -- trashed cards aren't tag-searchable, same as they aren't FTS-searchable.
   const auto card_t_rel = holder::core::card_trash_rel_path("dead9999");
-  write_file(root / card_t_rel, "trashed card body\n");
+  write_file(root / card_t_rel, "trashed card body #ghost\n");
 
   // Active message without front matter -> message_id/thread_id defaults + role/source defaults.
   const auto msg_a_rel = holder::core::ai_message_rel_path("mesa1234");
@@ -411,6 +412,7 @@ TEST_CASE("Rebuilder rebuilds cards/messages with defaults, links, trash and FTS
   REQUIRE(stats.ai_messages == 3);
   REQUIRE(stats.ai_threads == 3);
   REQUIRE(stats.links == 2);
+  REQUIRE(stats.tags == 1);
 
   // Derived title + created/updated fallback from mtime.
   const auto title =
@@ -462,6 +464,12 @@ TEST_CASE("Rebuilder rebuilds cards/messages with defaults, links, trash and FTS
   // FTS receives non-deleted rows.
   REQUIRE(fts.search_cards(project_id, "heading", 10, 0).size() >= 1);
   REQUIRE(fts.search_messages(project_id, "answer", 10, 0).size() >= 1);
+
+  // Tags were extracted from the active card's body and indexed; the trashed card's tag was not.
+  holder::card::TagRepo tags(db);
+  REQUIRE(tags.list_tags_for_card(project_id, "beef5678") == std::vector<std::string>{"todo"});
+  REQUIRE(tags.list_card_ids_with_tag(project_id, "todo") == std::vector<std::string>{"beef5678"});
+  REQUIRE(tags.list_card_ids_with_tag(project_id, "ghost").empty());
 }
 
 TEST_CASE("Rebuilder derive_title falls back when heading is blank", "[rebuild]") {

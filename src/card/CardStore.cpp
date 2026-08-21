@@ -3,6 +3,7 @@
 #include "card/CardFrontMatter.h"
 #include "card/CardPaths.h"
 #include "card/LinkRepo.h"
+#include "card/TagExtractor.h"
 #include "git/GitOps.h"
 #include "platform/Fs.h"
 #include "privacy/ProjectPrivacy.h"
@@ -80,6 +81,7 @@ CardStore::CardStore(
       git_(&resolve_git(git)),
       card_repo_(db),
       link_repo_(db),
+      tag_repo_(db),
       project_repo_(db),
       fts_(fts) {}
 
@@ -139,6 +141,9 @@ void CardStore::create(
   if (fts_) {
     fts_->upsert_card(card.card_id, card.project_id, card.title, content);
   }
+  tag_repo_.set_tags_for_card(
+      card.project_id, card.card_id, holder::core::extract_tags(content), card.created_at
+  );
 
   git_->commit("Add card " + card.title);
 }
@@ -193,6 +198,9 @@ void CardStore::update_content(
   if (fts_) {
     fts_->upsert_card(card.card_id, card.project_id, fts_title, content);
   }
+  tag_repo_.set_tags_for_card(
+      card.project_id, card_id, holder::core::extract_tags(content), updated_at
+  );
 
   if (!unchanged) {
     const std::string commit_title = title.has_value() ? title.value() : card.title;
@@ -343,6 +351,7 @@ void CardStore::trash(const std::string& card_id, long long deleted_at) {
   if (fts_) {
     fts_->delete_card(card_id);
   }
+  tag_repo_.delete_tags_for_card(card.project_id, card_id);
   git_->remove_path(card.rel_path);
   git_->stage_path(trash_rel);
   git_->commit("Delete card " + card.title);
@@ -378,11 +387,14 @@ void CardStore::restore(const std::string& card_id, long long updated_at) {
   assert_project_staged_blobs_safe(project, {card.rel_path});
 
   card_repo_.restore(card_id, updated_at);
+  const auto raw = fs_->read_file(dst_path);
+  const auto parsed = holder::core::parse_card_file(decode_card_blob(project, raw));
   if (fts_) {
-    const auto raw = fs_->read_file(dst_path);
-    const auto parsed = holder::core::parse_card_file(decode_card_blob(project, raw));
     fts_->upsert_card(card.card_id, card.project_id, card.title, parsed.body);
   }
+  tag_repo_.set_tags_for_card(
+      card.project_id, card_id, holder::core::extract_tags(parsed.body), updated_at
+  );
   git_->remove_path(trash_rel);
   git_->commit("Restore card " + card.title);
 }
@@ -407,6 +419,7 @@ void CardStore::hard_delete(const std::string& card_id) {
 
   link_repo_.delete_links_from(card.project_id, card.card_id);
   link_repo_.delete_links_to_typed(card.project_id, card.card_id, "card");
+  tag_repo_.delete_tags_for_card(card.project_id, card.card_id);
   card_repo_.remove(card.card_id);
   git_->commit("Permanently delete card " + card.title);
 }

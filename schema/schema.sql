@@ -82,6 +82,29 @@ CREATE INDEX IF NOT EXISTS idx_card_links_to
   ON card_links(project_id, to_card_id);
 
 -- ----------------------------
+-- Card tags: a disposable index over #tag occurrences in card bodies.
+-- Markdown source is the source of truth; this table is rebuilt from it,
+-- same as cards_fts and card_links.
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS card_tags (
+  project_id  TEXT NOT NULL,
+  card_id     TEXT NOT NULL,
+  tag         TEXT NOT NULL,             -- normalized lowercase
+  created_at  INTEGER NOT NULL,
+
+  FOREIGN KEY(project_id) REFERENCES projects(project_id) ON DELETE CASCADE,
+  FOREIGN KEY(card_id)    REFERENCES cards(card_id)       ON DELETE CASCADE,
+
+  PRIMARY KEY(project_id, card_id, tag)
+);
+
+CREATE INDEX IF NOT EXISTS idx_card_tags_tag
+  ON card_tags(project_id, tag);
+
+CREATE INDEX IF NOT EXISTS idx_card_tags_card
+  ON card_tags(project_id, card_id);
+
+-- ----------------------------
 -- Project resources (pointers only in v0.1)
 -- ----------------------------
 CREATE TABLE IF NOT EXISTS resources (

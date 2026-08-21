@@ -8,6 +8,7 @@
 #include "card/CardPaths.h"
 #include "card/CardRepo.h"
 #include "card/CardStore.h"
+#include "card/TagRepo.h"
 #include "git/GitOps.h"
 #include "git/GitRepo.h"
 #include "core_test_helpers.h"
@@ -1316,4 +1317,47 @@ TEST_CASE("CardStore trash/restore/hard_delete and get_content guards", "[cardst
   no_project.rel_path = holder::core::card_rel_path(no_project.card_id);
   no_project.title = "NoProject";
   REQUIRE_THROWS((void)store.get_content(no_project));
+}
+
+TEST_CASE("CardStore keeps card_tags in sync across create/update/trash/restore/hard_delete", "[cardstore]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  const auto project_root = dir / "project_repo";
+  create_project(db, "proj-1", project_root.string());
+
+  holder::index::FtsIndexer fts(db);
+  holder::card::CardStore store(db, &fts);
+  holder::card::TagRepo tags(db);
+
+  holder::model::Card card;
+  card.card_id = "tagsync1";
+  card.project_id = "proj-1";
+  card.title = "Tagged card";
+  card.created_at = 1;
+  card.updated_at = 1;
+  store.create(card, "Body mentioning #todo and #android.");
+
+  REQUIRE(
+      tags.list_tags_for_card("proj-1", card.card_id) == std::vector<std::string>{"android", "todo"}
+  );
+  REQUIRE(tags.list_card_ids_with_tag("proj-1", "todo") == std::vector<std::string>{card.card_id});
+
+  store.update_content(card.card_id, "Now only #urgent remains.", std::nullopt, 2);
+  REQUIRE(tags.list_tags_for_card("proj-1", card.card_id) == std::vector<std::string>{"urgent"});
+  REQUIRE(tags.list_card_ids_with_tag("proj-1", "todo").empty());
+
+  store.trash(card.card_id, 3);
+  REQUIRE(tags.list_tags_for_card("proj-1", card.card_id).empty());
+  REQUIRE(tags.list_card_ids_with_tag("proj-1", "urgent").empty());
+
+  store.restore(card.card_id, 4);
+  REQUIRE(tags.list_tags_for_card("proj-1", card.card_id) == std::vector<std::string>{"urgent"});
+  REQUIRE(tags.list_card_ids_with_tag("proj-1", "urgent") == std::vector<std::string>{card.card_id});
+
+  store.trash(card.card_id, 5);
+  store.hard_delete(card.card_id);
+  REQUIRE(tags.list_tags_for_card("proj-1", card.card_id).empty());
+  REQUIRE(tags.list_card_ids_with_tag("proj-1", "urgent").empty());
 }

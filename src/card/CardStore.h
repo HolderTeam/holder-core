@@ -2,6 +2,7 @@
 
 #include "card/CardRepo.h"
 #include "card/LinkRepo.h"
+#include "card/TagRepo.h"
 #include "git/GitOps.h"
 #include "index/FtsIndexer.h"
 #include "model/Card.h"
@@ -55,6 +56,7 @@ class CardStore {
   holder::git::GitOps* git_ = nullptr;
   CardRepo card_repo_;
   LinkRepo link_repo_;
+  TagRepo tag_repo_;
   holder::project::ProjectRepo project_repo_;
   holder::index::FtsIndexer* fts_ = nullptr;
 };
