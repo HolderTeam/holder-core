@@ -126,6 +126,29 @@ TEST_CASE("TagRepo list_card_ids_with_tag finds every card carrying a tag", "[ta
   REQUIRE(std::find(with_todo.begin(), with_todo.end(), "card-c") != with_todo.end());
 }
 
+TEST_CASE(
+    "TagRepo list_card_ids_with_tag excludes a trashed card even if card_tags still has its row",
+    "[tagrepo]"
+) {
+  const auto dir = holder::test::make_temp_dir();
+  auto db = holder::test::open_db_with_schema(dir / "holder.db");
+  create_project(db, "proj-1");
+  create_card(db, "card-a", "proj-1");
+  create_card(db, "card-b", "proj-1");
+
+  holder::card::TagRepo repo(db);
+  repo.set_tags_for_card("proj-1", "card-a", {"todo"}, 10);
+  repo.set_tags_for_card("proj-1", "card-b", {"todo"}, 11);
+
+  // CardRepo::soft_delete directly, bypassing CardStore::trash's own card_tags cleanup -- this
+  // is exactly the "card_tags somehow still has a row for a trashed card" case the query itself
+  // (not just well-behaved callers) needs to guard against.
+  holder::card::CardRepo cards(db);
+  cards.soft_delete("card-a", 20, 20);
+
+  REQUIRE(repo.list_card_ids_with_tag("proj-1", "todo") == std::vector<std::string>{"card-b"});
+}
+
 TEST_CASE("TagRepo list_card_ids_with_tag returns nothing for an unused tag", "[tagrepo]") {
   const auto dir = holder::test::make_temp_dir();
   auto db = holder::test::open_db_with_schema(dir / "holder.db");
@@ -155,6 +178,27 @@ TEST_CASE("TagRepo list_project_tags counts distinct tags, most-used first", "[t
   REQUIRE(tags.size() == 2);
   REQUIRE(tags[0] == std::make_pair(std::string("todo"), 3));
   REQUIRE(tags[1] == std::make_pair(std::string("urgent"), 1));
+}
+
+TEST_CASE(
+    "TagRepo list_project_tags excludes a trashed card's tags from the count",
+    "[tagrepo]"
+) {
+  const auto dir = holder::test::make_temp_dir();
+  auto db = holder::test::open_db_with_schema(dir / "holder.db");
+  create_project(db, "proj-1");
+  create_card(db, "card-a", "proj-1");
+  create_card(db, "card-b", "proj-1");
+
+  holder::card::TagRepo repo(db);
+  repo.set_tags_for_card("proj-1", "card-a", {"todo"}, 10);
+  repo.set_tags_for_card("proj-1", "card-b", {"todo"}, 11);
+
+  holder::card::CardRepo cards(db);
+  cards.soft_delete("card-a", 20, 20);
+
+  const auto tags = repo.list_project_tags("proj-1");
+  REQUIRE(tags == std::vector<std::pair<std::string, int>>{{"todo", 1}});
 }
 
 TEST_CASE("TagRepo list_project_tags returns nothing for a project with no tags", "[tagrepo]") {

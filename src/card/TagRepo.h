@@ -30,12 +30,14 @@ class TagRepo {
       const std::string& card_id
   ) const;
 
+  // Never includes a trashed card's id, even if card_tags somehow still has a row for one.
   std::vector<std::string> list_card_ids_with_tag(
       const std::string& project_id,
       const std::string& tag
   ) const;
 
-  // Every distinct tag in the project with how many cards carry it, most-used first.
+  // Every distinct tag in the project with how many (non-trashed) cards carry it, most-used
+  // first.
   std::vector<std::pair<std::string, int>> list_project_tags(const std::string& project_id) const;
 
  private:

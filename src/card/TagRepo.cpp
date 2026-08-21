@@ -120,8 +120,15 @@ std::vector<std::string> TagRepo::list_card_ids_with_tag(
     const std::string& project_id,
     const std::string& tag
 ) const {
+  // Joins cards rather than trusting card_tags to never hold a trashed card's rows on its
+  // own -- that's true today (CardStore::trash/Rebuilder both clean it up immediately) but is a
+  // cross-table invariant every future write path would have to remember to preserve. Filtering
+  // here makes "trashed cards never turn up in a tag search" a guarantee of the query itself.
   static constexpr const char* SQL =
-      "SELECT card_id FROM card_tags WHERE project_id = ? AND tag = ? ORDER BY created_at DESC;";
+      "SELECT ct.card_id FROM card_tags ct "
+      "JOIN cards c ON c.card_id = ct.card_id "
+      "WHERE ct.project_id = ? AND ct.tag = ? AND c.deleted_at IS NULL "
+      "ORDER BY ct.created_at DESC;";
   sqlite3_stmt* stmt = nullptr;
   if (sqlite3_prepare_v2(db_.handle(), SQL, -1, &stmt, nullptr) != SQLITE_OK) {
     throw_sqlite(db_.handle(), "prepare list cards with tag failed");
@@ -147,9 +154,13 @@ std::vector<std::string> TagRepo::list_card_ids_with_tag(
 std::vector<std::pair<std::string, int>> TagRepo::list_project_tags(
     const std::string& project_id
 ) const {
+  // Same trashed-card guard as list_card_ids_with_tag -- a phantom row in card_tags for a
+  // trashed card shouldn't inflate its tag's count here even though search wouldn't surface it.
   static constexpr const char* SQL =
-      "SELECT tag, COUNT(*) AS c FROM card_tags WHERE project_id = ? "
-      "GROUP BY tag ORDER BY c DESC, tag ASC;";
+      "SELECT ct.tag, COUNT(*) AS c FROM card_tags ct "
+      "JOIN cards c2 ON c2.card_id = ct.card_id "
+      "WHERE ct.project_id = ? AND c2.deleted_at IS NULL "
+      "GROUP BY ct.tag ORDER BY c DESC, ct.tag ASC;";
   sqlite3_stmt* stmt = nullptr;
   if (sqlite3_prepare_v2(db_.handle(), SQL, -1, &stmt, nullptr) != SQLITE_OK) {
     throw_sqlite(db_.handle(), "prepare list project tags failed");
