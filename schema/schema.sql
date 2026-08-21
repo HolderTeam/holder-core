@@ -1,4 +1,4 @@
--- schema.sql (v0.1)
+-- schema.sql (schema version 2)
 -- Local-first holder schema: projects, cards, links, resources, AI threads/messages, and FTS5.
 -- The app/server is responsible for keeping FTS tables in sync (no triggers in v0.1).
 
@@ -381,7 +381,7 @@ CREATE TABLE IF NOT EXISTS schema_version (
   version INTEGER NOT NULL
 );
 
--- Initialize schema version to 1 if empty
+-- Initialize schema version to 2 if empty
 INSERT INTO schema_version(version)
-SELECT 1
+SELECT 2
 WHERE NOT EXISTS (SELECT 1 FROM schema_version);

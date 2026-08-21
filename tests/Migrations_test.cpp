@@ -50,7 +50,8 @@ TEST_CASE("ensure_schema_version accepts expected version", "[migrations]") {
   const auto schema_path = find_schema_sql();
   holder::platform::Migrations::ensure_schema(db, schema_path);
 
-  REQUIRE_NOTHROW(holder::platform::Migrations::ensure_schema_version(db, 1));
+  REQUIRE_NOTHROW(holder::platform::Migrations::ensure_schema_version(db, 2));
+  REQUIRE_FALSE(holder::platform::Migrations::migrate_to_latest(db));
 }
 
 TEST_CASE("ensure_schema_version rejects mismatch", "[migrations]") {
@@ -64,8 +65,52 @@ TEST_CASE("ensure_schema_version rejects mismatch", "[migrations]") {
   holder::platform::Migrations::ensure_schema(db, schema_path);
 
   REQUIRE_THROWS_WITH(
-      holder::platform::Migrations::ensure_schema_version(db, 2),
+      holder::platform::Migrations::ensure_schema_version(db, 1),
       Catch::Matchers::ContainsSubstring("Schema version mismatch")
+  );
+}
+
+TEST_CASE("migrate_to_latest upgrades v1 databases with card tags", "[migrations]") {
+  const auto dir = make_temp_dir();
+  const auto db_path = dir / "holder.db";
+
+  holder::platform::Db db;
+  db.open(db_path);
+  holder::platform::Migrations::ensure_schema(db, find_schema_sql());
+  db.exec("DROP TABLE card_tags;");
+  db.exec("UPDATE schema_version SET version = 1;");
+
+  REQUIRE(holder::platform::Migrations::migrate_to_latest(db));
+  REQUIRE_NOTHROW(holder::platform::Migrations::ensure_schema_version(db, 2));
+  REQUIRE_NOTHROW(db.exec("SELECT project_id, card_id, tag, created_at FROM card_tags;"));
+  REQUIRE_FALSE(holder::platform::Migrations::migrate_to_latest(db));
+}
+
+TEST_CASE("migrate_to_latest tolerates a v1 database that already has card tags", "[migrations]") {
+  const auto dir = make_temp_dir();
+  const auto db_path = dir / "holder.db";
+
+  holder::platform::Db db;
+  db.open(db_path);
+  holder::platform::Migrations::ensure_schema(db, find_schema_sql());
+  db.exec("UPDATE schema_version SET version = 1;");
+
+  REQUIRE(holder::platform::Migrations::migrate_to_latest(db));
+  REQUIRE_NOTHROW(holder::platform::Migrations::ensure_schema_version(db, 2));
+}
+
+TEST_CASE("migrate_to_latest rejects databases newer than this build", "[migrations]") {
+  const auto dir = make_temp_dir();
+  const auto db_path = dir / "holder.db";
+
+  holder::platform::Db db;
+  db.open(db_path);
+  holder::platform::Migrations::ensure_schema(db, find_schema_sql());
+  db.exec("UPDATE schema_version SET version = 3;");
+
+  REQUIRE_THROWS_WITH(
+      holder::platform::Migrations::migrate_to_latest(db),
+      Catch::Matchers::ContainsSubstring("Expected at most 2")
   );
 }
 
