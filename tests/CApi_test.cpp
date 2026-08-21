@@ -1236,6 +1236,63 @@ TEST_CASE("C API card_link_add/remove round-trips connections with title enrichm
   holder_context_destroy(context);
 }
 
+TEST_CASE("C API card_list_links reflects parent/child hierarchy automatically", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_card_create(context, "project-1", "Parent card", "content", nullptr, &json, &error) ==
+      HOLDER_OK
+  );
+  const std::string parent_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(
+      holder_card_create(
+          context, "project-1", "Child card", "content", parent_id.c_str(), &json, &error
+      ) == HOLDER_OK
+  );
+  const std::string child_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
+  holder_string_free(json);
+
+  // A second, trashed child must not appear in the parent's children list.
+  json = nullptr;
+  REQUIRE(
+      holder_card_create(
+          context, "project-1", "Trashed child", "content", parent_id.c_str(), &json, &error
+      ) == HOLDER_OK
+  );
+  const std::string trashed_child_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
+  holder_string_free(json);
+  REQUIRE(holder_card_delete(context, trashed_child_id.c_str(), &error) == HOLDER_OK);
+
+  json = nullptr;
+  REQUIRE(holder_card_list_links(context, parent_id.c_str(), &json, &error) == HOLDER_OK);
+  auto parent_links = nlohmann::json::parse(json);
+  REQUIRE(parent_links["parent"].is_null());
+  REQUIRE(parent_links["children"].size() == 1);
+  REQUIRE(parent_links["children"][0]["card_id"] == child_id);
+  REQUIRE(parent_links["children"][0]["title"] == "Child card");
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(holder_card_list_links(context, child_id.c_str(), &json, &error) == HOLDER_OK);
+  auto child_links = nlohmann::json::parse(json);
+  REQUIRE_FALSE(child_links["parent"].is_null());
+  REQUIRE(child_links["parent"]["card_id"] == parent_id);
+  REQUIRE(child_links["parent"]["title"] == "Parent card");
+  REQUIRE(child_links["children"].empty());
+  holder_string_free(json);
+
+  holder_context_destroy(context);
+}
+
 TEST_CASE("C API indexes cards for search on create, update, and delete", "[capi]") {
   const auto data_dir = holder::test::make_temp_dir();
   const auto schema = read_schema_sql();

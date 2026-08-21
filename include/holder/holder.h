@@ -145,12 +145,17 @@ int holder_card_search(
     holder_error** out_error
 );
 
-// Lists card_id's explicit connections: *out_json becomes
+// Lists card_id's connections: *out_json becomes
 // {"outgoing": [{to_card_id, to_type, kind, label, created_at, to_title}],
-//  "backlinks": [{from_card_id, kind, label, created_at, from_title}]}.
+//  "backlinks": [{from_card_id, kind, label, created_at, from_title}],
+//  "parent": {card_id, title} | null,
+//  "children": [{card_id, title}, ...]}.
 // to_title/from_title are null when the id doesn't resolve to a known card.
-// Does not include hierarchical (parent/child) relationships or inline
-// [[wikilinks]] -- only the explicit link list stored in front matter.
+// parent/children reflect the card's hierarchy (parent_card_id) automatically,
+// same as desktop Holder's Connections tool -- they aren't editable through
+// this function; move a card via its parent_card_id instead. outgoing/
+// backlinks are the explicit link list stored in front matter. Neither
+// includes inline [[wikilinks]].
 int holder_card_list_links(
     holder_context* context,
     const char* card_id,

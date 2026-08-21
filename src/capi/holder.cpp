@@ -1058,7 +1058,24 @@ int holder_card_list_links(
       backlinks.push_back(backlink_to_json(context->db, link));
     }
 
-    nlohmann::json body = {{"outgoing", outgoing}, {"backlinks", backlinks}};
+    nlohmann::json parent = nullptr;
+    if (card->parent_card_id.has_value()) {
+      const auto parent_card = cards.get(*card->parent_card_id);
+      if (parent_card.has_value()) {
+        parent = {{"card_id", parent_card->card_id}, {"title", parent_card->title}};
+      }
+    }
+    nlohmann::json children = nlohmann::json::array();
+    for (const auto& child : cards.list_children(card->project_id, card_id)) {
+      if (child.deleted_at.has_value()) {
+        continue;
+      }
+      children.push_back({{"card_id", child.card_id}, {"title", child.title}});
+    }
+
+    nlohmann::json body = {
+        {"outgoing", outgoing}, {"backlinks", backlinks}, {"parent", parent}, {"children", children}
+    };
     auto* out = duplicate_string(body.dump());
     if (out == nullptr) {
       return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
