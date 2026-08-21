@@ -2,6 +2,7 @@
 
 #include "card/CardRepo.h"
 #include "card/CardStore.h"
+#include "card/LinkRepo.h"
 #include "git/EcdsaDerSigningCredentialProvider.h"
 #include "git/GitOps.h"
 #include "git/RepoSyncMetrics.h"
@@ -127,6 +128,34 @@ nlohmann::json card_to_json(const holder::model::Card& card) {
   body["deleted_at"] = card.deleted_at.has_value()
                            ? nlohmann::json(*card.deleted_at)
                            : nlohmann::json(nullptr);
+  return body;
+}
+
+// from_card_id is a generic "front-matter owner" id shared with ai_messages, so a backlink's
+// from side isn't necessarily a card -- to_title/from_title come back null when the id doesn't
+// resolve via CardRepo rather than throwing, since that's an expected, not exceptional, case.
+nlohmann::json outgoing_link_to_json(holder::platform::Db& db, const holder::model::CardLink& link) {
+  const auto to_card = holder::card::CardRepo(db).get(link.to_card_id);
+  nlohmann::json body = {
+      {"to_card_id", link.to_card_id},
+      {"to_type", link.to_type},
+      {"kind", link.kind},
+      {"created_at", link.created_at},
+  };
+  body["label"] = link.label.has_value() ? nlohmann::json(*link.label) : nlohmann::json(nullptr);
+  body["to_title"] = to_card.has_value() ? nlohmann::json(to_card->title) : nlohmann::json(nullptr);
+  return body;
+}
+
+nlohmann::json backlink_to_json(holder::platform::Db& db, const holder::model::CardLink& link) {
+  const auto from_card = holder::card::CardRepo(db).get(link.from_card_id);
+  nlohmann::json body = {
+      {"from_card_id", link.from_card_id},
+      {"kind", link.kind},
+      {"created_at", link.created_at},
+  };
+  body["label"] = link.label.has_value() ? nlohmann::json(*link.label) : nlohmann::json(nullptr);
+  body["from_title"] = from_card.has_value() ? nlohmann::json(from_card->title) : nlohmann::json(nullptr);
   return body;
 }
 
@@ -983,6 +1012,177 @@ int holder_card_search(
     }
 
     *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
+  }  // LCOV_EXCL_LINE
+}
+
+int holder_card_list_links(
+    holder_context* context,
+    const char* card_id,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (card_id == nullptr || card_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "card_id must not be empty");
+  }
+
+  try {
+    holder::card::CardRepo cards(context->db);
+    const auto card = cards.get(card_id);
+    if (!card.has_value()) {
+      return set_error(out_error, HOLDER_ERROR_RUNTIME, "card not found: " + std::string(card_id));
+    }
+
+    holder::card::LinkRepo links(context->db);
+    nlohmann::json outgoing = nlohmann::json::array();
+    for (const auto& link : links.list_outgoing(card->project_id, card_id)) {
+      outgoing.push_back(outgoing_link_to_json(context->db, link));
+    }
+    nlohmann::json backlinks = nlohmann::json::array();
+    for (const auto& link : links.list_backlinks(card->project_id, card_id)) {
+      backlinks.push_back(backlink_to_json(context->db, link));
+    }
+
+    nlohmann::json body = {{"outgoing", outgoing}, {"backlinks", backlinks}};
+    auto* out = duplicate_string(body.dump());
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+    }
+
+    *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
+  }  // LCOV_EXCL_LINE
+}
+
+int holder_card_link_add(
+    holder_context* context,
+    const char* from_card_id,
+    const char* to_card_id,
+    const char* kind,
+    const char* label,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (from_card_id == nullptr || from_card_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "from_card_id must not be empty");
+  }
+  if (to_card_id == nullptr || to_card_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "to_card_id must not be empty");
+  }
+  if (kind == nullptr || kind[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "kind must not be empty");
+  }
+
+  try {
+    holder::card::CardRepo cards(context->db);
+    const auto from_card = cards.get(from_card_id);
+    if (!from_card.has_value()) {
+      return set_error(
+          out_error, HOLDER_ERROR_RUNTIME, "card not found: " + std::string(from_card_id)
+      );
+    }
+    if (!cards.get(to_card_id).has_value()) {
+      return set_error(out_error, HOLDER_ERROR_RUNTIME, "card not found: " + std::string(to_card_id));
+    }
+
+    holder::model::CardLink link;
+    link.project_id = from_card->project_id;
+    link.from_card_id = from_card_id;
+    link.to_card_id = to_card_id;
+    link.to_type = "card";
+    link.kind = kind;
+    if (label != nullptr && label[0] != '\0') {
+      link.label = std::string(label);
+    }
+    link.created_at = now_epoch_seconds();
+
+    holder::card::LinkRepo(context->db).upsert_links(from_card->project_id, from_card_id, {link});
+    holder::card::CardStore(context->db, &context->fts).update_links(from_card_id, now_epoch_seconds());
+
+    nlohmann::json outgoing = nlohmann::json::array();
+    for (const auto& l : holder::card::LinkRepo(context->db).list_outgoing(from_card->project_id, from_card_id)) {
+      outgoing.push_back(outgoing_link_to_json(context->db, l));
+    }
+    auto* out = duplicate_string(outgoing.dump());
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+    }
+
+    *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
+  }  // LCOV_EXCL_LINE
+}
+
+int holder_card_link_remove(
+    holder_context* context,
+    const char* from_card_id,
+    const char* to_card_id,
+    const char* kind,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (from_card_id == nullptr || from_card_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "from_card_id must not be empty");
+  }
+  if (to_card_id == nullptr || to_card_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "to_card_id must not be empty");
+  }
+  if (kind == nullptr || kind[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "kind must not be empty");
+  }
+
+  try {
+    holder::card::CardRepo cards(context->db);
+    const auto from_card = cards.get(from_card_id);
+    if (!from_card.has_value()) {
+      return set_error(
+          out_error, HOLDER_ERROR_RUNTIME, "card not found: " + std::string(from_card_id)
+      );
+    }
+
+    holder::card::LinkRepo(context->db).delete_link(
+        from_card->project_id, from_card_id, to_card_id, std::string("card"), std::string(kind)
+    );
+    holder::card::CardStore(context->db, &context->fts).update_links(from_card_id, now_epoch_seconds());
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
     return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE

@@ -145,6 +145,42 @@ int holder_card_search(
     holder_error** out_error
 );
 
+// Lists card_id's explicit connections: *out_json becomes
+// {"outgoing": [{to_card_id, to_type, kind, label, created_at, to_title}],
+//  "backlinks": [{from_card_id, kind, label, created_at, from_title}]}.
+// to_title/from_title are null when the id doesn't resolve to a known card.
+// Does not include hierarchical (parent/child) relationships or inline
+// [[wikilinks]] -- only the explicit link list stored in front matter.
+int holder_card_list_links(
+    holder_context* context,
+    const char* card_id,
+    char** out_json,
+    holder_error** out_error
+);
+
+// Adds (or updates, if from_card_id/to_card_id/kind already matches) an explicit
+// outgoing connection. label may be NULL. Sets *out_json to from_card_id's
+// updated outgoing connection list, same shape as holder_card_list_links's
+// "outgoing" array.
+int holder_card_link_add(
+    holder_context* context,
+    const char* from_card_id,
+    const char* to_card_id,
+    const char* kind,
+    const char* label,
+    char** out_json,
+    holder_error** out_error
+);
+
+// Removes the from_card_id -> to_card_id connection of the given kind, if any.
+int holder_card_link_remove(
+    holder_context* context,
+    const char* from_card_id,
+    const char* to_card_id,
+    const char* kind,
+    holder_error** out_error
+);
+
 // Rebuilds the full-text search index from the database. Safe to call anytime;
 // mainly useful to backfill data written before FTS indexing was wired up.
 int holder_reindex(holder_context* context, holder_error** out_error);

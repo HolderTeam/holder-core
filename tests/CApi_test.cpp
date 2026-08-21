@@ -966,6 +966,276 @@ TEST_CASE("C API card_restore reports missing trash content", "[capi]") {
   holder_context_destroy(context);
 }
 
+TEST_CASE("C API reports invalid card link arguments", "[capi]") {
+  holder_error* error = nullptr;
+  char* json = nullptr;
+
+  REQUIRE(holder_card_list_links(nullptr, "card-1", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(json == nullptr);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_card_link_add(nullptr, "card-1", "card-2", "ref", nullptr, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(json == nullptr);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_card_link_remove(nullptr, "card-1", "card-2", "ref", &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  REQUIRE(holder_card_list_links(context, "", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_card_link_add(context, "", "card-2", "ref", nullptr, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+  REQUIRE(
+      holder_card_link_add(context, "card-1", "", "ref", nullptr, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+  REQUIRE(
+      holder_card_link_add(context, "card-1", "card-2", "", nullptr, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_card_link_remove(context, "", "card-2", "ref", &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+  REQUIRE(
+      holder_card_link_remove(context, "card-1", "", "ref", &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+  REQUIRE(
+      holder_card_link_remove(context, "card-1", "card-2", "", &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(holder_card_list_links(context, "missing-card", &json, &error) == HOLDER_ERROR_RUNTIME);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_card_link_add(context, "missing-card", "also-missing", "ref", nullptr, &json, &error) ==
+      HOLDER_ERROR_RUNTIME
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_card_link_remove(context, "missing-card", "also-missing", "ref", &error) ==
+      HOLDER_ERROR_RUNTIME
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(holder_card_list_links(context, "card-1", nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  holder_error_destroy(error);
+  error = nullptr;
+  REQUIRE(
+      holder_card_link_add(context, "card-1", "card-2", "ref", nullptr, nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+
+  json = nullptr;
+  REQUIRE(
+      holder_card_create(context, "project-1", "Real card", "content", nullptr, &json, &error) ==
+      HOLDER_OK
+  );
+  const std::string real_card_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(
+      holder_card_link_add(context, real_card_id.c_str(), "no-such-target", "ref", nullptr, &json, &error) ==
+      HOLDER_ERROR_RUNTIME
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("no-such-target") != std::string::npos);
+  holder_error_destroy(error);
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API card link functions report the underlying sqlite error when card_links is missing", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_card_create(context, "project-1", "From", "content", nullptr, &json, &error) == HOLDER_OK
+  );
+  const std::string from_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(holder_card_create(context, "project-1", "To", "content", nullptr, &json, &error) == HOLDER_OK);
+  const std::string to_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
+  holder_string_free(json);
+
+  {
+    holder::platform::Db raw_db;
+    raw_db.open(data_dir / "server" / "holder.db");
+    raw_db.exec("DROP TABLE card_links;");
+  }
+
+  json = nullptr;
+  REQUIRE(holder_card_list_links(context, from_id.c_str(), &json, &error) == HOLDER_ERROR_RUNTIME);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_card_link_add(context, from_id.c_str(), to_id.c_str(), "ref", nullptr, &json, &error) ==
+      HOLDER_ERROR_RUNTIME
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_card_link_remove(context, from_id.c_str(), to_id.c_str(), "ref", &error) ==
+      HOLDER_ERROR_RUNTIME
+  );
+  holder_error_destroy(error);
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API card_link_add/remove round-trips connections with title enrichment", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_card_create(context, "project-1", "Blocked task", "content", nullptr, &json, &error) ==
+      HOLDER_OK
+  );
+  const std::string blocked_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(
+      holder_card_create(context, "project-1", "Blocking task", "content", nullptr, &json, &error) ==
+      HOLDER_OK
+  );
+  const std::string blocking_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
+  holder_string_free(json);
+
+  // A card with no target's title is still resolvable is exercised separately below; here first
+  // confirm a fresh card has empty connections in both directions.
+  json = nullptr;
+  REQUIRE(holder_card_list_links(context, blocked_id.c_str(), &json, &error) == HOLDER_OK);
+  auto empty_links = nlohmann::json::parse(json);
+  REQUIRE(empty_links["outgoing"].empty());
+  REQUIRE(empty_links["backlinks"].empty());
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(
+      holder_card_link_add(
+          context, blocked_id.c_str(), blocking_id.c_str(), "blocked_by", "waiting on this", &json, &error
+      ) == HOLDER_OK
+  );
+  auto outgoing = nlohmann::json::parse(json);
+  REQUIRE(outgoing.size() == 1);
+  REQUIRE(outgoing[0]["to_card_id"] == blocking_id);
+  REQUIRE(outgoing[0]["to_title"] == "Blocking task");
+  REQUIRE(outgoing[0]["kind"] == "blocked_by");
+  REQUIRE(outgoing[0]["label"] == "waiting on this");
+  holder_string_free(json);
+
+  // Re-adding the same from/to/kind updates the label in place rather than duplicating.
+  json = nullptr;
+  REQUIRE(
+      holder_card_link_add(
+          context, blocked_id.c_str(), blocking_id.c_str(), "blocked_by", "still waiting", &json, &error
+      ) == HOLDER_OK
+  );
+  auto updated_outgoing = nlohmann::json::parse(json);
+  REQUIRE(updated_outgoing.size() == 1);
+  REQUIRE(updated_outgoing[0]["label"] == "still waiting");
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(holder_card_list_links(context, blocking_id.c_str(), &json, &error) == HOLDER_OK);
+  auto blocking_links = nlohmann::json::parse(json);
+  REQUIRE(blocking_links["outgoing"].empty());
+  REQUIRE(blocking_links["backlinks"].size() == 1);
+  REQUIRE(blocking_links["backlinks"][0]["from_card_id"] == blocked_id);
+  REQUIRE(blocking_links["backlinks"][0]["from_title"] == "Blocked task");
+  REQUIRE(blocking_links["backlinks"][0]["kind"] == "blocked_by");
+  holder_string_free(json);
+
+  // The connection round-trips through the card's own front matter, not just the DB index: a
+  // rebuild from disk must still see it.
+  {
+    holder::platform::Db raw_db;
+    raw_db.open(data_dir / "server" / "holder.db");
+    holder::index::FtsIndexer raw_fts(raw_db);
+    holder::project::ProjectRepo raw_projects(raw_db);
+    const auto project = raw_projects.get("project-1").value();
+    holder::store::Rebuilder(raw_db, &raw_fts).rebuild_project(project);
+  }
+  json = nullptr;
+  REQUIRE(holder_card_list_links(context, blocked_id.c_str(), &json, &error) == HOLDER_OK);
+  auto rebuilt = nlohmann::json::parse(json);
+  REQUIRE(rebuilt["outgoing"].size() == 1);
+  REQUIRE(rebuilt["outgoing"][0]["to_card_id"] == blocking_id);
+  holder_string_free(json);
+
+  REQUIRE(holder_card_link_remove(context, blocked_id.c_str(), blocking_id.c_str(), "blocked_by", &error) == HOLDER_OK);
+
+  json = nullptr;
+  REQUIRE(holder_card_list_links(context, blocked_id.c_str(), &json, &error) == HOLDER_OK);
+  REQUIRE(nlohmann::json::parse(json)["outgoing"].empty());
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(holder_card_list_links(context, blocking_id.c_str(), &json, &error) == HOLDER_OK);
+  REQUIRE(nlohmann::json::parse(json)["backlinks"].empty());
+  holder_string_free(json);
+
+  // Removing an already-removed connection is a harmless no-op, not an error.
+  REQUIRE(holder_card_link_remove(context, blocked_id.c_str(), blocking_id.c_str(), "blocked_by", &error) == HOLDER_OK);
+
+  holder_context_destroy(context);
+}
+
 TEST_CASE("C API indexes cards for search on create, update, and delete", "[capi]") {
   const auto data_dir = holder::test::make_temp_dir();
   const auto schema = read_schema_sql();
