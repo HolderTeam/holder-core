@@ -186,6 +186,37 @@ int holder_card_link_remove(
     holder_error** out_error
 );
 
+// Lists card_id's #tags (as extracted from its body by holder_card_create/
+// holder_card_update_content), lowercased: *out_json becomes ["todo", "urgent"].
+// Tags aren't editable through a dedicated function -- edit the #tag text in
+// the card body instead; the index follows automatically.
+int holder_card_list_tags(
+    holder_context* context,
+    const char* card_id,
+    char** out_json,
+    holder_error** out_error
+);
+
+// Lists project_id's (non-trashed) cards carrying `tag` (case-insensitive):
+// *out_json becomes [{card_id, title}, ...]. Empty, not an error, for an
+// unknown project_id or a tag nothing carries.
+int holder_cards_with_tag(
+    holder_context* context,
+    const char* project_id,
+    const char* tag,
+    char** out_json,
+    holder_error** out_error
+);
+
+// Lists every distinct tag in project_id with how many cards carry it, most-
+// used first: *out_json becomes [{"tag": "todo", "count": 3}, ...].
+int holder_project_list_tags(
+    holder_context* context,
+    const char* project_id,
+    char** out_json,
+    holder_error** out_error
+);
+
 // Rebuilds the full-text search index from the database. Safe to call anytime;
 // mainly useful to backfill data written before FTS indexing was wired up.
 int holder_reindex(holder_context* context, holder_error** out_error);

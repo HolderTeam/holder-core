@@ -1295,6 +1295,212 @@ TEST_CASE("C API card_list_links reflects parent/child hierarchy automatically",
   holder_context_destroy(context);
 }
 
+TEST_CASE("C API reports invalid tag arguments", "[capi]") {
+  holder_error* error = nullptr;
+  char* json = nullptr;
+
+  REQUIRE(holder_card_list_tags(nullptr, "card-1", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(json == nullptr);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_cards_with_tag(nullptr, "project-1", "todo", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(json == nullptr);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_project_list_tags(nullptr, "project-1", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(json == nullptr);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  REQUIRE(holder_card_list_tags(context, "", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  holder_error_destroy(error);
+  error = nullptr;
+  REQUIRE(holder_card_list_tags(context, "card-1", nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  holder_error_destroy(error);
+  error = nullptr;
+  REQUIRE(holder_card_list_tags(context, "missing-card", &json, &error) == HOLDER_ERROR_RUNTIME);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_cards_with_tag(context, "", "todo", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+  REQUIRE(
+      holder_cards_with_tag(context, "project-1", "", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+  REQUIRE(
+      holder_cards_with_tag(context, "project-1", "todo", nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(holder_project_list_tags(context, "", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  holder_error_destroy(error);
+  error = nullptr;
+  REQUIRE(
+      holder_project_list_tags(context, "project-1", nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  holder_error_destroy(error);
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API tags round-trip through create, update, and case-insensitive lookup", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_card_create(
+          context, "project-1", "Tagged", "Body mentioning #TODO and #android.", nullptr, &json, &error
+      ) == HOLDER_OK
+  );
+  const std::string card_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(holder_card_list_tags(context, card_id.c_str(), &json, &error) == HOLDER_OK);
+  REQUIRE(nlohmann::json::parse(json) == std::vector<std::string>{"android", "todo"});
+  holder_string_free(json);
+
+  // Lookup is case-insensitive even though storage is already lowercased.
+  json = nullptr;
+  REQUIRE(holder_cards_with_tag(context, "project-1", "TODO", &json, &error) == HOLDER_OK);
+  auto with_todo = nlohmann::json::parse(json);
+  REQUIRE(with_todo.size() == 1);
+  REQUIRE(with_todo[0]["card_id"] == card_id);
+  REQUIRE(with_todo[0]["title"] == "Tagged");
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(holder_project_list_tags(context, "project-1", &json, &error) == HOLDER_OK);
+  auto project_tags = nlohmann::json::parse(json);
+  REQUIRE(project_tags.size() == 2);
+  REQUIRE(project_tags[0]["tag"] == "android");
+  REQUIRE(project_tags[0]["count"] == 1);
+  REQUIRE(project_tags[1]["tag"] == "todo");
+  REQUIRE(project_tags[1]["count"] == 1);
+  holder_string_free(json);
+
+  // Editing the body away updates the index, not just adds to it.
+  REQUIRE(
+      holder_card_update_content(context, card_id.c_str(), "Only #urgent now.", nullptr, &json, &error) ==
+      HOLDER_OK
+  );
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(holder_card_list_tags(context, card_id.c_str(), &json, &error) == HOLDER_OK);
+  REQUIRE(nlohmann::json::parse(json) == std::vector<std::string>{"urgent"});
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(holder_cards_with_tag(context, "project-1", "todo", &json, &error) == HOLDER_OK);
+  REQUIRE(nlohmann::json::parse(json).empty());
+  holder_string_free(json);
+
+  // Trashing removes a card from tag search; restoring brings it back.
+  REQUIRE(holder_card_delete(context, card_id.c_str(), &error) == HOLDER_OK);
+  json = nullptr;
+  REQUIRE(holder_cards_with_tag(context, "project-1", "urgent", &json, &error) == HOLDER_OK);
+  REQUIRE(nlohmann::json::parse(json).empty());
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(holder_card_restore(context, card_id.c_str(), &json, &error) == HOLDER_OK);
+  holder_string_free(json);
+  json = nullptr;
+  REQUIRE(holder_cards_with_tag(context, "project-1", "urgent", &json, &error) == HOLDER_OK);
+  REQUIRE(nlohmann::json::parse(json).size() == 1);
+  holder_string_free(json);
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API cards_with_tag and project_list_tags return nothing for an unknown project", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(holder_cards_with_tag(context, "no-such-project", "todo", &json, &error) == HOLDER_OK);
+  REQUIRE(nlohmann::json::parse(json).empty());
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(holder_project_list_tags(context, "no-such-project", &json, &error) == HOLDER_OK);
+  REQUIRE(nlohmann::json::parse(json).empty());
+  holder_string_free(json);
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API tag functions report the underlying sqlite error when card_tags is missing", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_card_create(context, "project-1", "Card", "content #todo", nullptr, &json, &error) ==
+      HOLDER_OK
+  );
+  const std::string card_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
+  holder_string_free(json);
+
+  {
+    holder::platform::Db raw_db;
+    raw_db.open(data_dir / "server" / "holder.db");
+    raw_db.exec("DROP TABLE card_tags;");
+  }
+
+  json = nullptr;
+  REQUIRE(holder_card_list_tags(context, card_id.c_str(), &json, &error) == HOLDER_ERROR_RUNTIME);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_cards_with_tag(context, "project-1", "todo", &json, &error) == HOLDER_ERROR_RUNTIME
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(holder_project_list_tags(context, "project-1", &json, &error) == HOLDER_ERROR_RUNTIME);
+  holder_error_destroy(error);
+
+  holder_context_destroy(context);
+}
+
 TEST_CASE("C API indexes cards for search on create, update, and delete", "[capi]") {
   const auto data_dir = holder::test::make_temp_dir();
   const auto schema = read_schema_sql();
