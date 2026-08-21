@@ -74,13 +74,18 @@ if(WIN32 OR ANDROID)
   else()
     message(FATAL_ERROR "Could not find a usable libgit2 CMake target")
   endif()
+
+  find_package(md4c CONFIG REQUIRED)
+  set(HOLDER_CORE_MD4C_TARGET md4c::md4c)
 else()
   pkg_check_modules(SQLITE3 REQUIRED IMPORTED_TARGET sqlite3)
   pkg_check_modules(SODIUM REQUIRED IMPORTED_TARGET libsodium)
   pkg_check_modules(LIBGIT2 REQUIRED IMPORTED_TARGET libgit2)
+  pkg_check_modules(MD4C REQUIRED IMPORTED_TARGET md4c)
   set(HOLDER_CORE_SQLITE3_TARGET PkgConfig::SQLITE3)
   set(HOLDER_CORE_SODIUM_TARGET PkgConfig::SODIUM)
   set(HOLDER_CORE_LIBGIT2_TARGET PkgConfig::LIBGIT2)
+  set(HOLDER_CORE_MD4C_TARGET PkgConfig::MD4C)
 endif()
 
 if(HOLDER_CORE_USE_PKG_CONFIG_DEPS AND NOT APPLE)
@@ -190,6 +195,7 @@ target_link_libraries(holder PUBLIC
   ${HOLDER_CORE_SQLITE3_TARGET}
   ${HOLDER_CORE_SODIUM_TARGET}
   ${HOLDER_CORE_LIBGIT2_TARGET}
+  ${HOLDER_CORE_MD4C_TARGET}
   Threads::Threads
   nlohmann_json::nlohmann_json
   spdlog::spdlog

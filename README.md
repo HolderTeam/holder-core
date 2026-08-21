@@ -34,12 +34,13 @@ Required dependencies are intentionally core dependencies, not optional plugins:
 - SQLite
 - libgit2
 - libsodium
+- md4c
 - OpenSSL
 - nlohmann-json
 - yaml-cpp
 - spdlog
 
-On Linux and macOS, CMake currently finds SQLite, libgit2, and libsodium via `pkg-config`. On Windows, use the vcpkg packages that `holder-daemon` already uses.
+On Linux and macOS, CMake currently finds SQLite, libgit2, libsodium, and md4c via `pkg-config`. On Windows and Android, use the vcpkg packages that `holder-daemon` already uses.
 
 ## Consumption model
 
