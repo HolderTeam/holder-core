@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -17,5 +18,15 @@ namespace holder::core {
 // doesn't become tag "ff8800" -- the one accepted cost is a deliberately-chosen tag that happens
 // to look like a hex string (e.g. "#deadbeef") also getting excluded.
 std::vector<std::string> extract_tags(const std::string& markdown_body);
+
+struct TagOccurrence {
+  std::string tag;
+  std::size_t byte_start = 0; // Inclusive, at '#'.
+  std::size_t byte_end = 0;   // Exclusive, after the tag name.
+};
+
+// Every valid occurrence, including repeats, with UTF-8 byte offsets into markdown_body.
+// The same Markdown/code exclusions and token rules as extract_tags() apply.
+std::vector<TagOccurrence> extract_tag_occurrences(const std::string& markdown_body);
 
 } // namespace holder::core

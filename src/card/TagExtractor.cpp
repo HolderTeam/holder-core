@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
+#include <optional>
 #include <regex>
 #include <set>
 
@@ -41,9 +43,16 @@ struct ExtractorState {
   bool in_code = false;
   std::vector<std::string> tags;
   std::set<std::string> seen;
+  std::vector<TagOccurrence> occurrences;
+  std::uintptr_t source_begin = 0;
+  std::uintptr_t source_end = 0;
 };
 
-void collect_tags(const std::string& text, ExtractorState& state) {
+void collect_tags(
+    const std::string& text,
+    ExtractorState& state,
+    std::optional<std::size_t> source_offset
+) {
   for (auto it = std::sregex_iterator(text.begin(), text.end(), tag_pattern());
        it != std::sregex_iterator();
        ++it) {
@@ -52,6 +61,14 @@ void collect_tags(const std::string& text, ExtractorState& state) {
       continue;
     }
     std::string tag = to_lower(std::move(candidate));
+    if (source_offset.has_value()) {
+      const auto candidate_pos = static_cast<std::size_t>((*it).position(2));
+      state.occurrences.push_back({
+          tag,
+          source_offset.value() + candidate_pos - 1,
+          source_offset.value() + candidate_pos + static_cast<std::size_t>((*it).length(2)),
+      });
+    }
     if (state.seen.insert(tag).second) {
       state.tags.push_back(std::move(tag));
     }
@@ -91,15 +108,22 @@ int on_leave_span(MD_SPANTYPE type, void*, void* userdata) {
 int on_text(MD_TEXTTYPE, const MD_CHAR* text, MD_SIZE size, void* userdata) {
   auto* state = static_cast<ExtractorState*>(userdata);
   if (!state->in_code) {
-    collect_tags(std::string(text, size), *state);
+    const auto address = reinterpret_cast<std::uintptr_t>(text);
+    std::optional<std::size_t> source_offset;
+    if (address >= state->source_begin && address + size <= state->source_end) {
+      source_offset = static_cast<std::size_t>(address - state->source_begin);
+    }
+    collect_tags(std::string(text, size), *state, source_offset);
   }
   return 0;
 }
 
 } // namespace
 
-std::vector<std::string> extract_tags(const std::string& markdown_body) {
+static ExtractorState parse_tags(const std::string& markdown_body) {
   ExtractorState state;
+  state.source_begin = reinterpret_cast<std::uintptr_t>(markdown_body.data());
+  state.source_end = state.source_begin + markdown_body.size();
 
   MD_PARSER parser = {};
   parser.abi_version = 0;
@@ -112,7 +136,15 @@ std::vector<std::string> extract_tags(const std::string& markdown_body) {
 
   md_parse(markdown_body.c_str(), static_cast<MD_SIZE>(markdown_body.size()), &parser, &state);
 
-  return state.tags;
+  return state;
+}
+
+std::vector<std::string> extract_tags(const std::string& markdown_body) {
+  return parse_tags(markdown_body).tags;
+}
+
+std::vector<TagOccurrence> extract_tag_occurrences(const std::string& markdown_body) {
+  return parse_tags(markdown_body).occurrences;
 }
 
 } // namespace holder::core
