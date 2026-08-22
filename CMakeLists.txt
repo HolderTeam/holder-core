@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 
 include(cmake/HolderVersion.cmake)
 
-project(holder VERSION ${HOLDER_CORE_VERSION} LANGUAGES CXX)
+project(holder VERSION ${HOLDER_CORE_CMAKE_VERSION} LANGUAGES CXX)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 include(CTest)
@@ -179,7 +179,7 @@ target_compile_definitions(holder PUBLIC
 )
 
 target_compile_definitions(holder PRIVATE
-  HOLDER_VERSION_STRING="${PROJECT_VERSION}"
+  HOLDER_VERSION_STRING="${HOLDER_CORE_VERSION}"
   HOLDER_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
   HOLDER_VERSION_MINOR=${PROJECT_VERSION_MINOR}
   HOLDER_VERSION_PATCH=${PROJECT_VERSION_PATCH}
