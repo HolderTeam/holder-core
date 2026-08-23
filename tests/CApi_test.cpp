@@ -1501,6 +1501,236 @@ TEST_CASE("C API tag functions report the underlying sqlite error when card_tags
   holder_context_destroy(context);
 }
 
+TEST_CASE("C API reports invalid milestone arguments", "[capi]") {
+  holder_error* error = nullptr;
+  char* json = nullptr;
+
+  REQUIRE(
+      holder_card_list_milestones(nullptr, "card-1", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(json == nullptr);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_card_milestone_add(nullptr, "card-1", 100, 0, 0, 0, "Deadline", nullptr, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(json == nullptr);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_card_milestone_remove(nullptr, "card-1", "mile-1", &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_project_list_milestones_in_range(nullptr, "project-1", 0, 1000, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(json == nullptr);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  REQUIRE(
+      holder_card_list_milestones(context, "", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_card_milestone_add(context, "", 100, 0, 0, 0, nullptr, nullptr, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_card_milestone_remove(context, "", "mile-1", &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+  REQUIRE(
+      holder_card_milestone_remove(context, "card-1", "", &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_project_list_milestones_in_range(context, "", 0, 1000, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_card_list_milestones(context, "missing-card", &json, &error) == HOLDER_ERROR_RUNTIME
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_card_milestone_add(
+          context, "missing-card", 100, 0, 0, 0, nullptr, nullptr, &json, &error
+      ) == HOLDER_ERROR_RUNTIME
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_card_milestone_remove(context, "missing-card", "mile-1", &error) == HOLDER_ERROR_RUNTIME
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_card_list_milestones(context, "card-1", nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+  REQUIRE(
+      holder_card_milestone_add(context, "card-1", 100, 0, 0, 0, nullptr, nullptr, nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+  REQUIRE(
+      holder_project_list_milestones_in_range(context, "project-1", 0, 1000, nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  holder_error_destroy(error);
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE(
+    "C API card_milestone_add/remove round-trips through front matter, list, and range queries",
+    "[capi]"
+) {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_card_create(context, "project-1", "My Car", "content", nullptr, &json, &error) ==
+      HOLDER_OK
+  );
+  const std::string card_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
+  holder_string_free(json);
+
+  // A fresh card has no milestones.
+  json = nullptr;
+  REQUIRE(holder_card_list_milestones(context, card_id.c_str(), &json, &error) == HOLDER_OK);
+  REQUIRE(nlohmann::json::parse(json).empty());
+  holder_string_free(json);
+
+  // A point-in-time, all-day milestone (no end_at).
+  json = nullptr;
+  REQUIRE(
+      holder_card_milestone_add(
+          context, card_id.c_str(), 1000, 0, 0, 1, "Renewal", "Car insurance renewal", &json, &error
+      ) == HOLDER_OK
+  );
+  auto after_first = nlohmann::json::parse(json);
+  REQUIRE(after_first.size() == 1);
+  const std::string first_id = after_first[0]["milestone_id"].get<std::string>();
+  REQUIRE(after_first[0]["start_at"] == 1000);
+  REQUIRE(after_first[0]["end_at"].is_null());
+  REQUIRE(after_first[0]["all_day"] == true);
+  REQUIRE(after_first[0]["kind"] == "Renewal");
+  REQUIRE(after_first[0]["description"] == "Car insurance renewal");
+  holder_string_free(json);
+
+  // A timed span (has an end_at), no kind/description.
+  json = nullptr;
+  REQUIRE(
+      holder_card_milestone_add(context, card_id.c_str(), 2000, 1, 2500, 0, nullptr, nullptr, &json, &error) ==
+      HOLDER_OK
+  );
+  auto after_second = nlohmann::json::parse(json);
+  REQUIRE(after_second.size() == 2);
+  holder_string_free(json);
+
+  // The connection round-trips through the card's own front matter, not just the DB index: a
+  // rebuild from disk must still see both milestones.
+  {
+    holder::platform::Db raw_db;
+    raw_db.open(data_dir / "server" / "holder.db");
+    holder::index::FtsIndexer raw_fts(raw_db);
+    holder::project::ProjectRepo raw_projects(raw_db);
+    const auto project = raw_projects.get("project-1").value();
+    holder::store::Rebuilder(raw_db, &raw_fts).rebuild_project(project);
+  }
+  json = nullptr;
+  REQUIRE(holder_card_list_milestones(context, card_id.c_str(), &json, &error) == HOLDER_OK);
+  REQUIRE(nlohmann::json::parse(json).size() == 2);
+  holder_string_free(json);
+
+  // The Calendar's range query sees both, enriched with the card's title.
+  json = nullptr;
+  REQUIRE(
+      holder_project_list_milestones_in_range(context, "project-1", 0, 5000, &json, &error) ==
+      HOLDER_OK
+  );
+  auto in_range = nlohmann::json::parse(json);
+  REQUIRE(in_range.size() == 2);
+  REQUIRE(in_range[0]["start_at"] == 1000);
+  REQUIRE(in_range[0]["card_title"] == "My Car");
+  REQUIRE(in_range[1]["start_at"] == 2000);
+  REQUIRE(in_range[1]["end_at"] == 2500);
+  holder_string_free(json);
+
+  // Narrowing the range excludes the second milestone.
+  json = nullptr;
+  REQUIRE(
+      holder_project_list_milestones_in_range(context, "project-1", 0, 1500, &json, &error) ==
+      HOLDER_OK
+  );
+  REQUIRE(nlohmann::json::parse(json).size() == 1);
+  holder_string_free(json);
+
+  // Removing the first leaves only the second.
+  REQUIRE(holder_card_milestone_remove(context, card_id.c_str(), first_id.c_str(), &error) == HOLDER_OK);
+  json = nullptr;
+  REQUIRE(holder_card_list_milestones(context, card_id.c_str(), &json, &error) == HOLDER_OK);
+  auto after_remove = nlohmann::json::parse(json);
+  REQUIRE(after_remove.size() == 1);
+  REQUIRE(after_remove[0]["start_at"] == 2000);
+  holder_string_free(json);
+
+  // Removing an already-removed (or never-existing) milestone is a harmless no-op.
+  REQUIRE(holder_card_milestone_remove(context, card_id.c_str(), first_id.c_str(), &error) == HOLDER_OK);
+
+  // Trashing the card removes it from the range query, mirroring tags/the Calendar's own guard.
+  REQUIRE(holder_card_delete(context, card_id.c_str(), &error) == HOLDER_OK);
+  json = nullptr;
+  REQUIRE(
+      holder_project_list_milestones_in_range(context, "project-1", 0, 5000, &json, &error) ==
+      HOLDER_OK
+  );
+  REQUIRE(nlohmann::json::parse(json).empty());
+  holder_string_free(json);
+
+  holder_context_destroy(context);
+}
+
 TEST_CASE("C API indexes cards for search on create, update, and delete", "[capi]") {
   const auto data_dir = holder::test::make_temp_dir();
   const auto schema = read_schema_sql();

@@ -217,6 +217,56 @@ int holder_project_list_tags(
     holder_error** out_error
 );
 
+// Lists card_id's milestones, ordered by start_at: *out_json becomes
+// [{milestone_id, card_id, start_at, end_at, all_day, kind, description,
+// created_at, updated_at}, ...]. end_at/kind/description are null when unset.
+int holder_card_list_milestones(
+    holder_context* context,
+    const char* card_id,
+    char** out_json,
+    holder_error** out_error
+);
+
+// Adds a new milestone to card_id. has_end_at is 0 to omit end_at (a point
+// in time rather than a span); all_day/has_end_at are 0 or 1; kind and
+// description may be NULL. Sets *out_json to card_id's updated milestone
+// list, same shape as holder_card_list_milestones.
+int holder_card_milestone_add(
+    holder_context* context,
+    const char* card_id,
+    long long start_at,
+    int has_end_at,
+    long long end_at,
+    int all_day,
+    const char* kind,
+    const char* description,
+    char** out_json,
+    holder_error** out_error
+);
+
+// Removes milestone_id from card_id, if present. A no-op, not an error, if
+// milestone_id doesn't exist or belongs to a different card.
+int holder_card_milestone_remove(
+    holder_context* context,
+    const char* card_id,
+    const char* milestone_id,
+    holder_error** out_error
+);
+
+// Lists every milestone in project_id whose start_at falls within [from, to]
+// (inclusive), ordered by start_at -- the Calendar's primary query. *out_json
+// becomes [{..same fields as holder_card_list_milestones, plus card_title},
+// ...]. Never includes a trashed card's milestones. card_title is null when
+// the card can't be resolved.
+int holder_project_list_milestones_in_range(
+    holder_context* context,
+    const char* project_id,
+    long long from,
+    long long to,
+    char** out_json,
+    holder_error** out_error
+);
+
 // Lists Holder's full built-in vocabulary of card_links.kind values with
 // curated English labels: *out_json becomes [{"id": "depends_on",
 // "forward": "Depends on", "reverse": "Required by"}, ...]. forward is how

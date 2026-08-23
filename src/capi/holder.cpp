@@ -4,6 +4,7 @@
 #include "card/CardStore.h"
 #include "card/LinkKindCatalog.h"
 #include "card/LinkRepo.h"
+#include "card/MilestoneRepo.h"
 #include "card/TagRepo.h"
 #include "git/EcdsaDerSigningCredentialProvider.h"
 #include "git/GitOps.h"
@@ -199,6 +200,33 @@ nlohmann::json optional_json(const std::optional<std::string>& value) {
 
 nlohmann::json optional_json(const std::optional<long long>& value) {
   return value.has_value() ? nlohmann::json(*value) : nlohmann::json(nullptr);
+}
+
+nlohmann::json milestone_to_json(const holder::model::Milestone& milestone) {
+  nlohmann::json body = {
+      {"milestone_id", milestone.milestone_id},
+      {"card_id", milestone.card_id},
+      {"start_at", milestone.start_at},
+      {"all_day", milestone.all_day},
+      {"created_at", milestone.created_at},
+      {"updated_at", milestone.updated_at},
+  };
+  body["end_at"] = optional_json(milestone.end_at);
+  body["kind"] = optional_json(milestone.kind);
+  body["description"] = optional_json(milestone.description);
+  return body;
+}
+
+// Adds card_title (null if unresolvable) for the project-wide range listing, where the caller
+// doesn't already know which card each milestone belongs to -- unlike the card-scoped list.
+nlohmann::json milestone_with_card_title_to_json(
+    holder::platform::Db& db,
+    const holder::model::Milestone& milestone
+) {
+  auto body = milestone_to_json(milestone);
+  const auto card = holder::card::CardRepo(db).get(milestone.card_id);
+  body["card_title"] = card.has_value() ? nlohmann::json(card->title) : nlohmann::json(nullptr);
+  return body;
 }
 
 nlohmann::json project_sync_to_json(const std::optional<holder::model::ProjectSyncState>& sync) {
@@ -1339,6 +1367,228 @@ int holder_project_list_tags(
     nlohmann::json body = nlohmann::json::array();
     for (const auto& [tag, count] : holder::card::TagRepo(context->db).list_project_tags(project_id)) {
       body.push_back({{"tag", tag}, {"count", count}});
+    }
+
+    auto* out = duplicate_string(body.dump());
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+    }
+
+    *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
+  }  // LCOV_EXCL_LINE
+}
+
+int holder_card_list_milestones(
+    holder_context* context,
+    const char* card_id,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (card_id == nullptr || card_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "card_id must not be empty");
+  }
+
+  try {
+    holder::card::CardRepo cards(context->db);
+    const auto card = cards.get(card_id);
+    if (!card.has_value()) {
+      return set_error(out_error, HOLDER_ERROR_RUNTIME, "card not found: " + std::string(card_id));
+    }
+
+    nlohmann::json body = nlohmann::json::array();
+    for (const auto& milestone :
+         holder::card::MilestoneRepo(context->db).list_for_card(card->project_id, card_id)) {
+      body.push_back(milestone_to_json(milestone));
+    }
+
+    auto* out = duplicate_string(body.dump());
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+    }
+
+    *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
+  }  // LCOV_EXCL_LINE
+}
+
+int holder_card_milestone_add(
+    holder_context* context,
+    const char* card_id,
+    long long start_at,
+    int has_end_at,
+    long long end_at,
+    int all_day,
+    const char* kind,
+    const char* description,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (card_id == nullptr || card_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "card_id must not be empty");
+  }
+
+  try {
+    holder::card::CardRepo cards(context->db);
+    const auto card = cards.get(card_id);
+    if (!card.has_value()) {
+      return set_error(out_error, HOLDER_ERROR_RUNTIME, "card not found: " + std::string(card_id));
+    }
+
+    holder::card::MilestoneRepo milestone_repo(context->db);
+    auto milestones = milestone_repo.list_for_card(card->project_id, card_id);
+
+    holder::model::Milestone milestone;
+    milestone.milestone_id = uuid_v4();
+    milestone.project_id = card->project_id;
+    milestone.card_id = card_id;
+    milestone.start_at = start_at;
+    if (has_end_at != 0) {
+      milestone.end_at = end_at;
+    }
+    milestone.all_day = (all_day != 0);
+    if (kind != nullptr && kind[0] != '\0') {
+      milestone.kind = std::string(kind);
+    }
+    if (description != nullptr && description[0] != '\0') {
+      milestone.description = std::string(description);
+    }
+    milestone.created_at = now_epoch_seconds();
+    milestone.updated_at = milestone.created_at;
+    milestones.push_back(milestone);
+
+    milestone_repo.replace_for_card(card->project_id, card_id, milestones);
+    holder::card::CardStore(context->db, &context->fts)
+        .update_milestones(card_id, now_epoch_seconds());
+
+    nlohmann::json body = nlohmann::json::array();
+    for (const auto& m : milestone_repo.list_for_card(card->project_id, card_id)) {
+      body.push_back(milestone_to_json(m));
+    }
+    auto* out = duplicate_string(body.dump());
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+    }
+
+    *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
+  }  // LCOV_EXCL_LINE
+}
+
+int holder_card_milestone_remove(
+    holder_context* context,
+    const char* card_id,
+    const char* milestone_id,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (card_id == nullptr || card_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "card_id must not be empty");
+  }
+  if (milestone_id == nullptr || milestone_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "milestone_id must not be empty");
+  }
+
+  try {
+    holder::card::CardRepo cards(context->db);
+    const auto card = cards.get(card_id);
+    if (!card.has_value()) {
+      return set_error(out_error, HOLDER_ERROR_RUNTIME, "card not found: " + std::string(card_id));
+    }
+
+    holder::card::MilestoneRepo milestone_repo(context->db);
+    auto milestones = milestone_repo.list_for_card(card->project_id, card_id);
+    const auto before = milestones.size();
+    milestones.erase(
+        std::remove_if(
+            milestones.begin(),
+            milestones.end(),
+            [&](const holder::model::Milestone& m) { return m.milestone_id == milestone_id; }
+        ),
+        milestones.end()
+    );
+    if (milestones.size() == before) {
+      return HOLDER_OK;
+    }
+
+    milestone_repo.replace_for_card(card->project_id, card_id, milestones);
+    holder::card::CardStore(context->db, &context->fts)
+        .update_milestones(card_id, now_epoch_seconds());
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
+  }  // LCOV_EXCL_LINE
+}
+
+int holder_project_list_milestones_in_range(
+    holder_context* context,
+    const char* project_id,
+    long long from,
+    long long to,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (project_id == nullptr || project_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "project_id must not be empty");
+  }
+
+  try {
+    nlohmann::json body = nlohmann::json::array();
+    for (const auto& milestone :
+         holder::card::MilestoneRepo(context->db).list_in_range(project_id, from, to)) {
+      body.push_back(milestone_with_card_title_to_json(context->db, milestone));
     }
 
     auto* out = duplicate_string(body.dump());
