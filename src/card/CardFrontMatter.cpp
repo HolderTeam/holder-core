@@ -16,7 +16,8 @@ constexpr std::string_view kCrlfClosingDelimiter = "\r\n---\r\n";
 
 std::string render_card_front_matter(
     const holder::model::Card& card,
-    const std::vector<holder::model::CardLink>& links
+    const std::vector<holder::model::CardLink>& links,
+    const std::vector<holder::model::Milestone>& milestones
 ) {
   YAML::Emitter out;
   out << YAML::BeginMap;
@@ -52,6 +53,35 @@ std::string render_card_front_matter(
     } else {
       out << YAML::Key << "label" << YAML::Value << YAML::Null;
     }
+    out << YAML::EndMap;
+  }
+  out << YAML::EndSeq;
+  out << YAML::Key << "milestones" << YAML::Value << YAML::BeginSeq;
+  for (const auto& milestone : milestones) {
+    out << YAML::BeginMap;
+    out << YAML::Key << "milestone_id" << YAML::Value << milestone.milestone_id;
+    out << YAML::Key << "start_at" << YAML::Value << milestone.start_at;
+    out << YAML::Key << "end_at" << YAML::Value;
+    if (milestone.end_at.has_value()) {
+      out << milestone.end_at.value();
+    } else {
+      out << YAML::Null;
+    }
+    out << YAML::Key << "all_day" << YAML::Value << milestone.all_day;
+    out << YAML::Key << "kind" << YAML::Value;
+    if (milestone.kind.has_value()) {
+      out << milestone.kind.value();
+    } else {
+      out << YAML::Null;
+    }
+    out << YAML::Key << "description" << YAML::Value;
+    if (milestone.description.has_value()) {
+      out << milestone.description.value();
+    } else {
+      out << YAML::Null;
+    }
+    out << YAML::Key << "created_at" << YAML::Value << milestone.created_at;
+    out << YAML::Key << "updated_at" << YAML::Value << milestone.updated_at;
     out << YAML::EndMap;
   }
   out << YAML::EndSeq;
@@ -126,6 +156,32 @@ ParsedCardFile parse_card_file(const std::string& raw) {
         }
         if (!link.to_card_id.empty()) {
           parsed.links.push_back(std::move(link));
+        }
+      }
+    }
+
+    if (node["milestones"] && node["milestones"].IsSequence()) {
+      for (const auto& item : node["milestones"]) {
+        if (!item.IsMap()) continue;
+        holder::model::Milestone milestone;
+        milestone.project_id = card.project_id;
+        milestone.card_id = card.card_id;
+        if (item["milestone_id"]) milestone.milestone_id = item["milestone_id"].as<std::string>();
+        if (item["start_at"]) milestone.start_at = item["start_at"].as<long long>();
+        if (item["end_at"] && !item["end_at"].IsNull()) {
+          milestone.end_at = item["end_at"].as<long long>();
+        }
+        if (item["all_day"]) milestone.all_day = item["all_day"].as<bool>();
+        if (item["kind"] && !item["kind"].IsNull()) {
+          milestone.kind = item["kind"].as<std::string>();
+        }
+        if (item["description"] && !item["description"].IsNull()) {
+          milestone.description = item["description"].as<std::string>();
+        }
+        if (item["created_at"]) milestone.created_at = item["created_at"].as<long long>();
+        if (item["updated_at"]) milestone.updated_at = item["updated_at"].as<long long>();
+        if (!milestone.milestone_id.empty()) {
+          parsed.milestones.push_back(std::move(milestone));
         }
       }
     }

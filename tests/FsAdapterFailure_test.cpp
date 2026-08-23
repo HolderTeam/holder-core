@@ -232,7 +232,7 @@ TEST_CASE("Rebuilder propagates fs read failure", "[fs]") {
   card.rel_path = holder::core::card_rel_path(card.card_id);
   card.created_at = 1;
   card.updated_at = 1;
-  const auto raw = holder::core::render_card_front_matter(card, {}) + "body";
+  const auto raw = holder::core::render_card_front_matter(card, {}, {}) + "body";
   const auto full_path = root / card.rel_path;
   std::filesystem::create_directories(full_path.parent_path());
   std::ofstream out(full_path);
@@ -363,7 +363,7 @@ TEST_CASE("Rebuilder rebuilds cards/messages with defaults, links, trash and FTS
   card_link.created_at = 0; // rebuilt default path
   write_file(
       root / card_b.rel_path,
-      holder::core::render_card_front_matter(card_b, {card_link}) + "linked body #todo\n"
+      holder::core::render_card_front_matter(card_b, {card_link}, {}) + "linked body #todo\n"
   );
 
   // Trash card without front matter -> deleted_at gets mtime. Its #ghost tag must not surface
@@ -745,7 +745,7 @@ TEST_CASE("Rebuilder rejects cards with unresolved parent graph", "[rebuild]") {
   child.rel_path = holder::core::card_rel_path(child.card_id);
   child.created_at = 1;
   child.updated_at = 1;
-  write_file(root / child.rel_path, holder::core::render_card_front_matter(child, {}) + "body\n");
+  write_file(root / child.rel_path, holder::core::render_card_front_matter(child, {}, {}) + "body\n");
 
   holder::index::FtsIndexer fts(db);
   holder::store::Rebuilder rebuilder(db, &fts);

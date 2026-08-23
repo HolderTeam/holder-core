@@ -1073,7 +1073,7 @@ TEST_CASE("CardStore move exercises error and no-op branches", "[cardstore]") {
   file_card.parent_card_id = std::optional<std::string>("parent-target");
   file_card.sort_key = 7.0;
   file_card.updated_at = 77;
-  const auto prewritten_raw = holder::core::render_card_front_matter(file_card, {}) +
+  const auto prewritten_raw = holder::core::render_card_front_matter(file_card, {}, {}) +
                               stale_parsed.body;
   holder::git::GitRepo stale_repo;
   stale_repo.open_or_init(project_root);

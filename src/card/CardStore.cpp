@@ -37,9 +37,10 @@ void write_card_file(
     const holder::model::Project& project,
     const holder::model::Card& card,
     const std::vector<holder::model::CardLink>& links,
+    const std::vector<holder::model::Milestone>& milestones,
     const std::string& content
 ) {
-  const auto plain = holder::core::render_card_front_matter(card, links) + content;
+  const auto plain = holder::core::render_card_front_matter(card, links, milestones) + content;
   if (project.privacy_mode == "encrypted_git") {
     const auto& project_key_id = require_project_key_id(project);
     repo.write_file(
@@ -126,7 +127,7 @@ void CardStore::create(
   }
 
   const auto links = link_repo_.list_outgoing(card.project_id, card.card_id);
-  write_card_file(*git_, project, card, links, content);
+  write_card_file(*git_, project, card, links, {}, content);
 
   git_->stage_path(card.rel_path);
   assert_project_staged_blobs_safe(project, {card.rel_path});
@@ -168,9 +169,12 @@ void CardStore::update_content(
 
   const auto full_path = git_->repo_dir() / card.rel_path;
   bool unchanged = false;
+  std::vector<holder::model::Milestone> existing_milestones;
   if (fs_->exists(full_path)) {
     const auto plain = decode_card_blob(project, fs_->read_file(full_path));
-    unchanged = (holder::core::parse_card_file(plain).body == content);
+    const auto parsed = holder::core::parse_card_file(plain);
+    unchanged = (parsed.body == content);
+    existing_milestones = parsed.milestones;
   }
 
   if (!unchanged) {
@@ -180,7 +184,7 @@ void CardStore::update_content(
     }
     updated_card.updated_at = updated_at;
     const auto links = link_repo_.list_outgoing(card.project_id, card.card_id);
-    write_card_file(*git_, project, updated_card, links, content);
+    write_card_file(*git_, project, updated_card, links, existing_milestones, content);
   }
 
   if (!unchanged) {
@@ -254,7 +258,8 @@ void CardStore::move(
   card.parent_card_id = next_parent;
   card.sort_key = next_sort;
   card.updated_at = updated_at;
-  const auto updated_plain = holder::core::render_card_front_matter(card, links) + parsed.body;
+  const auto updated_plain =
+      holder::core::render_card_front_matter(card, links, parsed.milestones) + parsed.body;
   const auto updated_raw = (project.privacy_mode == "encrypted_git")
                                ? holder::privacy::encrypt_project_blob(
                                      project.project_id,
@@ -301,7 +306,8 @@ void CardStore::update_links(const std::string& card_id, long long updated_at) {
   const auto links = link_repo_.list_outgoing(card.project_id, card.card_id);
 
   card.updated_at = updated_at;
-  const auto updated_plain = holder::core::render_card_front_matter(card, links) + parsed.body;
+  const auto updated_plain =
+      holder::core::render_card_front_matter(card, links, parsed.milestones) + parsed.body;
   const auto updated_raw = (project.privacy_mode == "encrypted_git")
                                ? holder::privacy::encrypt_project_blob(
                                      project.project_id,
