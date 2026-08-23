@@ -33,6 +33,7 @@ add_executable(holder_core_tests
   GitRepo_test.cpp
   LinkKindCatalog_test.cpp
   LinkRepo_test.cpp
+  MilestoneRepo_test.cpp
   Migrations_test.cpp
   PrivacyCryptoService_test.cpp
   PrivacyError_test.cpp

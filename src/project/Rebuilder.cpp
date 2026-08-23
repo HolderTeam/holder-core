@@ -7,6 +7,7 @@
 #include "card/CardPaths.h"
 #include "card/CardRepo.h"
 #include "card/LinkRepo.h"
+#include "card/MilestoneRepo.h"
 #include "card/TagExtractor.h"
 #include "card/TagRepo.h"
 #include "platform/Fs.h"
@@ -127,6 +128,7 @@ struct CardRecord {
   holder::model::Card card;
   std::string body;
   std::vector<holder::model::CardLink> links;
+  std::vector<holder::model::Milestone> milestones;
 };
 
 } // namespace
@@ -178,6 +180,7 @@ Rebuilder::RebuildStats Rebuilder::rebuild_project(const holder::model::Project&
 
   holder::card::CardRepo card_repo(db_);
   holder::card::LinkRepo link_repo(db_);
+  holder::card::MilestoneRepo milestone_repo(db_);
   holder::card::TagRepo tag_repo(db_);
 
   auto collect_files = [&](const std::filesystem::path& base) {
@@ -256,6 +259,13 @@ Rebuilder::RebuildStats Rebuilder::rebuild_project(const holder::model::Project&
       if (link.kind.empty()) link.kind = "ref";
       if (link.created_at <= 0) link.created_at = record.card.created_at;
     }
+    record.milestones = parsed.milestones;
+    for (auto& milestone : record.milestones) {
+      milestone.project_id = record.card.project_id;
+      milestone.card_id = record.card.card_id;
+      if (milestone.created_at <= 0) milestone.created_at = record.card.created_at;
+      if (milestone.updated_at <= 0) milestone.updated_at = milestone.created_at;
+    }
     card_records.push_back(std::move(record));
   };
 
@@ -294,6 +304,13 @@ Rebuilder::RebuildStats Rebuilder::rebuild_project(const holder::model::Project&
             record.card.project_id, record.card.card_id, extracted_tags, record.card.created_at
         );
         stats.tags += extracted_tags.size();
+
+        if (!record.milestones.empty()) {
+          milestone_repo.replace_for_card(
+              record.card.project_id, record.card.card_id, record.milestones
+          );
+          stats.milestones += record.milestones.size();
+        }
       }
       inserted_cards.insert(record.card.card_id);
       inserted[i] = true;

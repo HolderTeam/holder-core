@@ -8,6 +8,7 @@
 #include "card/CardPaths.h"
 #include "card/CardRepo.h"
 #include "card/CardStore.h"
+#include "card/MilestoneRepo.h"
 #include "card/TagRepo.h"
 #include "git/GitOps.h"
 #include "git/GitRepo.h"
@@ -86,6 +87,21 @@ std::string read_file(const std::filesystem::path& path) {
   REQUIRE(in.is_open());
   std::string data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
   return data;
+}
+
+holder::model::Milestone make_milestone_for(
+    const std::string& milestone_id,
+    const std::string& project_id,
+    const std::string& card_id
+) {
+  holder::model::Milestone milestone;
+  milestone.milestone_id = milestone_id;
+  milestone.project_id = project_id;
+  milestone.card_id = card_id;
+  milestone.start_at = 100;
+  milestone.created_at = 1;
+  milestone.updated_at = 1;
+  return milestone;
 }
 
 std::string make_large_body(std::size_t bytes) {
@@ -1360,4 +1376,138 @@ TEST_CASE("CardStore keeps card_tags in sync across create/update/trash/restore/
   store.hard_delete(card.card_id);
   REQUIRE(tags.list_tags_for_card("proj-1", card.card_id).empty());
   REQUIRE(tags.list_card_ids_with_tag("proj-1", "urgent").empty());
+}
+
+TEST_CASE("CardStore update_milestones exercises error, encrypted, and no-op branches", "[cardstore]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  const auto project_root = dir / "project_repo";
+  create_project(db, "proj-1", project_root.string());
+
+  holder::index::FtsIndexer fts(db);
+  holder::card::CardStore store(db, &fts);
+  holder::card::CardRepo card_repo(db);
+  holder::card::MilestoneRepo milestones(db);
+
+  REQUIRE_THROWS(store.update_milestones("missing", 2));
+
+  holder::model::Card bad_rel;
+  bad_rel.card_id = "milbad01";
+  bad_rel.project_id = "proj-1";
+  bad_rel.rel_path = "cards/wrong.md";
+  bad_rel.title = "Bad";
+  bad_rel.sort_key = 0.0;
+  bad_rel.created_at = 1;
+  bad_rel.updated_at = 1;
+  card_repo.create(bad_rel);
+  REQUIRE_THROWS(store.update_milestones(bad_rel.card_id, 2));
+
+  holder::model::Card noop;
+  noop.card_id = "milnop01";
+  noop.project_id = "proj-1";
+  noop.title = "Noop";
+  noop.created_at = 1;
+  noop.updated_at = 10;
+  store.create(noop, "body");
+  const int before = count_commits(project_root);
+  store.update_milestones(noop.card_id, 10);
+  REQUIRE(count_commits(project_root) == before);
+
+  holder::model::Milestone milestone;
+  milestone.milestone_id = "mile-1";
+  milestone.project_id = "proj-1";
+  milestone.card_id = noop.card_id;
+  milestone.start_at = 100;
+  milestone.kind = "Renewal";
+  milestone.created_at = 1;
+  milestone.updated_at = 1;
+  milestones.replace_for_card("proj-1", noop.card_id, {milestone});
+
+  store.update_milestones(noop.card_id, 11);
+  REQUIRE(count_commits(project_root) == before + 1);
+
+  const auto raw = read_file(project_root / holder::core::card_rel_path(noop.card_id));
+  const auto parsed = holder::core::parse_card_file(raw);
+  REQUIRE(parsed.milestones.size() == 1);
+  REQUIRE(parsed.milestones[0].milestone_id == "mile-1");
+
+  // Encrypted update_milestones path
+  holder::project::ProjectRepo project_repo(db);
+  holder::model::Project enc;
+  enc.project_id = "proj-enc-milestones";
+  enc.name = "Encrypted Milestones";
+  enc.root_path = (dir / "project_repo_enc").string();
+  enc.privacy_mode = "encrypted_git";
+  enc.project_key_id.reset();
+  enc.created_at = 1;
+  enc.updated_at = 1;
+  project_repo.create(enc);
+  holder::test::EnvGuard keystore_env("HOLDER_TEST_KEYSTORE_DIR", (dir / "keystore").string());
+  holder::git::RealGitOps bootstrap_git;
+  holder::privacy::ensure_encrypted_project_ready(
+      bootstrap_git,
+      project_repo,
+      enc.project_id,
+      enc.root_path,
+      std::nullopt,
+      2,
+      []() {
+        return std::string("key-milestones");
+      }
+  );
+
+  holder::model::Card enc_card;
+  enc_card.card_id = "encmil01";
+  enc_card.project_id = enc.project_id;
+  enc_card.title = "Enc";
+  enc_card.created_at = 1;
+  enc_card.updated_at = 1;
+  store.create(enc_card, "body");
+  milestones.replace_for_card(
+      enc.project_id, enc_card.card_id, {make_milestone_for("mile-enc", enc.project_id, enc_card.card_id)}
+  );
+  const int before_enc = count_commits(enc.root_path);
+  store.update_milestones(enc_card.card_id, 2);
+  REQUIRE(count_commits(enc.root_path) == before_enc + 1);
+}
+
+TEST_CASE("CardStore keeps milestones in sync across trash/restore/hard_delete", "[cardstore]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  const auto project_root = dir / "project_repo";
+  create_project(db, "proj-1", project_root.string());
+
+  holder::index::FtsIndexer fts(db);
+  holder::card::CardStore store(db, &fts);
+  holder::card::MilestoneRepo milestones(db);
+
+  holder::model::Card card;
+  card.card_id = "milsync1";
+  card.project_id = "proj-1";
+  card.title = "Milestone card";
+  card.created_at = 1;
+  card.updated_at = 1;
+  store.create(card, "Body");
+
+  milestones.replace_for_card(
+      "proj-1", card.card_id, {make_milestone_for("mile-1", "proj-1", card.card_id)}
+  );
+  store.update_milestones(card.card_id, 2);
+  REQUIRE(milestones.list_for_card("proj-1", card.card_id).size() == 1);
+
+  store.trash(card.card_id, 3);
+  REQUIRE(milestones.list_for_card("proj-1", card.card_id).empty());
+
+  store.restore(card.card_id, 4);
+  const auto after_restore = milestones.list_for_card("proj-1", card.card_id);
+  REQUIRE(after_restore.size() == 1);
+  REQUIRE(after_restore[0].milestone_id == "mile-1");
+
+  store.trash(card.card_id, 5);
+  store.hard_delete(card.card_id);
+  REQUIRE(milestones.list_for_card("proj-1", card.card_id).empty());
 }

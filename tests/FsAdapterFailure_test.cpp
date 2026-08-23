@@ -12,6 +12,7 @@
 #include "card/CardPaths.h"
 #include "card/CardRepo.h"
 #include "card/CardStore.h"
+#include "card/MilestoneRepo.h"
 #include "index/FtsIndexer.h"
 #include "model/AiMessage.h"
 #include "model/AiThread.h"
@@ -361,9 +362,16 @@ TEST_CASE("Rebuilder rebuilds cards/messages with defaults, links, trash and FTS
   card_link.to_type = "card";
   card_link.kind = "ref";
   card_link.created_at = 0; // rebuilt default path
+  holder::model::Milestone card_milestone;
+  card_milestone.milestone_id = "mile-b1";
+  card_milestone.start_at = 500;
+  card_milestone.kind = "Renewal";
+  card_milestone.created_at = 0; // rebuilt default path
+  card_milestone.updated_at = 0; // rebuilt default path
   write_file(
       root / card_b.rel_path,
-      holder::core::render_card_front_matter(card_b, {card_link}, {}) + "linked body #todo\n"
+      holder::core::render_card_front_matter(card_b, {card_link}, {card_milestone}) +
+          "linked body #todo\n"
   );
 
   // Trash card without front matter -> deleted_at gets mtime. Its #ghost tag must not surface
@@ -413,6 +421,7 @@ TEST_CASE("Rebuilder rebuilds cards/messages with defaults, links, trash and FTS
   REQUIRE(stats.ai_threads == 3);
   REQUIRE(stats.links == 2);
   REQUIRE(stats.tags == 1);
+  REQUIRE(stats.milestones == 1);
 
   // Derived title + created/updated fallback from mtime.
   const auto title =
@@ -461,6 +470,18 @@ TEST_CASE("Rebuilder rebuilds cards/messages with defaults, links, trash and FTS
   REQUIRE(out_msg[0].kind == "ref");
   REQUIRE(out_msg[0].created_at > 0);
 
+  // Milestone was inserted and normalized (project_id/card_id/created_at/updated_at) by rebuilder.
+  holder::card::MilestoneRepo milestones(db);
+  const auto card_milestones = milestones.list_for_card(project_id, "beef5678");
+  REQUIRE(card_milestones.size() == 1);
+  REQUIRE(card_milestones[0].milestone_id == "mile-b1");
+  REQUIRE(card_milestones[0].project_id == project_id);
+  REQUIRE(card_milestones[0].card_id == "beef5678");
+  REQUIRE(card_milestones[0].start_at == 500);
+  REQUIRE(card_milestones[0].kind == std::optional<std::string>("Renewal"));
+  REQUIRE(card_milestones[0].created_at > 0);
+  REQUIRE(card_milestones[0].updated_at > 0);
+
   // FTS receives non-deleted rows.
   REQUIRE(fts.search_cards(project_id, "heading", 10, 0).size() >= 1);
   REQUIRE(fts.search_messages(project_id, "answer", 10, 0).size() >= 1);
@@ -470,6 +491,54 @@ TEST_CASE("Rebuilder rebuilds cards/messages with defaults, links, trash and FTS
   REQUIRE(tags.list_tags_for_card(project_id, "beef5678") == std::vector<std::string>{"todo"});
   REQUIRE(tags.list_card_ids_with_tag(project_id, "todo") == std::vector<std::string>{"beef5678"});
   REQUIRE(tags.list_card_ids_with_tag(project_id, "ghost").empty());
+}
+
+TEST_CASE("Rebuilder excludes a trashed card's milestones from the index", "[rebuild]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+
+  const std::string project_id = "proj-1";
+  const auto root = dir / "repo";
+  std::filesystem::create_directories(root);
+  create_project(db, project_id, root.string());
+
+  holder::model::Card trashed;
+  trashed.card_id = "trshmil1";
+  trashed.project_id = project_id;
+  trashed.title = "Trashed";
+  trashed.rel_path = holder::core::card_trash_rel_path(trashed.card_id);
+  trashed.created_at = 1;
+  trashed.updated_at = 1;
+  trashed.deleted_at = 2;
+
+  holder::model::Milestone milestone;
+  milestone.milestone_id = "mile-t1";
+  milestone.start_at = 100;
+  milestone.created_at = 1;
+  milestone.updated_at = 1;
+  write_file(
+      root / trashed.rel_path,
+      holder::core::render_card_front_matter(trashed, {}, {milestone}) + "trashed body\n"
+  );
+
+  holder::index::FtsIndexer fts(db);
+  holder::store::Rebuilder rebuilder(db, &fts);
+
+  holder::model::Project project;
+  project.project_id = project_id;
+  project.name = "Project";
+  project.root_path = root.string();
+  project.created_at = 1;
+  project.updated_at = 1;
+
+  const auto stats = rebuilder.rebuild_project(project);
+  REQUIRE(stats.cards == 1);
+  REQUIRE(stats.milestones == 0);
+
+  holder::card::MilestoneRepo milestones(db);
+  REQUIRE(milestones.list_for_card(project_id, trashed.card_id).empty());
 }
 
 TEST_CASE("Rebuilder derive_title falls back when heading is blank", "[rebuild]") {

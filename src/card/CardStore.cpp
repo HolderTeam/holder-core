@@ -82,6 +82,7 @@ CardStore::CardStore(
       git_(&resolve_git(git)),
       card_repo_(db),
       link_repo_(db),
+      milestone_repo_(db),
       tag_repo_(db),
       project_repo_(db),
       fts_(fts) {}
@@ -327,6 +328,51 @@ void CardStore::update_links(const std::string& card_id, long long updated_at) {
   git_->commit("Update links for " + card.title);
 }
 
+void CardStore::update_milestones(const std::string& card_id, long long updated_at) {
+  const auto card_opt = card_repo_.get(card_id);
+  if (!card_opt.has_value()) {
+    throw std::runtime_error("card not found: " + card_id);
+  }
+
+  auto card = card_opt.value();
+  const auto project = require_project(card.project_id);
+  const std::string expected = holder::core::card_rel_path(card.card_id);
+  if (card.rel_path != expected) {
+    throw std::runtime_error("card rel_path does not match card_id");
+  }
+
+  const auto full_path = git_->repo_dir() / card.rel_path;
+  if (!fs_->exists(full_path)) {
+    throw std::runtime_error("card content missing");
+  }
+
+  const auto raw = fs_->read_file(full_path);
+  const auto plain = decode_card_blob(project, raw);
+  const auto parsed = holder::core::parse_card_file(plain);
+  const auto milestones = milestone_repo_.list_for_card(card.project_id, card.card_id);
+
+  card.updated_at = updated_at;
+  const auto updated_plain =
+      holder::core::render_card_front_matter(card, parsed.links, milestones) + parsed.body;
+  const auto updated_raw = (project.privacy_mode == "encrypted_git")
+                               ? holder::privacy::encrypt_project_blob(
+                                     project.project_id,
+                                     require_project_key_id(project),
+                                     updated_plain
+                                 )
+                               : updated_plain;
+
+  if (updated_raw == raw) {
+    return;
+  }
+
+  git_->write_file(card.rel_path, updated_raw);
+  git_->stage_path(card.rel_path);
+  assert_project_staged_blobs_safe(project, {card.rel_path});
+  card_repo_.touch_updated(card_id, updated_at);
+  git_->commit("Update milestones for " + card.title);
+}
+
 void CardStore::trash(const std::string& card_id, long long deleted_at) {
   const auto card_opt = card_repo_.get(card_id);
   if (!card_opt.has_value()) {
@@ -358,6 +404,7 @@ void CardStore::trash(const std::string& card_id, long long deleted_at) {
     fts_->delete_card(card_id);
   }
   tag_repo_.delete_tags_for_card(card.project_id, card_id);
+  milestone_repo_.delete_for_card(card.project_id, card_id);
   git_->remove_path(card.rel_path);
   git_->stage_path(trash_rel);
   git_->commit("Delete card " + card.title);
@@ -401,6 +448,7 @@ void CardStore::restore(const std::string& card_id, long long updated_at) {
   tag_repo_.set_tags_for_card(
       card.project_id, card_id, holder::core::extract_tags(parsed.body), updated_at
   );
+  milestone_repo_.replace_for_card(card.project_id, card_id, parsed.milestones);
   git_->remove_path(trash_rel);
   git_->commit("Restore card " + card.title);
 }
@@ -426,6 +474,7 @@ void CardStore::hard_delete(const std::string& card_id) {
   link_repo_.delete_links_from(card.project_id, card.card_id);
   link_repo_.delete_links_to_typed(card.project_id, card.card_id, "card");
   tag_repo_.delete_tags_for_card(card.project_id, card.card_id);
+  milestone_repo_.delete_for_card(card.project_id, card.card_id);
   card_repo_.remove(card.card_id);
   git_->commit("Permanently delete card " + card.title);
 }

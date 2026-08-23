@@ -2,6 +2,7 @@
 
 #include "card/CardRepo.h"
 #include "card/LinkRepo.h"
+#include "card/MilestoneRepo.h"
 #include "card/TagRepo.h"
 #include "git/GitOps.h"
 #include "index/FtsIndexer.h"
@@ -43,6 +44,7 @@ class CardStore {
       long long updated_at
   );
   void update_links(const std::string& card_id, long long updated_at);
+  void update_milestones(const std::string& card_id, long long updated_at);
   void trash(const std::string& card_id, long long deleted_at);
   void restore(const std::string& card_id, long long updated_at);
   void hard_delete(const std::string& card_id);
@@ -56,6 +58,7 @@ class CardStore {
   holder::git::GitOps* git_ = nullptr;
   CardRepo card_repo_;
   LinkRepo link_repo_;
+  MilestoneRepo milestone_repo_;
   TagRepo tag_repo_;
   holder::project::ProjectRepo project_repo_;
   holder::index::FtsIndexer* fts_ = nullptr;

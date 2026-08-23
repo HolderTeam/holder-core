@@ -24,6 +24,7 @@ class Rebuilder {
     std::size_t ai_threads = 0;
     std::size_t links = 0;
     std::size_t tags = 0;
+    std::size_t milestones = 0;
   };
 
   RebuildStats rebuild_project(const holder::model::Project& project);
