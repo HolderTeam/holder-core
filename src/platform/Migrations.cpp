@@ -62,6 +62,40 @@ UPDATE schema_version SET version = 2 WHERE version = 1;
   tx.commit();
 }
 
+void migrate_v2_to_v3(Db& db) {
+  static constexpr const char* SQL = R"sql(
+DROP TABLE IF EXISTS alerts;
+
+CREATE TABLE IF NOT EXISTS milestones (
+  milestone_id  TEXT PRIMARY KEY,
+  project_id    TEXT NOT NULL,
+  card_id       TEXT NOT NULL,
+  start_at      INTEGER NOT NULL,
+  end_at        INTEGER NULL,
+  all_day       INTEGER NOT NULL DEFAULT 0,
+  kind          TEXT NULL,
+  description   TEXT NULL,
+  created_at    INTEGER NOT NULL,
+  updated_at    INTEGER NOT NULL,
+
+  FOREIGN KEY(project_id) REFERENCES projects(project_id) ON DELETE CASCADE,
+  FOREIGN KEY(card_id)    REFERENCES cards(card_id)       ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_milestones_project_card
+  ON milestones(project_id, card_id);
+
+CREATE INDEX IF NOT EXISTS idx_milestones_project_start
+  ON milestones(project_id, start_at);
+
+UPDATE schema_version SET version = 3 WHERE version = 2;
+)sql";
+
+  Tx tx(db);
+  db.exec(SQL);
+  tx.commit();
+}
+
 } // namespace
 
 std::string Migrations::read_file(const std::filesystem::path& p) {
@@ -128,6 +162,11 @@ bool Migrations::migrate_to_latest(Db& db) {
     case 1:
       migrate_v1_to_v2(db);
       version = 2;
+      migrated = true;
+      break;
+    case 2:
+      migrate_v2_to_v3(db);
+      version = 3;
       migrated = true;
       break;
     default:

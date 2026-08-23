@@ -8,7 +8,7 @@ namespace holder::platform {
 
 class Migrations {
  public:
-  static constexpr int latest_schema_version = 2;
+  static constexpr int latest_schema_version = 3;
 
   // Apply schema.sql if DB is new/empty (v0.1).
   static void ensure_schema(Db& db, const std::filesystem::path& schema_sql_path);

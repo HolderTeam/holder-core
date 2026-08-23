@@ -50,7 +50,7 @@ TEST_CASE("ensure_schema_version accepts expected version", "[migrations]") {
   const auto schema_path = find_schema_sql();
   holder::platform::Migrations::ensure_schema(db, schema_path);
 
-  REQUIRE_NOTHROW(holder::platform::Migrations::ensure_schema_version(db, 2));
+  REQUIRE_NOTHROW(holder::platform::Migrations::ensure_schema_version(db, 3));
   REQUIRE_FALSE(holder::platform::Migrations::migrate_to_latest(db));
 }
 
@@ -81,7 +81,7 @@ TEST_CASE("migrate_to_latest upgrades v1 databases with card tags", "[migrations
   db.exec("UPDATE schema_version SET version = 1;");
 
   REQUIRE(holder::platform::Migrations::migrate_to_latest(db));
-  REQUIRE_NOTHROW(holder::platform::Migrations::ensure_schema_version(db, 2));
+  REQUIRE_NOTHROW(holder::platform::Migrations::ensure_schema_version(db, 3));
   REQUIRE_NOTHROW(db.exec("SELECT project_id, card_id, tag, created_at FROM card_tags;"));
   REQUIRE_FALSE(holder::platform::Migrations::migrate_to_latest(db));
 }
@@ -96,7 +96,53 @@ TEST_CASE("migrate_to_latest tolerates a v1 database that already has card tags"
   db.exec("UPDATE schema_version SET version = 1;");
 
   REQUIRE(holder::platform::Migrations::migrate_to_latest(db));
-  REQUIRE_NOTHROW(holder::platform::Migrations::ensure_schema_version(db, 2));
+  REQUIRE_NOTHROW(holder::platform::Migrations::ensure_schema_version(db, 3));
+}
+
+TEST_CASE("migrate_to_latest upgrades v2 databases with milestones and drops alerts", "[migrations]") {
+  const auto dir = make_temp_dir();
+  const auto db_path = dir / "holder.db";
+
+  holder::platform::Db db;
+  db.open(db_path);
+  holder::platform::Migrations::ensure_schema(db, find_schema_sql());
+  db.exec("DROP TABLE milestones;");
+  db.exec(
+      "CREATE TABLE alerts ("
+      "  alert_id TEXT PRIMARY KEY,"
+      "  project_id TEXT NOT NULL,"
+      "  card_id TEXT NULL,"
+      "  title TEXT NOT NULL,"
+      "  due_at INTEGER NOT NULL,"
+      "  created_at INTEGER NOT NULL,"
+      "  updated_at INTEGER NOT NULL"
+      ");"
+  );
+  db.exec("UPDATE schema_version SET version = 2;");
+
+  REQUIRE(holder::platform::Migrations::migrate_to_latest(db));
+  REQUIRE_NOTHROW(holder::platform::Migrations::ensure_schema_version(db, 3));
+  REQUIRE_NOTHROW(
+      db.exec(
+          "SELECT milestone_id, project_id, card_id, start_at, end_at, all_day, kind, description, "
+          "created_at, updated_at FROM milestones;"
+      )
+  );
+  REQUIRE_THROWS(db.exec("SELECT 1 FROM alerts;"));
+  REQUIRE_FALSE(holder::platform::Migrations::migrate_to_latest(db));
+}
+
+TEST_CASE("migrate_to_latest tolerates a v2 database that already has milestones", "[migrations]") {
+  const auto dir = make_temp_dir();
+  const auto db_path = dir / "holder.db";
+
+  holder::platform::Db db;
+  db.open(db_path);
+  holder::platform::Migrations::ensure_schema(db, find_schema_sql());
+  db.exec("UPDATE schema_version SET version = 2;");
+
+  REQUIRE(holder::platform::Migrations::migrate_to_latest(db));
+  REQUIRE_NOTHROW(holder::platform::Migrations::ensure_schema_version(db, 3));
 }
 
 TEST_CASE("migrate_to_latest rejects databases newer than this build", "[migrations]") {
@@ -106,11 +152,11 @@ TEST_CASE("migrate_to_latest rejects databases newer than this build", "[migrati
   holder::platform::Db db;
   db.open(db_path);
   holder::platform::Migrations::ensure_schema(db, find_schema_sql());
-  db.exec("UPDATE schema_version SET version = 3;");
+  db.exec("UPDATE schema_version SET version = 4;");
 
   REQUIRE_THROWS_WITH(
       holder::platform::Migrations::migrate_to_latest(db),
-      Catch::Matchers::ContainsSubstring("Expected at most 2")
+      Catch::Matchers::ContainsSubstring("Expected at most 3")
   );
 }
 

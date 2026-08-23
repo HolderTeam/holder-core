@@ -1,5 +1,5 @@
--- schema.sql (schema version 2)
--- Local-first holder schema: projects, cards, links, resources, AI threads/messages, and FTS5.
+-- schema.sql (schema version 3)
+-- Local-first holder schema: projects, cards, links, milestones, resources, AI threads/messages, and FTS5.
 -- The app/server is responsible for keeping FTS tables in sync (no triggers in v0.1).
 
 PRAGMA foreign_keys = ON;
@@ -103,6 +103,33 @@ CREATE INDEX IF NOT EXISTS idx_card_tags_tag
 
 CREATE INDEX IF NOT EXISTS idx_card_tags_card
   ON card_tags(project_id, card_id);
+
+-- ----------------------------
+-- Milestones: a user-defined point or span of time significant to a Card.
+-- Serialized into the card's own front matter, same as card_links; this table is a
+-- rebuildable index over that, same as card_tags and card_links.
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS milestones (
+  milestone_id  TEXT PRIMARY KEY,         -- UUID
+  project_id    TEXT NOT NULL,
+  card_id       TEXT NOT NULL,
+  start_at      INTEGER NOT NULL,         -- epoch seconds (UTC)
+  end_at        INTEGER NULL,
+  all_day       INTEGER NOT NULL DEFAULT 0, -- 0/1
+  kind          TEXT NULL,                -- e.g. 'Deadline', 'Appointment', 'Birthday' -- vocabulary, not schema
+  description   TEXT NULL,
+  created_at    INTEGER NOT NULL,
+  updated_at    INTEGER NOT NULL,
+
+  FOREIGN KEY(project_id) REFERENCES projects(project_id) ON DELETE CASCADE,
+  FOREIGN KEY(card_id)    REFERENCES cards(card_id)       ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_milestones_project_card
+  ON milestones(project_id, card_id);
+
+CREATE INDEX IF NOT EXISTS idx_milestones_project_start
+  ON milestones(project_id, start_at);
 
 -- ----------------------------
 -- Project resources (pointers only in v0.1)
@@ -349,39 +376,13 @@ CREATE VIRTUAL TABLE IF NOT EXISTS ai_fts USING fts5(
 
 
 -- ----------------------------
--- Alerts
--- ----------------------------
-CREATE TABLE IF NOT EXISTS alerts (
-  alert_id     TEXT PRIMARY KEY,
-  project_id   TEXT NOT NULL,
-  card_id      TEXT NULL,
-  title        TEXT NOT NULL,
-  due_at       INTEGER NOT NULL,         -- epoch seconds (UTC)
-  repeat_rule  TEXT NULL,               -- optional RRULE later
-  created_at   INTEGER NOT NULL,
-  updated_at   INTEGER NOT NULL,
-  fired_at     INTEGER NULL,
-  dismissed_at INTEGER NULL,
-
-  FOREIGN KEY(project_id) REFERENCES projects(project_id) ON DELETE CASCADE,
-  FOREIGN KEY(card_id)    REFERENCES cards(card_id)       ON DELETE SET NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_alerts_due
-  ON alerts(due_at);
-
-CREATE INDEX IF NOT EXISTS idx_alerts_project_due
-  ON alerts(project_id, due_at);
-
-
--- ----------------------------
 -- A tiny schema version table (handy for migrations)
 -- ----------------------------
 CREATE TABLE IF NOT EXISTS schema_version (
   version INTEGER NOT NULL
 );
 
--- Initialize schema version to 2 if empty
+-- Initialize schema version to 3 if empty
 INSERT INTO schema_version(version)
-SELECT 2
+SELECT 3
 WHERE NOT EXISTS (SELECT 1 FROM schema_version);
