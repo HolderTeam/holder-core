@@ -125,6 +125,7 @@ add_library(holder STATIC
   src/ai/AiRunRepo.cpp
   src/ai/AiRunnerRepo.cpp
   src/ai/AiThreadRepo.cpp
+  src/ai/AiThreadManifest.cpp
   src/card/CardFrontMatter.cpp
   src/card/CardPaths.cpp
   src/card/CardRepo.cpp
@@ -151,6 +152,7 @@ add_library(holder STATIC
   src/privacy/SecretStore.cpp
   src/project/DefaultProject.cpp
   src/project/ProjectPaths.cpp
+  src/project/ProjectManifest.cpp
   src/project/ProjectRepo.cpp
   src/project/ProjectStore.cpp
   src/project/ProjectSyncRepo.cpp

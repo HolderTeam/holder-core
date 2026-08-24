@@ -1,6 +1,6 @@
 #include "project/StartupRecovery.h"
 
-#include "privacy/PrivacyError.h"
+#include "project/ProjectManifest.h"
 #include "project/ProjectRepo.h"
 #include "project/Rebuilder.h"
 
@@ -17,22 +17,6 @@
 namespace holder::project {
 namespace {
 
-bool should_retry_plain_recovery(
-    const holder::privacy::PrivacyError& ex,
-    const holder::model::Project& project
-) {
-  if (project.privacy_mode != "encrypted_git") {
-    return false; // LCOV_EXCL_LINE
-  }
-  switch (ex.code()) {
-  case holder::privacy::PrivacyErrorCode::EnvelopeInvalid:
-  case holder::privacy::PrivacyErrorCode::KeyMaterialMissing:
-    return true;
-  default:
-    return false;
-  }
-}
-
 long long now_epoch_seconds() {
   return std::chrono::duration_cast<std::chrono::seconds>(
              std::chrono::system_clock::now().time_since_epoch()
@@ -47,7 +31,8 @@ bool looks_like_project_root(const std::filesystem::path& root) {
           std::filesystem::exists(root / "ai_messages") ||
           std::filesystem::exists(root / "resources") ||
           std::filesystem::exists(root / "locations") ||
-          std::filesystem::exists(root / ".holder" / "privacy.json"));
+          std::filesystem::exists(root / ".holder" / "privacy.json") ||
+          std::filesystem::exists(root / ".holder" / "project.json"));
 }
 
 std::string derive_project_name_from_root(const std::filesystem::path& root) {
@@ -105,11 +90,11 @@ std::vector<holder::model::Project> recover_projects_from_disk(
     holder::platform::Db& db,
     holder::index::FtsIndexer* fts,
     const std::filesystem::path& projects_root,
-    const std::function<std::string()>& uuid_v4
+    const std::function<std::string()>& uuid_v4,
+    bool require_durable_manifest
 ) {
-  std::vector<holder::model::Project> recovered;
   if (!std::filesystem::exists(projects_root) || !std::filesystem::is_directory(projects_root)) {
-    return recovered;
+    return {};
   }
 
   std::vector<std::filesystem::path> roots;
@@ -118,50 +103,66 @@ std::vector<holder::model::Project> recover_projects_from_disk(
       roots.push_back(entry.path());
     }
   }
+  return recover_project_roots(db, fts, std::move(roots), uuid_v4, require_durable_manifest);
+}
+
+std::vector<holder::model::Project> recover_project_roots(
+    holder::platform::Db& db,
+    holder::index::FtsIndexer* fts,
+    std::vector<std::filesystem::path> roots,
+    const std::function<std::string()>& uuid_v4,
+    bool require_durable_manifest
+) {
+  std::vector<holder::model::Project> recovered;
   std::sort(roots.begin(), roots.end());
+  roots.erase(std::unique(roots.begin(), roots.end()), roots.end());
 
   holder::project::ProjectRepo repo(db);
-  holder::store::Rebuilder rebuilder(db, fts, nullptr, true);
+  holder::store::Rebuilder rebuilder(db, fts, nullptr, true, require_durable_manifest);
   for (const auto& root : roots) {
     holder::model::Project project;
-    project.project_id = uuid_v4();
-    project.name = derive_project_name_from_root(root);
-    project.root_path = root.string();
-    project.created_at = now_epoch_seconds();
-    project.updated_at = project.created_at;
+    bool project_created = false;
 
     try {
-      load_privacy_metadata(project);
+      if (has_project_manifest(root)) {
+        project = read_project_manifest(root);
+      } else {
+        if (require_durable_manifest) {
+          throw std::runtime_error("project has no durable manifest: " + root.string());
+        }
+        project.project_id = uuid_v4();
+        project.name = derive_project_name_from_root(root);
+        project.root_path = root.string();
+        project.created_at = now_epoch_seconds();
+        project.updated_at = project.created_at;
+        load_privacy_metadata(project);
+        spdlog::warn(
+            "Recovering legacy project without durable metadata: {}. "
+            "Its identity may not be recoverable after database loss.",
+            root.string()
+        );
+      }
+      if (const auto existing = repo.get(project.project_id); existing.has_value()) {
+        if (std::filesystem::path(existing->root_path).lexically_normal() !=
+            root.lexically_normal()) {
+          throw std::runtime_error(
+              "duplicate project_id discovered at different roots: " + project.project_id
+          );
+        }
+        continue;
+      }
       repo.create(project);
+      project_created = true;
       rebuilder.rebuild_project(project);
       recovered.push_back(project);
       spdlog::info("Recovered project from disk: {} ({})", project.name, project.root_path);
-    } catch (const holder::privacy::PrivacyError& ex) {
-      if (should_retry_plain_recovery(ex, project)) {
-        repo.remove(project.project_id);
-
-        auto fallback = project;
-        fallback.privacy_mode = "plain";
-        fallback.project_key_id.reset();
-        try {
-          repo.create(fallback);
-          rebuilder.rebuild_project(fallback);
-          recovered.push_back(fallback);
-          spdlog::warn(
-              "Recovered project as plain after envelope mismatch: {} ({})",
-              fallback.name,
-              fallback.root_path
-          );
-        } catch (const std::exception& retry_ex) {
-          repo.remove(fallback.project_id);
-          spdlog::warn("Skipping project recovery at {}: {}", root.string(), retry_ex.what());
-        }
-      } else {
-        repo.remove(project.project_id);
-        spdlog::warn("Skipping project recovery at {}: {}", root.string(), ex.what());
-      }
     } catch (const std::exception& ex) {
-      repo.remove(project.project_id);
+      if (project_created) {
+        repo.remove(project.project_id);
+      }
+      if (require_durable_manifest) {
+        throw;
+      }
       spdlog::warn("Skipping project recovery at {}: {}", root.string(), ex.what());
     }
   }

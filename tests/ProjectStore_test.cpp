@@ -43,6 +43,12 @@ TEST_CASE("ProjectStore create defaults id, timestamps, and root_path", "[projec
 
   holder::project::ProjectRepo repo(db);
   REQUIRE(repo.list().size() == 1);
+  REQUIRE(std::filesystem::exists(
+      std::filesystem::path(created.root_path) / ".holder" / "privacy.json"
+  ));
+  REQUIRE(std::filesystem::exists(
+      std::filesystem::path(created.root_path) / ".holder" / "project.json"
+  ));
 }
 
 TEST_CASE("ProjectStore create honors an explicit root_path", "[project_store]") {

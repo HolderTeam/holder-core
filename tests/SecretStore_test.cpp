@@ -141,7 +141,7 @@ TEST_CASE(
 }
 
 TEST_CASE(
-    "AI provider credential recovery does nothing when repo metadata already exists",
+    "AI provider credential recovery reconciles missing entries individually",
     "[startup][recovery]"
 ) {
   const auto dir = holder::test::make_temp_dir();
@@ -176,7 +176,9 @@ TEST_CASE(
   REQUIRE(existing->created_at == 10);
   REQUIRE(existing->updated_at == 20);
 
-  REQUIRE_FALSE(repo.get("switchyard").has_value());
+  const auto recovered = repo.get("switchyard");
+  REQUIRE(recovered.has_value());
+  REQUIRE(recovered->api_key_preview == "sw_****123");
 }
 
 TEST_CASE("SecretStore handles sanitized filenames and tolerant metadata edge cases", "[privacy]") {

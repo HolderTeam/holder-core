@@ -15,7 +15,8 @@ class Rebuilder {
       holder::platform::Db& db,
       holder::index::FtsIndexer* fts,
       holder::core::Fs* fs = nullptr,
-      bool tolerate_invalid_ai_messages = false
+      bool tolerate_invalid_ai_messages = false,
+      bool require_ai_thread_manifests = false
   );
 
   struct RebuildStats {
@@ -38,6 +39,7 @@ class Rebuilder {
   holder::index::FtsIndexer* fts_ = nullptr;
   holder::core::Fs* fs_ = nullptr;
   bool tolerate_invalid_ai_messages_ = false;
+  bool require_ai_thread_manifests_ = false;
 };
 
 } // namespace holder::store

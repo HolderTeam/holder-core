@@ -16,6 +16,7 @@
 #include "privacy/PlatformKeyring.h"
 #include "privacy/ProjectPrivacy.h"
 #include "project/DefaultProject.h"
+#include "project/ProjectManifest.h"
 #include "project/ProjectPaths.h"
 #include "project/ProjectRepo.h"
 #include "project/ProjectStore.h"
@@ -390,6 +391,16 @@ std::unique_ptr<holder::git::RealGitOps> open_project_git(
   git->open_or_init(project.root_path);
   return git;
 }  // LCOV_EXCL_LINE
+
+void persist_project_metadata(
+    holder_context* context,
+    const holder::model::Project& project,
+    const std::string& commit_message
+) {
+  auto git = open_project_git(context, project);
+  holder::project::write_project_manifest(*git, project);
+  git->commit(commit_message);
+}
 
 nlohmann::json optional_json(const std::optional<std::string>& value) {
   return value.has_value() ? nlohmann::json(*value) : nlohmann::json(nullptr);
@@ -1140,8 +1151,10 @@ int holder_project_rename(
     }
 
     repo.update_name(project_id, name, now_epoch_seconds());
+    const auto updated = repo.get(project_id).value();
+    persist_project_metadata(context, updated, "Update project metadata");
 
-    auto* out = duplicate_string(project_to_json(repo.get(project_id).value()).dump());
+    auto* out = duplicate_string(project_to_json(updated).dump());
     if (out == nullptr) {
       return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
     }
@@ -2254,8 +2267,17 @@ int holder_project_update_git_remote(
         (remote_url != nullptr && remote_url[0] != '\0') ? std::optional<std::string>(remote_url)
                                                           : std::nullopt;
     repo.update_git_remote(project_id, url, now_epoch_seconds());
+    const auto updated = repo.get(project_id).value();
+    auto git = open_project_git(context, updated);
+    if (url.has_value()) {
+      git->set_remote("origin", *url);
+    } else {
+      git->remove_remote("origin");
+    }
+    holder::project::write_project_manifest(*git, updated);
+    git->commit("Update project metadata");
 
-    auto* out = duplicate_string(project_to_json(repo.get(project_id).value()).dump());
+    auto* out = duplicate_string(project_to_json(updated).dump());
     if (out == nullptr) {
       return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
     }
@@ -2957,6 +2979,11 @@ int holder_recovery_token_import(
     }
 
     holder::privacy::import_recovery_token(repo, project_id, pin, recovery_token, now_epoch_seconds());
+    persist_project_metadata(
+        context,
+        repo.get(project_id).value(),
+        "Restore encrypted project metadata"
+    );
 
     nlohmann::json body = {{"project_id", project_id}};
     auto* out = duplicate_string(body.dump());
@@ -3122,6 +3149,13 @@ int holder_recovery_token_import_global(
         }
         // LCOV_EXCL_STOP
       }
+    }
+
+    // A newly recovered repository must pull before its first local metadata
+    // commit; otherwise that commit makes an otherwise empty checkout diverge
+    // from the hinted remote before recovery has even begun.
+    if (const auto imported = repo.get(metadata.project_id); imported.has_value()) {
+      persist_project_metadata(context, *imported, "Restore encrypted project metadata");
     }
 
     nlohmann::json body = {

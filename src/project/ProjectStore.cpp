@@ -1,6 +1,7 @@
 #include "project/ProjectStore.h"
 
 #include "privacy/ProjectPrivacy.h"
+#include "project/ProjectManifest.h"
 #include "project/ProjectPaths.h"
 
 #include <chrono>
@@ -51,8 +52,8 @@ holder::model::Project ProjectStore::create(
   repo_.create(project);
 
   try {
+    git_->open_or_init(project.root_path);
     if (project.git_remote_url.has_value()) {
-      git_->open_or_init(project.root_path);
       git_->set_remote("origin", *project.git_remote_url);
     }
     if (project.privacy_mode == "encrypted_git") {
@@ -66,6 +67,9 @@ holder::model::Project ProjectStore::create(
           uuid_v4
       );
     }
+    project = repo_.get(project.project_id).value();
+    write_project_manifest(*git_, project);
+    git_->commit("Create project metadata");
   } catch (...) {
     repo_.remove(project.project_id);
     throw;

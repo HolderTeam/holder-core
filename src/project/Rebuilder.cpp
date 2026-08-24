@@ -3,6 +3,7 @@
 #include "ai/AiMessageFrontMatter.h"
 #include "ai/AiMessagePaths.h"
 #include "ai/AiThreadRepo.h"
+#include "ai/AiThreadManifest.h"
 #include "card/CardFrontMatter.h"
 #include "card/CardPaths.h"
 #include "card/CardRepo.h"
@@ -149,12 +150,14 @@ Rebuilder::Rebuilder(
     holder::platform::Db& db,
     holder::index::FtsIndexer* fts,
     holder::core::Fs* fs,
-    bool tolerate_invalid_ai_messages
+    bool tolerate_invalid_ai_messages,
+    bool require_ai_thread_manifests
 )
     : db_(db),
       fts_(fts),
       fs_(&resolve_fs(fs)),
-      tolerate_invalid_ai_messages_(tolerate_invalid_ai_messages) {}
+      tolerate_invalid_ai_messages_(tolerate_invalid_ai_messages),
+      require_ai_thread_manifests_(require_ai_thread_manifests) {}
 
 Rebuilder::RebuildStats Rebuilder::rebuild_project(const holder::model::Project& project) {
   RebuildStats stats;
@@ -441,6 +444,23 @@ Rebuilder::RebuildStats Rebuilder::rebuild_project(const holder::model::Project&
 
   const auto message_files = collect_files(root / "ai_messages", ".md");
   const auto trash_message_files = collect_files(root / "trash" / "ai_messages", ".md");
+  const auto thread_files = collect_files(root / "ai_threads", ".json");
+
+  std::unordered_map<std::string, holder::model::AiThread> durable_threads;
+  for (const auto& path : thread_files) {
+    holder::model::AiThread thread;
+    try {
+      thread = holder::ai::read_ai_thread_manifest(project, path);
+    } catch (const std::exception& ex) {
+      throw std::runtime_error(relative_path_string(root, path) + ": " + ex.what());
+    }
+    const auto actual = relative_path_string(root, path);
+    const auto expected = holder::ai::ai_thread_manifest_rel_path(thread.thread_id);
+    if (actual != expected) throw std::runtime_error(actual + ": AI thread path does not match id");
+    if (!durable_threads.emplace(thread.thread_id, thread).second) {
+      throw std::runtime_error(actual + ": duplicate thread_id");
+    }
+  }
 
   std::unordered_map<std::string, std::pair<long long, long long>> thread_times;
   std::vector<MessageRecord> records;
@@ -536,15 +556,38 @@ Rebuilder::RebuildStats Rebuilder::rebuild_project(const holder::model::Project&
   }
 
   holder::ai::AiThreadRepo thread_repo(db_);
-  for (const auto& entry : thread_times) {
-    holder::model::AiThread thread;
-    thread.thread_id = entry.first;
-    thread.project_id = project.project_id;
-    thread.title = "AI Thread " + entry.first.substr(0, 8);
-    thread.created_at = entry.second.first;
-    thread.updated_at = entry.second.second;
-    thread_repo.create(thread);
-    stats.ai_threads += 1;
+  if (!durable_threads.empty()) {
+    for (const auto& [thread_id, times] : thread_times) {
+      (void)times;
+      if (durable_threads.find(thread_id) == durable_threads.end()) {
+        throw std::runtime_error("AI message refers to thread without durable manifest: " + thread_id);
+      }
+    }
+    std::vector<std::string> ids;
+    ids.reserve(durable_threads.size());
+    for (const auto& [thread_id, thread] : durable_threads) {
+      (void)thread;
+      ids.push_back(thread_id);
+    }
+    std::sort(ids.begin(), ids.end());
+    for (const auto& thread_id : ids) {
+      thread_repo.create(durable_threads.at(thread_id));
+      ++stats.ai_threads;
+    }
+  } else {
+    if (require_ai_thread_manifests_ && !thread_times.empty()) {
+      throw std::runtime_error("AI messages exist without durable thread manifests");
+    }
+    for (const auto& entry : thread_times) {
+      holder::model::AiThread thread;
+      thread.thread_id = entry.first;
+      thread.project_id = project.project_id;
+      thread.title = "AI Thread " + entry.first.substr(0, 8);
+      thread.created_at = entry.second.first;
+      thread.updated_at = entry.second.second;
+      thread_repo.create(thread);
+      stats.ai_threads += 1;
+    }
   }
 
   static constexpr const char* SQL_INSERT_MESSAGE =

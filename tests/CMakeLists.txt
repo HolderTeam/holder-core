@@ -16,6 +16,7 @@ add_executable(holder_core_tests
   AiRunRepo_test.cpp
   AiRunnerRepo_test.cpp
   AiThreadRepo_test.cpp
+  AiThreadManifest_test.cpp
   AssetStorage_test.cpp
   CApi_test.cpp
   CardFrontMatter_test.cpp
@@ -42,6 +43,7 @@ add_executable(holder_core_tests
   ProjectPrivacy_test.cpp
   ProjectRepo_test.cpp
   ProjectStore_test.cpp
+  ProjectManifest_test.cpp
   ProjectSyncPolicy_test.cpp
   ProjectSyncRepo_test.cpp
   PullConflictResolution_test.cpp

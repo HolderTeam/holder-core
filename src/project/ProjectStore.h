@@ -21,10 +21,10 @@ class ProjectStore {
   // project.project_id/created_at/updated_at are generated when unset. If
   // project.root_path is empty, projects_root must be provided and a unique
   // directory is derived from the project name under it (see ProjectPaths.h).
-  // A git repo is initialized at root_path when git_remote_url is set or
-  // privacy_mode is "encrypted_git"; encrypted projects also get key material
-  // and privacy metadata via ensure_encrypted_project_ready. The persisted
-  // row is removed if git/privacy setup throws.
+  // A git repo and durable project manifest are initialized for every project.
+  // Encrypted projects also get key material via
+  // ensure_encrypted_project_ready. The persisted row is removed if
+  // git/privacy/manifest setup throws.
   holder::model::Project create(
       holder::model::Project project,
       const std::function<std::string()>& uuid_v4,

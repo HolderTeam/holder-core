@@ -301,7 +301,7 @@ TEST_CASE(
 }
 
 TEST_CASE(
-    "Startup recovery falls back to plain when privacy metadata is stale",
+    "Startup recovery fails closed when encrypted project key material is missing",
     "[startup][recovery]"
 ) {
   const auto dir = holder::test::make_temp_dir();
@@ -340,23 +340,14 @@ TEST_CASE(
       }
   );
 
-  REQUIRE(recovered.size() == 1);
-  REQUIRE(recovered[0].project_id == "proj-plain");
-  REQUIRE(recovered[0].privacy_mode == "plain");
-  REQUIRE_FALSE(recovered[0].project_key_id.has_value());
+  REQUIRE(recovered.empty());
 
   holder::project::ProjectRepo recovered_project_repo(recovered_db);
   holder::card::CardRepo recovered_card_repo(recovered_db);
   const auto projects = recovered_project_repo.list();
-  REQUIRE(projects.size() == 1);
+  REQUIRE(projects.empty());
   const auto cards = recovered_card_repo.list_all("proj-plain");
-  REQUIRE(cards.size() == 1);
-  REQUIRE(cards[0].title == "Plain card");
-
-  holder::card::CardStore recovered_store(recovered_db, &recovered_fts);
-  const auto content = recovered_store.get_content(cards[0]);
-  REQUIRE(content.has_value());
-  REQUIRE(content.value() == "# Plain card\n\nRecovered as plain.\n");
+  REQUIRE(cards.empty());
 }
 
 TEST_CASE(
@@ -526,7 +517,7 @@ TEST_CASE(
 }
 
 TEST_CASE(
-    "Startup recovery skips project when fallback plain rebuild also fails",
+    "Startup recovery skips encrypted project with invalid envelope and malformed files",
     "[startup][recovery]"
 ) {
   const auto dir = holder::test::make_temp_dir();
