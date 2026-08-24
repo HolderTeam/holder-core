@@ -271,8 +271,9 @@ TEST_CASE("Asset import stores, links, deduplicates and retrieves", "[asset]") {
   card.updated_at = 1;
   holder::card::CardRepo(db).create(card);
   std::filesystem::create_directories((project_root / card.rel_path).parent_path());
-  std::ofstream card_file(project_root / card.rel_path);
-  card_file << holder::core::render_card_front_matter(card, {}, {}) << "Check the boiler.\n";
+  const std::string card_body = "Check the boiler.\n";
+  std::ofstream card_file(project_root / card.rel_path, std::ios::binary);
+  card_file << holder::core::render_card_front_matter(card, {}, {}) << card_body;
   card_file.close();
 
   holder::model::Location location;
@@ -342,6 +343,6 @@ TEST_CASE("Asset import stores, links, deduplicates and retrieves", "[asset]") {
   };
   const auto rewritten = holder::core::parse_card_file(rewritten_text);
   REQUIRE(rewritten.links.empty());
-  REQUIRE(rewritten.body == "Check the boiler.\n");
+  REQUIRE(rewritten.body == card_body);
   REQUIRE(git.commits.size() == 2);
 }
