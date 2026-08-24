@@ -5,6 +5,8 @@ MODE="${1:-test}"
 BUILD_TYPE="${2:-RelWithDebInfo}"
 BUILD_DIR="${BUILD_DIR:-build}"
 INSTALL_PREFIX="${INSTALL_PREFIX:-out/install/local}"
+CCACHE_BIN=""
+CCACHE_STATE="unchecked"
 
 print_usage() {
   cat <<'EOF'
@@ -24,7 +26,71 @@ Examples:
   ./make.sh coverage
   ./make.sh build Debug
   INSTALL_PREFIX=/tmp/holder-core ./make.sh install
+
+Environment:
+  HOLDER_CCACHE  auto (default), 1 to require, or 0 to disable ccache
 EOF
+}
+
+prepare_ccache() {
+  local setting="${HOLDER_CCACHE:-auto}"
+  local required="false"
+
+  if [ "${CCACHE_STATE}" != "unchecked" ]; then
+    return
+  fi
+
+  case "${setting}" in
+    auto)
+      ;;
+    1|on|true)
+      required="true"
+      ;;
+    0|off|false)
+      CCACHE_STATE="disabled"
+      echo "ccache: disabled by HOLDER_CCACHE=${setting}"
+      return
+      ;;
+    *)
+      echo "Invalid HOLDER_CCACHE value: ${setting} (expected auto, 1, or 0)." >&2
+      exit 2
+      ;;
+  esac
+
+  if CCACHE_BIN="$(command -v ccache 2>/dev/null)"; then
+    CCACHE_STATE="enabled"
+    echo "ccache: enabled (${CCACHE_BIN})"
+    "${CCACHE_BIN}" --show-stats
+    return
+  fi
+
+  CCACHE_BIN=""
+  CCACHE_STATE="disabled"
+  if [ "${required}" = "true" ]; then
+    echo "Missing dependency: ccache is required by HOLDER_CCACHE=${setting}." >&2
+    exit 1
+  fi
+  echo "ccache: not found; building without a compiler cache." >&2
+  echo "Install it with: sudo apt install ccache" >&2
+}
+
+cmake_configure() {
+  prepare_ccache
+  if [ "${CCACHE_STATE}" = "enabled" ]; then
+    cmake "$@" -DCMAKE_CXX_COMPILER_LAUNCHER="${CCACHE_BIN}"
+  else
+    # Clear a launcher cached by an earlier invocation when caching is now
+    # explicitly disabled or ccache is no longer installed.
+    cmake "$@" -DCMAKE_CXX_COMPILER_LAUNCHER=
+  fi
+}
+
+cmake_build() {
+  cmake --build "$@"
+  if [ "${CCACHE_STATE}" = "enabled" ]; then
+    echo "ccache statistics after build:"
+    "${CCACHE_BIN}" --show-stats
+  fi
 }
 
 jobs() {
@@ -48,7 +114,7 @@ is_windows_shell() {
 
 configure() {
   if is_windows_shell && [ -n "${VCPKG_ROOT:-}" ]; then
-    cmake --preset windows-vcpkg-debug
+    cmake_configure --preset windows-vcpkg-debug
     BUILD_DIR="out/build/windows-vcpkg-debug"
     return
   fi
@@ -63,17 +129,17 @@ configure() {
     cmake_args+=(-G Ninja)
   fi
 
-  cmake "${cmake_args[@]}"
+  cmake_configure "${cmake_args[@]}"
 }
 
 build() {
   configure
-  cmake --build "${BUILD_DIR}" --target holder --parallel "$(jobs)"
+  cmake_build "${BUILD_DIR}" --target holder --parallel "$(jobs)"
 }
 
 run_tests() {
   configure
-  cmake --build "${BUILD_DIR}" --parallel "$(jobs)"
+  cmake_build "${BUILD_DIR}" --parallel "$(jobs)"
   ctest --test-dir "${BUILD_DIR}" --output-on-failure
 }
 
@@ -90,11 +156,11 @@ coverage_all() {
     gcov_executable="gcov-13"
   fi
 
-  cmake -S . -B "${build_dir}" -G Ninja \
+  cmake_configure -S . -B "${build_dir}" -G Ninja \
     -DCMAKE_BUILD_TYPE=Debug \
     -DCMAKE_CXX_FLAGS="--coverage -O0 -g"
 
-  cmake --build "${build_dir}" --parallel "$(jobs)"
+  cmake_build "${build_dir}" --parallel "$(jobs)"
 
   lcov --directory "${build_dir}" --zerocounters
   lcov --capture --initial --directory "${build_dir}" --output-file "${info_base}" \
