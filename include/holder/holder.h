@@ -28,6 +28,18 @@ int holder_context_open(
 
 void holder_context_destroy(holder_context* context);
 
+// Rebuilds the disposable SQLite projection from durable project files beneath
+// data_dir/projects. The platform keyring provider must already be registered
+// when encrypted projects may be present. This function must be called while
+// no holder_context for data_dir is open. Sets *out_json to a rebuild report.
+int holder_database_rebuild(
+    const char* data_dir,
+    const char* schema_sql,
+    int dry_run,
+    char** out_json,
+    holder_error** out_error
+);
+
 int holder_project_list(holder_context* context, char** out_json, holder_error** out_error);
 
 // Resource, Asset and Storage Location JSON APIs. Resources are returned as

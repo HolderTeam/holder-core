@@ -143,6 +143,7 @@ add_library(holder STATIC
   src/index/FtsIndexer.cpp
   src/index/Reindexer.cpp
   src/platform/Db.cpp
+  src/platform/DatabaseRebuild.cpp
   src/platform/Fs.cpp
   src/platform/Migrations.cpp
   src/platform/Tx.cpp

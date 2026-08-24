@@ -13,6 +13,8 @@
 #include "index/Reindexer.h"
 #include "model/ProjectSyncState.h"
 #include "platform/Db.h"
+#include "platform/DatabaseRebuild.h"
+#include "platform/Migrations.h"
 #include "privacy/PlatformKeyring.h"
 #include "privacy/ProjectPrivacy.h"
 #include "project/DefaultProject.h"
@@ -59,6 +61,49 @@ struct holder_error {
 };
 
 namespace {
+
+std::filesystem::path rebuild_readiness_path(const std::filesystem::path& data_dir) {
+  return data_dir / "server" / "database-rebuild-ready.json";
+}
+
+bool looks_like_project(const std::filesystem::path& root) {
+  return std::filesystem::is_directory(root) &&
+         std::filesystem::is_regular_file(root / ".holder" / "project.json");
+}
+
+std::vector<std::filesystem::path> discover_managed_project_roots(
+    const std::filesystem::path& data_dir
+) {
+  std::vector<std::filesystem::path> roots;
+  const auto projects_dir = data_dir / "projects";
+  if (!std::filesystem::is_directory(projects_dir)) return roots;
+  for (const auto& entry : std::filesystem::directory_iterator(projects_dir)) {
+    if (looks_like_project(entry.path())) roots.push_back(entry.path());
+  }
+  return roots;
+}
+
+holder::platform::DatabaseRebuildReport rebuild_managed_database(
+    const std::filesystem::path& data_dir,
+    const std::string& schema_sql,
+    bool dry_run
+) {
+  holder::platform::DatabaseRebuildRequest request;
+  request.database_path = data_dir / "server" / "holder.db";
+  request.backup_root = data_dir / "server" / "database-backups";
+  request.schema_sql = schema_sql;
+  request.expected_schema_version = holder::platform::Migrations::latest_schema_version;
+  request.project_roots = discover_managed_project_roots(data_dir);
+  request.durable_ownership_ready = holder::platform::database_rebuild_is_ready(
+      rebuild_readiness_path(data_dir)
+  );
+  request.dry_run = dry_run;
+  auto report = holder::platform::rebuild_database_projection(request);
+  if (!dry_run) {
+    holder::platform::mark_database_rebuild_ready(rebuild_readiness_path(data_dir));
+  }
+  return report;
+}
 
 void clear_error(holder_error** out_error) {
   if (out_error != nullptr) {
@@ -708,9 +753,36 @@ int holder_context_open(
     context->data_dir = std::filesystem::path(data_dir);
     context->db_path = context->data_dir / "server" / "holder.db";
     std::filesystem::create_directories(context->db_path.parent_path());
+
+    const auto health = holder::platform::inspect_database_health(context->db_path);
+    const auto roots = discover_managed_project_roots(context->data_dir);
+    if (health.health == holder::platform::DatabaseHealth::IoError) {
+      throw std::runtime_error("database I/O failure: " + health.detail);
+    }
+    if (health.health == holder::platform::DatabaseHealth::Corrupt ||
+        (health.health == holder::platform::DatabaseHealth::Missing && !roots.empty())) {
+      if (schema_sql == nullptr || schema_sql[0] == '\0') {
+        throw std::runtime_error("schema SQL is required to reconstruct the database");
+      }
+      rebuild_managed_database(context->data_dir, schema_sql, false);
+    }
+
     context->db.open(context->db_path);
     if (schema_sql != nullptr && schema_sql[0] != '\0') {
       context->db.exec(schema_sql);
+    }
+    try {
+      if (holder::project::ProjectRepo(context->db).list().size() != roots.size()) {
+        throw std::runtime_error(
+            "not every project is under the managed project directory"
+        );
+      }
+      holder::platform::audit_core_durable_ownership(context->db);
+      holder::platform::mark_database_rebuild_ready(rebuild_readiness_path(context->data_dir));
+    } catch (const std::exception&) {
+      // A healthy legacy profile remains usable, but is deliberately not marked
+      // reconstructible until its durable owners have been backfilled and audited.
+      if (health.health != holder::platform::DatabaseHealth::Healthy) throw;
     }
 
     *out_context = context.release();
@@ -726,6 +798,38 @@ int holder_context_open(
 
 void holder_context_destroy(holder_context* context) {
   delete context;
+}
+
+int holder_database_rebuild(
+    const char* data_dir,
+    const char* schema_sql,
+    int dry_run,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+  if (data_dir == nullptr || data_dir[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "data_dir must not be empty");
+  }
+  if (schema_sql == nullptr || schema_sql[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "schema_sql must not be empty");
+  }
+  try {
+    const auto report = rebuild_managed_database(
+        std::filesystem::path(data_dir), schema_sql, dry_run != 0
+    );
+    return return_json(nlohmann::json::parse(report.to_json()), out_json, out_error);
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed"); // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error); // LCOV_EXCL_LINE
+  }
 }
 
 int holder_resource_list(
@@ -1104,6 +1208,13 @@ int holder_project_create(
     holder::project::ProjectStore store(context->db);
     const auto created =
         store.create(std::move(project), uuid_v4, context->data_dir / "projects");
+
+    if (root_path != nullptr && root_path[0] != '\0') {
+      // This generic C API does not yet persist a registry for caller-selected
+      // roots. Fail closed rather than later rebuilding only managed projects.
+      std::error_code ignored;
+      std::filesystem::remove(rebuild_readiness_path(context->data_dir), ignored);
+    }
 
     auto* out = duplicate_string(project_to_json(created).dump());
     if (out == nullptr) {

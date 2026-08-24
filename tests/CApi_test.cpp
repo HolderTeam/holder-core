@@ -218,6 +218,75 @@ TEST_CASE("C API opens context and lists empty projects", "[capi]") {
   holder_context_destroy(context);
 }
 
+TEST_CASE("C API rebuilds its SQLite projection from managed project files", "[capi][rebuild]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* project_json = nullptr;
+  REQUIRE(holder_project_create(context, "Rebuild me", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
+  const auto project = nlohmann::json::parse(project_json);
+  const auto project_id = project.at("project_id").get<std::string>();
+  holder_string_free(project_json);
+
+  char* card_json = nullptr;
+  REQUIRE(
+      holder_card_create(
+          context, project_id.c_str(), "Durable card", "Body survives", nullptr,
+          &card_json, &error
+      ) == HOLDER_OK
+  );
+  const auto card_id = nlohmann::json::parse(card_json).at("card_id").get<std::string>();
+  holder_string_free(card_json);
+  holder_context_destroy(context);
+
+  char* report_json = nullptr;
+  REQUIRE(
+      holder_database_rebuild(
+          data_dir.string().c_str(), schema.c_str(), 1, &report_json, &error
+      ) == HOLDER_OK
+  );
+  const auto dry_run = nlohmann::json::parse(report_json);
+  REQUIRE(dry_run.at("dry_run") == true);
+  REQUIRE(dry_run.at("projects") == 1);
+  REQUIRE(dry_run.at("cards") == 1);
+  holder_string_free(report_json);
+
+  REQUIRE(std::filesystem::remove(data_dir / "server" / "holder.db"));
+  REQUIRE(
+      holder_database_rebuild(
+          data_dir.string().c_str(), schema.c_str(), 0, &report_json, &error
+      ) == HOLDER_OK
+  );
+  const auto rebuilt = nlohmann::json::parse(report_json);
+  REQUIRE(rebuilt.at("previous_health") == "missing");
+  REQUIRE(rebuilt.at("projects") == 1);
+  REQUIRE(rebuilt.at("cards") == 1);
+  holder_string_free(report_json);
+
+  context = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  char* content = nullptr;
+  REQUIRE(holder_card_get_content(context, card_id.c_str(), &content, &error) == HOLDER_OK);
+  REQUIRE(std::string(content) == "Body survives");
+  holder_string_free(content);
+  holder_context_destroy(context);
+
+  {
+    std::ofstream damaged(data_dir / "server" / "holder.db", std::ios::binary | std::ios::trunc);
+    damaged << "not a sqlite database";
+  }
+  context = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  content = nullptr;
+  REQUIRE(holder_card_get_content(context, card_id.c_str(), &content, &error) == HOLDER_OK);
+  REQUIRE(std::string(content) == "Body survives");
+  holder_string_free(content);
+  holder_context_destroy(context);
+}
+
 TEST_CASE("C API lists empty cards as JSON", "[capi]") {
   const auto data_dir = holder::test::make_temp_dir();
   const auto schema = read_schema_sql();
