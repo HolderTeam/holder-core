@@ -156,7 +156,17 @@ add_library(holder STATIC
   src/project/ProjectSyncRepo.cpp
   src/project/Rebuilder.cpp
   src/project/StartupRecovery.cpp
+  src/resource/LocationRepo.cpp
+  src/resource/LocationStore.cpp
+  src/resource/MetadataMapping.cpp
+  src/resource/AssetEnvelope.cpp
+  src/resource/AssetImportService.cpp
+  src/resource/LocalDirectoryProvider.cpp
+  src/resource/LocationBindingStore.cpp
+  src/resource/ResourceManifest.cpp
+  src/resource/ResourcePaths.cpp
   src/resource/ResourceRepo.cpp
+  src/resource/ResourceStore.cpp
   src/sync/ProjectSyncPolicy.cpp
   src/sync/PullConflictResolution.cpp
 )

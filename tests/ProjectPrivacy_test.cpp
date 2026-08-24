@@ -124,6 +124,17 @@ TEST_CASE("Privacy safety check accepts HolderPriv1 envelope blobs", "[privacy]"
   REQUIRE_NOTHROW(holder::privacy::assert_encryption_push_safe(root.string()));
 }
 
+TEST_CASE("Privacy safety check covers Resource and Location manifests", "[privacy]") {
+  const auto root = make_temp_dir_local();
+  write_file(root / "resources" / "ab" / "resource.json", "{\"resource\":{}}\n");
+  write_file(root / "locations" / "cd" / "location.json", "HolderPriv1\n{}\nAA==\n");
+
+  const auto check = holder::privacy::run_encryption_safety_check(root.string());
+  REQUIRE_FALSE(check.ok);
+  REQUIRE(check.checked_files == 2);
+  REQUIRE(check.unsafe_paths == std::vector<std::string>{"resources/ab/resource.json"});
+}
+
 TEST_CASE("ensure_encrypted_project_ready stores 32-byte privacy key material", "[privacy]") {
   const auto dir = holder::test::make_temp_dir();
   const auto db_path = dir / "holder.db";
@@ -539,15 +550,32 @@ TEST_CASE("privacy safety check treats unreadable card file as unsafe", "[privac
 #endif
 }
 
-TEST_CASE("index safety check ignores non-card paths and missing staged card paths", "[privacy]") {
+TEST_CASE("index safety check ignores unrelated paths and missing protected paths", "[privacy]") {
   const auto root = make_temp_dir_local();
   holder::git::RealGitOps git;
   git.open_or_init(root);
 
   REQUIRE_NOTHROW(holder::privacy::assert_encryption_index_paths_safe(
       root.string(),
-      {"notes/a.md", "cards/aa/missing.md"}
+      {"notes/a.md", "cards/aa/missing.md", "resources/aa/missing.json"}
   ));
+}
+
+TEST_CASE("staged plaintext Resource and Location manifests fail index safety check", "[privacy]") {
+  const auto root = make_temp_dir_local();
+  holder::git::RealGitOps git;
+  git.open_or_init(root);
+  const std::string resource = "resources/aa/plain.json";
+  const std::string location = "locations/bb/plain.json";
+  git.write_file(resource, "{}\n");
+  git.write_file(location, "{}\n");
+  git.stage_path(resource);
+  git.stage_path(location);
+
+  REQUIRE_THROWS_AS(
+      holder::privacy::assert_encryption_index_paths_safe(root.string(), {resource, location}),
+      holder::privacy::PrivacyError
+  );
 }
 
 TEST_CASE("index safety check errors when repository cannot be opened", "[privacy]") {

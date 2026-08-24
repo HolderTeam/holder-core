@@ -4452,6 +4452,96 @@ TEST_CASE("C API error_message returns an empty string for a null error", "[capi
   REQUIRE(std::string(holder_error_message(nullptr)) == "");
 }
 
+TEST_CASE("C API resources assets and locations share the Git-backed JSON model", "[capi][resource]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  const nlohmann::json location = {
+      {"location_id", "location-1234"},
+      {"project_id", "project-1"},
+      {"name", "Family Assets"},
+      {"provider", "local_directory"},
+      {"configuration", nlohmann::json::object()},
+      {"created_at", 10},
+      {"updated_at", 10},
+  };
+  char* json = nullptr;
+  const auto location_text = location.dump();
+  REQUIRE(holder_location_put_json(context, location_text.c_str(), &json, &error) == HOLDER_OK);
+  REQUIRE(nlohmann::json::parse(json)["name"] == "Family Assets");
+  holder_string_free(json);
+
+  const nlohmann::json bundle = {
+      {"resource",
+       {
+           {"resource_id", "resource-1234"},
+           {"project_id", "project-1"},
+           {"type", "document"},
+           {"label", "Homework.pdf"},
+           {"metadata", {{"description", nlohmann::json::array({"Revision notes"})}}},
+           {"created_at", 20},
+           {"updated_at", 20},
+       }},
+      {"assets",
+       nlohmann::json::array({
+           {
+               {"asset_id", "asset-1234"},
+               {"resource_id", "resource-1234"},
+               {"original_filename", "Homework.pdf"},
+               {"media_type", "application/pdf"},
+               {"byte_size", 42},
+               {"plaintext_sha256", std::string(64, 'a')},
+               {"created_at", 20},
+               {"updated_at", 20},
+               {"placements",
+                nlohmann::json::array({
+                    {
+                        {"placement_id", "placement-1234"},
+                        {"asset_id", "asset-1234"},
+                        {"location_id", "location-1234"},
+                        {"object_key", "project-1/asset-1234.holderasset"},
+                        {"encoding", "plain"},
+                        {"stored_byte_size", 42},
+                        {"stored_sha256", std::string(64, 'a')},
+                        {"created_at", 20},
+                    },
+                })},
+           },
+       })},
+  };
+  const auto bundle_text = bundle.dump();
+  json = nullptr;
+  REQUIRE(holder_resource_put_json(context, bundle_text.c_str(), &json, &error) == HOLDER_OK);
+  REQUIRE(nlohmann::json::parse(json)["assets"].size() == 1);
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(holder_resource_list(context, "project-1", &json, &error) == HOLDER_OK);
+  REQUIRE(nlohmann::json::parse(json).size() == 1);
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(holder_asset_get(context, "asset-1234", &json, &error) == HOLDER_OK);
+  REQUIRE(nlohmann::json::parse(json)["media_type"] == "application/pdf");
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(holder_asset_delete(context, "asset-1234", &json, &error) == HOLDER_OK);
+  REQUIRE(nlohmann::json::parse(json)["assets"].empty());
+  holder_string_free(json);
+
+  REQUIRE(holder_location_delete(context, "location-1234", &error) == HOLDER_OK);
+  REQUIRE(holder_resource_delete(context, "resource-1234", &error) == HOLDER_OK);
+  REQUIRE(std::filesystem::exists(data_dir / "repo" / ".git"));
+
+  holder_context_destroy(context);
+}
+
 TEST_CASE("C API link_kind_list returns the full catalog, no context required", "[capi]") {
   holder_error* error = nullptr;
   char* json = nullptr;

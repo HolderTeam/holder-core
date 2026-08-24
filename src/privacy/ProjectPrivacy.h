@@ -5,11 +5,17 @@
 #include "project/ProjectRepo.h"
 
 #include <functional>
+#include <array>
 #include <optional>
 #include <string>
 #include <vector>
 
 namespace holder::privacy {
+
+std::array<unsigned char, 32> load_project_key_bytes(
+    const std::string& project_id,
+    const std::string& project_key_id
+);
 
 struct RecoveryTokenMetadata {
   std::string project_id;

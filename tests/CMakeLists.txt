@@ -16,6 +16,7 @@ add_executable(holder_core_tests
   AiRunRepo_test.cpp
   AiRunnerRepo_test.cpp
   AiThreadRepo_test.cpp
+  AssetStorage_test.cpp
   CApi_test.cpp
   CardFrontMatter_test.cpp
   CardPaths_test.cpp

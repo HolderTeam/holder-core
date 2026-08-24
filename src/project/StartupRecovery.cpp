@@ -45,6 +45,8 @@ bool looks_like_project_root(const std::filesystem::path& root) {
          (std::filesystem::exists(root / "cards") ||
           std::filesystem::exists(root / "trash" / "cards") ||
           std::filesystem::exists(root / "ai_messages") ||
+          std::filesystem::exists(root / "resources") ||
+          std::filesystem::exists(root / "locations") ||
           std::filesystem::exists(root / ".holder" / "privacy.json"));
 }
 

@@ -13,10 +13,16 @@
 #include "platform/Fs.h"
 #include "platform/Tx.h"
 #include "privacy/ProjectPrivacy.h"
+#include "resource/LocationRepo.h"
+#include "resource/ResourceManifest.h"
+#include "resource/ResourcePaths.h"
+#include "resource/ResourceRepo.h"
 
 #include <spdlog/spdlog.h>
 #include <sqlite3.h>
 
+#include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <optional>
 #include <stdexcept>
@@ -131,6 +137,12 @@ struct CardRecord {
   std::vector<holder::model::Milestone> milestones;
 };
 
+bool is_sha256(const std::string& value) {
+  return value.size() == 64 && std::all_of(value.begin(), value.end(), [](unsigned char ch) {
+    return std::isxdigit(ch) != 0;
+  });
+}
+
 } // namespace
 
 Rebuilder::Rebuilder(
@@ -177,27 +189,124 @@ Rebuilder::RebuildStats Rebuilder::rebuild_project(const holder::model::Project&
       project.project_id
   );
   exec_delete_project(db_.handle(), "DELETE FROM ai_fts WHERE project_id = ?;", project.project_id);
+  exec_delete_project(db_.handle(), "DELETE FROM resources WHERE project_id = ?;", project.project_id);
+  exec_delete_project(
+      db_.handle(), "DELETE FROM storage_locations WHERE project_id = ?;", project.project_id
+  );
 
   holder::card::CardRepo card_repo(db_);
   holder::card::LinkRepo link_repo(db_);
   holder::card::MilestoneRepo milestone_repo(db_);
   holder::card::TagRepo tag_repo(db_);
+  holder::resource::ResourceRepo resource_repo(db_);
+  holder::resource::LocationRepo location_repo(db_);
 
-  auto collect_files = [&](const std::filesystem::path& base) {
+  auto collect_files = [&](const std::filesystem::path& base, const std::string& extension) {
     std::vector<std::filesystem::path> out;
     if (!fs.exists(base)) {
       return out;
     }
     for (const auto& entry : std::filesystem::recursive_directory_iterator(base)) {
       if (!entry.is_regular_file()) continue;
-      if (entry.path().extension() != ".md") continue;
+      if (entry.path().extension() != extension) continue;
       out.push_back(entry.path());
     }
     return out;
   }; // LCOV_EXCL_LINE
 
-  const auto card_files = collect_files(root / "cards");
-  const auto trash_card_files = collect_files(root / "trash" / "cards");
+  const auto location_files = collect_files(root / "locations", ".json");
+  const auto resource_files = collect_files(root / "resources", ".json");
+
+  std::unordered_set<std::string> location_ids;
+  std::vector<holder::model::Location> locations;
+  for (const auto& path : location_files) {
+    holder::model::Location location;
+    try {
+      location = holder::resource::parse_location_manifest(
+          decode_blob_for_project(project, fs.read_file(path))
+      );
+    } catch (const std::exception& ex) {
+      throw std::runtime_error(relative_path_string(root, path) + ": " + ex.what());
+    }
+    const auto actual = relative_path_string(root, path);
+    const auto expected = holder::resource::location_rel_path(location.location_id);
+    if (actual != expected) throw std::runtime_error(actual + ": location path does not match id");
+    if (location.project_id != project.project_id) {
+      throw std::runtime_error(actual + ": location belongs to another project");
+    }
+    if (!location_ids.insert(location.location_id).second) {
+      throw std::runtime_error(actual + ": duplicate location_id");
+    }
+    locations.push_back(std::move(location));
+  }
+
+  std::unordered_set<std::string> resource_ids;
+  std::unordered_set<std::string> asset_ids;
+  std::unordered_set<std::string> placement_ids;
+  std::vector<holder::model::ResourceBundle> resource_bundles;
+  for (const auto& path : resource_files) {
+    holder::model::ResourceBundle bundle;
+    try {
+      bundle = holder::resource::parse_resource_manifest(
+          decode_blob_for_project(project, fs.read_file(path))
+      );
+    } catch (const std::exception& ex) {
+      throw std::runtime_error(relative_path_string(root, path) + ": " + ex.what());
+    }
+    const auto actual = relative_path_string(root, path);
+    const auto expected = holder::resource::resource_rel_path(bundle.resource.resource_id);
+    if (actual != expected) throw std::runtime_error(actual + ": resource path does not match id");
+    if (bundle.resource.project_id != project.project_id) {
+      throw std::runtime_error(actual + ": resource belongs to another project");
+    }
+    if (!resource_ids.insert(bundle.resource.resource_id).second) {
+      throw std::runtime_error(actual + ": duplicate resource_id");
+    }
+    for (const auto& asset : bundle.assets) {
+      if (!asset_ids.insert(asset.asset_id).second) {
+        throw std::runtime_error(actual + ": duplicate asset_id");
+      }
+      if (!is_sha256(asset.plaintext_sha256)) {
+        throw std::runtime_error(actual + ": invalid plaintext_sha256");
+      }
+      for (const auto& placement : asset.placements) {
+        if (!placement_ids.insert(placement.placement_id).second) {
+          throw std::runtime_error(actual + ": duplicate placement_id");
+        }
+        if (!is_sha256(placement.stored_sha256)) {
+          throw std::runtime_error(actual + ": invalid stored_sha256");
+        }
+      }
+    }
+    resource_bundles.push_back(std::move(bundle));
+  }
+
+  for (const auto& bundle : resource_bundles) {
+    for (const auto& asset : bundle.assets) {
+      for (const auto& placement : asset.placements) {
+        if (location_ids.find(placement.location_id) == location_ids.end()) {
+          throw std::runtime_error(
+              holder::resource::resource_rel_path(bundle.resource.resource_id) +
+              ": placement refers to unknown location " + placement.location_id
+          );
+        }
+      }
+    }
+  }
+
+  for (const auto& location : locations) {
+    location_repo.put(location);
+    ++stats.locations;
+  }
+  for (const auto& bundle : resource_bundles) {
+    resource_repo.put_bundle(bundle);
+    ++stats.resources;
+    stats.assets += bundle.assets.size();
+    for (const auto& asset : bundle.assets) stats.placements += asset.placements.size();
+  }
+
+  const auto card_files = collect_files(root / "cards", ".md");
+  const auto trash_card_files = collect_files(root / "trash" / "cards", ".md");
 
   std::vector<CardRecord> card_records;
   auto load_card_file = [&](const std::filesystem::path& path, bool is_trash) {
@@ -330,8 +439,8 @@ Rebuilder::RebuildStats Rebuilder::rebuild_project(const holder::model::Project&
     }
   }
 
-  const auto message_files = collect_files(root / "ai_messages");
-  const auto trash_message_files = collect_files(root / "trash" / "ai_messages");
+  const auto message_files = collect_files(root / "ai_messages", ".md");
+  const auto trash_message_files = collect_files(root / "trash" / "ai_messages", ".md");
 
   std::unordered_map<std::string, std::pair<long long, long long>> thread_times;
   std::vector<MessageRecord> records;

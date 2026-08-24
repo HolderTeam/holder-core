@@ -111,8 +111,7 @@ TEST_CASE("Deleting project cascades to dependent rows", "[cascade]") {
   holder::model::Resource resource;
   resource.resource_id = "res-1";
   resource.project_id = "proj-1";
-  resource.kind = "url";
-  resource.uri = "https://example.com";
+  resource.type = "website";
   resource.label = "Example";
   resource.created_at = 4;
   resource.updated_at = 4;

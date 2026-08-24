@@ -246,6 +246,13 @@ DecryptedRecoveryTokenPayload decrypt_recovery_payload(
 
 } // namespace
 
+std::array<unsigned char, 32> load_project_key_bytes(
+    const std::string& project_id,
+    const std::string& project_key_id
+) {
+  return holder::privacy::key_from_base64(load_key_material(project_id, project_key_id));
+}
+
 void ensure_encrypted_git_setup(
     holder::git::GitOps& git,
     const std::string& root_path,
@@ -464,20 +471,21 @@ RecoveryTokenMetadata inspect_recovery_token(
 
 EncryptionSafetyCheck run_encryption_safety_check(const std::string& root_path) {
   EncryptionSafetyCheck out;
-  const auto cards_root = std::filesystem::path(root_path) / "cards";
-  if (!std::filesystem::exists(cards_root)) {
-    out.message = "No cards directory found; nothing to verify.";
-    return out;
-  }
-
-  for (const auto& entry : std::filesystem::recursive_directory_iterator(cards_root)) {
-    if (!entry.is_regular_file()) {
+  const auto project_root = std::filesystem::path(root_path);
+  for (const auto* directory : {"cards", "resources", "locations"}) {
+    const auto protected_root = project_root / directory;
+    if (!std::filesystem::exists(protected_root)) {
       continue;
     }
-    const auto relative = std::filesystem::relative(entry.path(), root_path).generic_string();
-    ++out.checked_files;
-    if (!has_envelope_header(entry.path())) {
-      out.unsafe_paths.push_back(relative);
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(protected_root)) {
+      if (!entry.is_regular_file()) {
+        continue;
+      }
+      const auto relative = std::filesystem::relative(entry.path(), root_path).generic_string();
+      ++out.checked_files;
+      if (!has_envelope_header(entry.path())) {
+        out.unsafe_paths.push_back(relative);
+      }
     }
   }
 
@@ -485,7 +493,7 @@ EncryptionSafetyCheck run_encryption_safety_check(const std::string& root_path) 
   if (out.ok) {
     out.message = "Privacy safety check passed.";
   } else {
-    out.message = "Privacy safety check failed: found plaintext card blobs.";
+    out.message = "Privacy safety check failed: found plaintext project blobs.";
   }
   return out;
 }
@@ -528,7 +536,8 @@ void assert_encryption_index_paths_safe(
 
   std::vector<std::string> unsafe_paths;
   for (const auto& rel_path : relative_paths) {
-    if (!starts_with(rel_path, "cards/")) {
+    if (!starts_with(rel_path, "cards/") && !starts_with(rel_path, "resources/") &&
+        !starts_with(rel_path, "locations/")) {
       continue;
     }
 

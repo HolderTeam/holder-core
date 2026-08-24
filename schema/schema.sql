@@ -1,4 +1,4 @@
--- schema.sql (schema version 3)
+-- schema.sql (schema version 4)
 -- Local-first holder schema: projects, cards, links, milestones, resources, AI threads/messages, and FTS5.
 -- The app/server is responsible for keeping FTS tables in sync (no triggers in v0.1).
 
@@ -132,15 +132,13 @@ CREATE INDEX IF NOT EXISTS idx_milestones_project_start
   ON milestones(project_id, start_at);
 
 -- ----------------------------
--- Project resources (pointers only in v0.1)
+-- Project Resources: rebuildable projection of Git manifests
 -- ----------------------------
 CREATE TABLE IF NOT EXISTS resources (
-  resource_id  TEXT PRIMARY KEY,         -- UUID
+  resource_id  TEXT PRIMARY KEY,
   project_id   TEXT NOT NULL,
-  kind         TEXT NOT NULL,            -- 'dir', 'file', 'repo', 'url'
-  uri          TEXT NOT NULL,            -- store as URI: file:///..., https://..., git+ssh://...
+  type         TEXT NOT NULL,
   label        TEXT NOT NULL,
-  desc         TEXT NULL,                -- human description (why it matters)
   created_at   INTEGER NOT NULL,
   updated_at   INTEGER NOT NULL,
 
@@ -150,8 +148,80 @@ CREATE TABLE IF NOT EXISTS resources (
 CREATE INDEX IF NOT EXISTS idx_resources_project
   ON resources(project_id);
 
-CREATE INDEX IF NOT EXISTS idx_resources_project_kind
-  ON resources(project_id, kind);
+CREATE INDEX IF NOT EXISTS idx_resources_project_type
+  ON resources(project_id, type);
+
+CREATE TABLE IF NOT EXISTS resource_metadata (
+  resource_id  TEXT NOT NULL,
+  property     TEXT NOT NULL,
+  value_index  INTEGER NOT NULL,
+  value        TEXT NOT NULL,
+
+  FOREIGN KEY(resource_id) REFERENCES resources(resource_id) ON DELETE CASCADE,
+  PRIMARY KEY(resource_id, property, value_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_resource_metadata_property
+  ON resource_metadata(property, value);
+
+CREATE TABLE IF NOT EXISTS storage_locations (
+  location_id  TEXT PRIMARY KEY,
+  project_id   TEXT NOT NULL,
+  name         TEXT NOT NULL,
+  provider     TEXT NOT NULL,
+  config_json  TEXT NOT NULL,
+  created_at   INTEGER NOT NULL,
+  updated_at   INTEGER NOT NULL,
+
+  FOREIGN KEY(project_id) REFERENCES projects(project_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_storage_locations_project
+  ON storage_locations(project_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS assets (
+  asset_id          TEXT PRIMARY KEY,
+  resource_id       TEXT NOT NULL,
+  project_id        TEXT NOT NULL,
+  original_filename TEXT NOT NULL,
+  media_type        TEXT NOT NULL,
+  byte_size         INTEGER NOT NULL,
+  plaintext_sha256  TEXT NOT NULL,
+  created_at        INTEGER NOT NULL,
+  updated_at        INTEGER NOT NULL,
+
+  FOREIGN KEY(resource_id) REFERENCES resources(resource_id) ON DELETE CASCADE,
+  FOREIGN KEY(project_id) REFERENCES projects(project_id) ON DELETE CASCADE,
+  CHECK(byte_size >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_assets_resource
+  ON assets(resource_id, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_assets_project_hash
+  ON assets(project_id, plaintext_sha256);
+
+CREATE TABLE IF NOT EXISTS asset_placements (
+  placement_id     TEXT PRIMARY KEY,
+  asset_id         TEXT NOT NULL,
+  location_id      TEXT NOT NULL,
+  object_key       TEXT NOT NULL,
+  encoding         TEXT NOT NULL,
+  stored_byte_size INTEGER NOT NULL,
+  stored_sha256    TEXT NOT NULL,
+  created_at       INTEGER NOT NULL,
+
+  FOREIGN KEY(asset_id) REFERENCES assets(asset_id) ON DELETE CASCADE,
+  FOREIGN KEY(location_id) REFERENCES storage_locations(location_id) ON DELETE RESTRICT,
+  UNIQUE(location_id, object_key),
+  CHECK(stored_byte_size >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_asset_placements_asset
+  ON asset_placements(asset_id);
+
+CREATE INDEX IF NOT EXISTS idx_asset_placements_location
+  ON asset_placements(location_id);
 
 -- ----------------------------
 -- AI threads + messages
@@ -382,7 +452,7 @@ CREATE TABLE IF NOT EXISTS schema_version (
   version INTEGER NOT NULL
 );
 
--- Initialize schema version to 3 if empty
+-- Initialize schema version to 4 if empty
 INSERT INTO schema_version(version)
-SELECT 3
+SELECT 4
 WHERE NOT EXISTS (SELECT 1 FROM schema_version);

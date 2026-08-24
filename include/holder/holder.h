@@ -30,6 +30,76 @@ void holder_context_destroy(holder_context* context);
 
 int holder_project_list(holder_context* context, char** out_json, holder_error** out_error);
 
+// Resource, Asset and Storage Location JSON APIs. Resources are returned as
+// {resource: {...}, assets: [{..., placements: [...]}]}; Locations are returned
+// as their safe portable declarations. Private Location bindings are deliberately
+// outside this C API and remain a host/SecretStore concern.
+int holder_resource_list(
+    holder_context* context,
+    const char* project_id,
+    char** out_json,
+    holder_error** out_error
+);
+int holder_resource_get(
+    holder_context* context,
+    const char* resource_id,
+    char** out_json,
+    holder_error** out_error
+);
+int holder_resource_put_json(
+    holder_context* context,
+    const char* resource_bundle_json,
+    char** out_json,
+    holder_error** out_error
+);
+int holder_resource_delete(
+    holder_context* context,
+    const char* resource_id,
+    holder_error** out_error
+);
+int holder_asset_get(
+    holder_context* context,
+    const char* asset_id,
+    char** out_json,
+    holder_error** out_error
+);
+int holder_asset_put_json(
+    holder_context* context,
+    const char* resource_id,
+    const char* asset_json,
+    char** out_json,
+    holder_error** out_error
+);
+int holder_asset_delete(
+    holder_context* context,
+    const char* asset_id,
+    char** out_json,
+    holder_error** out_error
+);
+int holder_location_list(
+    holder_context* context,
+    const char* project_id,
+    char** out_json,
+    holder_error** out_error
+);
+int holder_location_get(
+    holder_context* context,
+    const char* location_id,
+    char** out_json,
+    holder_error** out_error
+);
+int holder_location_put_json(
+    holder_context* context,
+    const char* location_json,
+    char** out_json,
+    holder_error** out_error
+);
+int holder_location_delete(
+    holder_context* context,
+    const char* location_id,
+    holder_error** out_error
+);
+
 int holder_card_list(
     holder_context* context,
     const char* project_id,

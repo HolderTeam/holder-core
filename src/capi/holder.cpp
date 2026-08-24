@@ -20,6 +20,10 @@
 #include "project/ProjectRepo.h"
 #include "project/ProjectStore.h"
 #include "project/ProjectSyncRepo.h"
+#include "resource/LocationRepo.h"
+#include "resource/LocationStore.h"
+#include "resource/ResourceRepo.h"
+#include "resource/ResourceStore.h"
 #include "sync/ProjectSyncPolicy.h"
 #include "sync/PullConflictResolution.h"
 
@@ -36,6 +40,7 @@
 #include <filesystem>
 #include <memory>
 #include <new>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -134,6 +139,198 @@ nlohmann::json card_to_json(const holder::model::Card& card) {
                            ? nlohmann::json(*card.deleted_at)
                            : nlohmann::json(nullptr);
   return body;
+}
+
+nlohmann::json placement_to_json(const holder::model::Placement& placement) {
+  return {
+      {"placement_id", placement.placement_id},
+      {"asset_id", placement.asset_id},
+      {"location_id", placement.location_id},
+      {"object_key", placement.object_key},
+      {"encoding", placement.encoding},
+      {"stored_byte_size", placement.stored_byte_size},
+      {"stored_sha256", placement.stored_sha256},
+      {"created_at", placement.created_at},
+  };
+}
+
+nlohmann::json asset_to_json(const holder::model::Asset& asset) {
+  nlohmann::json placements = nlohmann::json::array();
+  for (const auto& placement : asset.placements) placements.push_back(placement_to_json(placement));
+  return {
+      {"asset_id", asset.asset_id},
+      {"resource_id", asset.resource_id},
+      {"original_filename", asset.original_filename},
+      {"media_type", asset.media_type},
+      {"byte_size", asset.byte_size},
+      {"plaintext_sha256", asset.plaintext_sha256},
+      {"created_at", asset.created_at},
+      {"updated_at", asset.updated_at},
+      {"placements", std::move(placements)},
+  };
+}
+
+nlohmann::json resource_bundle_to_json(const holder::model::ResourceBundle& bundle) {
+  nlohmann::json assets = nlohmann::json::array();
+  for (const auto& asset : bundle.assets) assets.push_back(asset_to_json(asset));
+  return {
+      {"resource",
+       {
+           {"resource_id", bundle.resource.resource_id},
+           {"project_id", bundle.resource.project_id},
+           {"type", bundle.resource.type},
+           {"label", bundle.resource.label},
+           {"metadata", bundle.resource.metadata},
+           {"created_at", bundle.resource.created_at},
+           {"updated_at", bundle.resource.updated_at},
+       }},
+      {"assets", std::move(assets)},
+  };
+}
+
+nlohmann::json location_to_json(const holder::model::Location& location) {
+  return {
+      {"location_id", location.location_id},
+      {"project_id", location.project_id},
+      {"name", location.name},
+      {"provider", location.provider},
+      {"configuration", location.configuration},
+      {"created_at", location.created_at},
+      {"updated_at", location.updated_at},
+  };
+}
+
+holder::model::Placement placement_from_json(const nlohmann::json& body, const std::string& asset_id) {
+  holder::model::Placement placement;
+  placement.placement_id = body.at("placement_id").get<std::string>();
+  placement.asset_id = asset_id;
+  placement.location_id = body.at("location_id").get<std::string>();
+  placement.object_key = body.at("object_key").get<std::string>();
+  placement.encoding = body.at("encoding").get<std::string>();
+  placement.stored_byte_size = body.at("stored_byte_size").get<long long>();
+  placement.stored_sha256 = body.at("stored_sha256").get<std::string>();
+  placement.created_at = body.at("created_at").get<long long>();
+  return placement;
+}
+
+holder::model::Asset asset_from_json(const nlohmann::json& body, const std::string& resource_id) {
+  holder::model::Asset asset;
+  asset.asset_id = body.at("asset_id").get<std::string>();
+  asset.resource_id = resource_id;
+  asset.original_filename = body.at("original_filename").get<std::string>();
+  asset.media_type = body.at("media_type").get<std::string>();
+  asset.byte_size = body.at("byte_size").get<long long>();
+  asset.plaintext_sha256 = body.at("plaintext_sha256").get<std::string>();
+  asset.created_at = body.at("created_at").get<long long>();
+  asset.updated_at = body.at("updated_at").get<long long>();
+  for (const auto& item : body.value("placements", nlohmann::json::array())) {
+    asset.placements.push_back(placement_from_json(item, asset.asset_id));
+  }
+  return asset;
+}
+
+holder::model::ResourceBundle resource_bundle_from_json(const nlohmann::json& body) {
+  const auto& resource_body = body.at("resource");
+  holder::model::ResourceBundle bundle;
+  bundle.resource.resource_id = resource_body.at("resource_id").get<std::string>();
+  bundle.resource.project_id = resource_body.at("project_id").get<std::string>();
+  bundle.resource.type = resource_body.at("type").get<std::string>();
+  bundle.resource.label = resource_body.at("label").get<std::string>();
+  bundle.resource.metadata = resource_body.value(
+      "metadata", holder::model::ResourceMetadata{}
+  );
+  bundle.resource.created_at = resource_body.at("created_at").get<long long>();
+  bundle.resource.updated_at = resource_body.at("updated_at").get<long long>();
+  for (const auto& item : body.value("assets", nlohmann::json::array())) {
+    bundle.assets.push_back(asset_from_json(item, bundle.resource.resource_id));
+  }
+  return bundle;
+}
+
+holder::model::Location location_from_json(const nlohmann::json& body) {
+  holder::model::Location location;
+  location.location_id = body.at("location_id").get<std::string>();
+  location.project_id = body.at("project_id").get<std::string>();
+  location.name = body.at("name").get<std::string>();
+  location.provider = body.at("provider").get<std::string>();
+  location.configuration = body.value("configuration", std::map<std::string, std::string>{});
+  location.created_at = body.at("created_at").get<long long>();
+  location.updated_at = body.at("updated_at").get<long long>();
+  return location;
+}
+
+int return_json(const nlohmann::json& body, char** out_json, holder_error** out_error) {
+  auto* out = duplicate_string(body.dump());
+  if (out == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed"); // LCOV_EXCL_LINE
+  }
+  *out_json = out;
+  return HOLDER_OK;
+}
+
+template <typename Fn>
+int with_json_output(
+    holder_context* context,
+    char** out_json,
+    holder_error** out_error,
+    Fn&& fn
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  try {
+    return return_json(fn(), out_json, out_error);
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed"); // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error); // LCOV_EXCL_LINE
+  }
+}
+
+template <typename Fn>
+int with_void_output(holder_context* context, holder_error** out_error, Fn&& fn) {
+  clear_error(out_error);
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  try {
+    fn();
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed"); // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error); // LCOV_EXCL_LINE
+  }
+}
+
+std::optional<holder::model::ResourceBundle> find_bundle_for_asset(
+    holder_context* context,
+    const std::string& asset_id
+) {
+  holder::project::ProjectRepo projects(context->db);
+  holder::resource::ResourceRepo resources(context->db);
+  for (const auto& project : projects.list()) {
+    for (const auto& resource : resources.list(project.project_id)) {
+      auto bundle = resources.get_bundle(resource.resource_id);
+      if (!bundle.has_value()) continue;
+      const auto found = std::find_if(
+          bundle->assets.begin(), bundle->assets.end(), [&](const auto& asset) {
+            return asset.asset_id == asset_id;
+          }
+      );
+      if (found != bundle->assets.end()) return bundle;
+    }
+  }
+  return std::nullopt;
 }
 
 std::string to_lower(std::string value) {
@@ -518,6 +715,222 @@ int holder_context_open(
 
 void holder_context_destroy(holder_context* context) {
   delete context;
+}
+
+int holder_resource_list(
+    holder_context* context,
+    const char* project_id,
+    char** out_json,
+    holder_error** out_error
+) {
+  if (project_id == nullptr || project_id[0] == '\0') {
+    clear_error(out_error);
+    if (out_json != nullptr) *out_json = nullptr;
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "project_id must not be empty");
+  }
+  return with_json_output(context, out_json, out_error, [&]() {
+    nlohmann::json body = nlohmann::json::array();
+    holder::resource::ResourceRepo repo(context->db);
+    for (const auto& resource : repo.list(project_id)) {
+      const auto bundle = repo.get_bundle(resource.resource_id);
+      if (bundle.has_value()) body.push_back(resource_bundle_to_json(*bundle));
+    }
+    return body;
+  });
+}
+
+int holder_resource_get(
+    holder_context* context,
+    const char* resource_id,
+    char** out_json,
+    holder_error** out_error
+) {
+  if (resource_id == nullptr || resource_id[0] == '\0') {
+    clear_error(out_error);
+    if (out_json != nullptr) *out_json = nullptr;
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "resource_id must not be empty");
+  }
+  return with_json_output(context, out_json, out_error, [&]() {
+    const auto bundle = holder::resource::ResourceRepo(context->db).get_bundle(resource_id);
+    if (!bundle.has_value()) throw std::runtime_error("resource not found: " + std::string(resource_id));
+    return resource_bundle_to_json(*bundle);
+  });
+}
+
+int holder_resource_put_json(
+    holder_context* context,
+    const char* resource_bundle_json,
+    char** out_json,
+    holder_error** out_error
+) {
+  if (resource_bundle_json == nullptr || resource_bundle_json[0] == '\0') {
+    clear_error(out_error);
+    if (out_json != nullptr) *out_json = nullptr;
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "resource_bundle_json must not be empty");
+  }
+  return with_json_output(context, out_json, out_error, [&]() {
+    const auto bundle = resource_bundle_from_json(nlohmann::json::parse(resource_bundle_json));
+    holder::resource::ResourceStore(context->db).put(bundle);
+    return resource_bundle_to_json(bundle);
+  });
+}
+
+int holder_resource_delete(
+    holder_context* context,
+    const char* resource_id,
+    holder_error** out_error
+) {
+  if (resource_id == nullptr || resource_id[0] == '\0') {
+    clear_error(out_error);
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "resource_id must not be empty");
+  }
+  return with_void_output(context, out_error, [&]() {
+    holder::resource::ResourceStore(context->db).remove(resource_id);
+  });
+}
+
+int holder_asset_get(
+    holder_context* context,
+    const char* asset_id,
+    char** out_json,
+    holder_error** out_error
+) {
+  if (asset_id == nullptr || asset_id[0] == '\0') {
+    clear_error(out_error);
+    if (out_json != nullptr) *out_json = nullptr;
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "asset_id must not be empty");
+  }
+  return with_json_output(context, out_json, out_error, [&]() {
+    const auto bundle = find_bundle_for_asset(context, asset_id);
+    if (!bundle.has_value()) throw std::runtime_error("asset not found: " + std::string(asset_id));
+    const auto found = std::find_if(bundle->assets.begin(), bundle->assets.end(), [&](const auto& asset) {
+      return asset.asset_id == asset_id;
+    });
+    return asset_to_json(*found);
+  });
+}
+
+int holder_asset_put_json(
+    holder_context* context,
+    const char* resource_id,
+    const char* asset_json,
+    char** out_json,
+    holder_error** out_error
+) {
+  if (resource_id == nullptr || resource_id[0] == '\0' || asset_json == nullptr || asset_json[0] == '\0') {
+    clear_error(out_error);
+    if (out_json != nullptr) *out_json = nullptr;
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "resource_id and asset_json must not be empty");
+  }
+  return with_json_output(context, out_json, out_error, [&]() {
+    holder::resource::ResourceRepo repo(context->db);
+    auto bundle = repo.get_bundle(resource_id);
+    if (!bundle.has_value()) throw std::runtime_error("resource not found: " + std::string(resource_id));
+    auto asset = asset_from_json(nlohmann::json::parse(asset_json), resource_id);
+    const auto found = std::find_if(bundle->assets.begin(), bundle->assets.end(), [&](const auto& current) {
+      return current.asset_id == asset.asset_id;
+    });
+    if (found == bundle->assets.end()) bundle->assets.push_back(asset);
+    else *found = asset;
+    bundle->resource.updated_at = std::max(bundle->resource.updated_at, asset.updated_at);
+    holder::resource::ResourceStore(context->db).put(*bundle);
+    return asset_to_json(asset);
+  });
+}
+
+int holder_asset_delete(
+    holder_context* context,
+    const char* asset_id,
+    char** out_json,
+    holder_error** out_error
+) {
+  if (asset_id == nullptr || asset_id[0] == '\0') {
+    clear_error(out_error);
+    if (out_json != nullptr) *out_json = nullptr;
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "asset_id must not be empty");
+  }
+  return with_json_output(context, out_json, out_error, [&]() {
+    auto bundle = find_bundle_for_asset(context, asset_id);
+    if (!bundle.has_value()) throw std::runtime_error("asset not found: " + std::string(asset_id));
+    bundle->assets.erase(
+        std::remove_if(bundle->assets.begin(), bundle->assets.end(), [&](const auto& asset) {
+          return asset.asset_id == asset_id;
+        }),
+        bundle->assets.end()
+    );
+    holder::resource::ResourceStore(context->db).put(*bundle);
+    return resource_bundle_to_json(*bundle);
+  });
+}
+
+int holder_location_list(
+    holder_context* context,
+    const char* project_id,
+    char** out_json,
+    holder_error** out_error
+) {
+  if (project_id == nullptr || project_id[0] == '\0') {
+    clear_error(out_error);
+    if (out_json != nullptr) *out_json = nullptr;
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "project_id must not be empty");
+  }
+  return with_json_output(context, out_json, out_error, [&]() {
+    nlohmann::json body = nlohmann::json::array();
+    for (const auto& location : holder::resource::LocationRepo(context->db).list(project_id)) {
+      body.push_back(location_to_json(location));
+    }
+    return body;
+  });
+}
+
+int holder_location_get(
+    holder_context* context,
+    const char* location_id,
+    char** out_json,
+    holder_error** out_error
+) {
+  if (location_id == nullptr || location_id[0] == '\0') {
+    clear_error(out_error);
+    if (out_json != nullptr) *out_json = nullptr;
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "location_id must not be empty");
+  }
+  return with_json_output(context, out_json, out_error, [&]() {
+    const auto location = holder::resource::LocationRepo(context->db).get(location_id);
+    if (!location.has_value()) throw std::runtime_error("location not found: " + std::string(location_id));
+    return location_to_json(*location);
+  });
+}
+
+int holder_location_put_json(
+    holder_context* context,
+    const char* location_json,
+    char** out_json,
+    holder_error** out_error
+) {
+  if (location_json == nullptr || location_json[0] == '\0') {
+    clear_error(out_error);
+    if (out_json != nullptr) *out_json = nullptr;
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "location_json must not be empty");
+  }
+  return with_json_output(context, out_json, out_error, [&]() {
+    const auto location = location_from_json(nlohmann::json::parse(location_json));
+    holder::resource::LocationStore(context->db).put(location);
+    return location_to_json(location);
+  });
+}
+
+int holder_location_delete(
+    holder_context* context,
+    const char* location_id,
+    holder_error** out_error
+) {
+  if (location_id == nullptr || location_id[0] == '\0') {
+    clear_error(out_error);
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "location_id must not be empty");
+  }
+  return with_void_output(context, out_error, [&]() {
+    holder::resource::LocationStore(context->db).remove(location_id);
+  });
 }
 
 int holder_project_list(holder_context* context, char** out_json, holder_error** out_error) {
