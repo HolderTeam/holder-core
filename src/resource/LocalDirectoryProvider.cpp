@@ -2,6 +2,7 @@
 
 #include "resource/AssetEnvelope.h"
 
+#include <array>
 #include <chrono>
 #include <fstream>
 #include <system_error>
