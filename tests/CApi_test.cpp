@@ -279,7 +279,10 @@ TEST_CASE("C API rebuilds its SQLite projection from managed project files", "[c
     damaged << "not a sqlite database";
   }
   context = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  const int corrupt_reopen_rc =
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error);
+  INFO("holder_context_open after corruption: " << holder_error_message(error));
+  REQUIRE(corrupt_reopen_rc == HOLDER_OK);
   content = nullptr;
   REQUIRE(holder_card_get_content(context, card_id.c_str(), &content, &error) == HOLDER_OK);
   REQUIRE(std::string(content) == "Body survives");

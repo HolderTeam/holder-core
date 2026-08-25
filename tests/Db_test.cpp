@@ -6,10 +6,12 @@
 #endif
 
 #include "platform/Db.h"
+#include "platform/DatabaseRebuild.h"
 #include "platform/Tx.h"
 
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <string>
 
 namespace {
@@ -91,6 +93,24 @@ TEST_CASE("Db exec failure includes sqlite message", "[db]") {
       db.exec("THIS IS NOT VALID SQL;"),
       Catch::Matchers::ContainsSubstring("sqlite exec failed")
   );
+}
+
+TEST_CASE("Database health distinguishes corruption from operational failures", "[db][rebuild]") {
+  const auto dir = make_temp_dir();
+  const auto malformed_path = dir / "malformed.db";
+  {
+    std::ofstream malformed(malformed_path, std::ios::binary | std::ios::trunc);
+    REQUIRE(malformed.is_open());
+    malformed << "not a sqlite database";
+  }
+
+  const auto malformed = holder::platform::inspect_database_health(malformed_path);
+  REQUIRE(malformed.health == holder::platform::DatabaseHealth::Corrupt);
+
+  const auto directory_path = dir / "directory.db";
+  std::filesystem::create_directory(directory_path);
+  const auto inaccessible = holder::platform::inspect_database_health(directory_path);
+  REQUIRE(inaccessible.health == holder::platform::DatabaseHealth::IoError);
 }
 
 TEST_CASE("Tx destructor swallows rollback failure", "[db][tx]") {

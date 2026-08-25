@@ -32,6 +32,18 @@ namespace {
 
 constexpr int kReadinessVersion = 1;
 
+bool is_sqlite_corruption_failure(int code) {
+  switch (code & 0xff) {
+  case SQLITE_ERROR:
+  case SQLITE_CORRUPT:
+  case SQLITE_FORMAT:
+  case SQLITE_NOTADB:
+    return true;
+  default:
+    return false;
+  }
+}
+
 std::string health_name(DatabaseHealth health) {
   switch (health) {
   case DatabaseHealth::Missing: return "missing";
@@ -198,22 +210,33 @@ DatabaseHealthResult inspect_database_health(const std::filesystem::path& path) 
     const int code = sqlite3_extended_errcode(db);
     const std::string message = sqlite3_errmsg(db);
     sqlite3_close(db);
-    const bool corrupt = code == SQLITE_CORRUPT || code == SQLITE_NOTADB;
-    return {corrupt ? DatabaseHealth::Corrupt : DatabaseHealth::IoError, message};
+    // Apple SQLite can report a malformed database as generic SQLITE_ERROR here,
+    // while newer SQLite versions normally use SQLITE_NOTADB. The statement is a
+    // fixed, valid pragma, so a non-operational prepare failure means the database
+    // itself cannot be interpreted and is safe to classify as corrupt.
+    return {
+        is_sqlite_corruption_failure(code) ? DatabaseHealth::Corrupt
+                                           : DatabaseHealth::IoError,
+        message,
+    };
   }
   const int step_rc = sqlite3_step(stmt);
   const std::string result = step_rc == SQLITE_ROW && sqlite3_column_text(stmt, 0)
                                  ? reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0))
                                  : std::string();
   const int code = sqlite3_extended_errcode(db);
+  const std::string message = sqlite3_errmsg(db);
   sqlite3_finalize(stmt);
   sqlite3_close(db);
   if (step_rc == SQLITE_ROW && result == "ok") return {DatabaseHealth::Healthy, "ok"};
-  if (code == SQLITE_CORRUPT || code == SQLITE_NOTADB || step_rc == SQLITE_CORRUPT ||
-      step_rc == SQLITE_NOTADB || !result.empty()) {
-    return {DatabaseHealth::Corrupt, result.empty() ? "quick_check failed" : result};
+  if (!result.empty() || is_sqlite_corruption_failure(code) ||
+      is_sqlite_corruption_failure(step_rc)) {
+    return {
+        DatabaseHealth::Corrupt,
+        !result.empty() ? result : (!message.empty() ? message : "quick_check failed"),
+    };
   }
-  return {DatabaseHealth::IoError, "quick_check could not complete"};
+  return {DatabaseHealth::IoError, !message.empty() ? message : "quick_check could not complete"};
 }
 
 bool database_rebuild_is_ready(const std::filesystem::path& readiness_path) {
