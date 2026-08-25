@@ -265,6 +265,10 @@ TEST_CASE("C API rebuilds its SQLite projection from managed project files", "[c
   REQUIRE(rebuilt.at("projects") == 1);
   REQUIRE(rebuilt.at("cards") == 1);
   holder_string_free(report_json);
+  const auto rebuild_temporary = data_dir / "server" / "holder.db.rebuild.tmp";
+  REQUIRE_FALSE(std::filesystem::exists(rebuild_temporary));
+  REQUIRE_FALSE(std::filesystem::exists(rebuild_temporary.string() + "-wal"));
+  REQUIRE_FALSE(std::filesystem::exists(rebuild_temporary.string() + "-shm"));
 
   context = nullptr;
   REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);

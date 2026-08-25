@@ -137,6 +137,38 @@ void move_if_exists(const std::filesystem::path& from, const std::filesystem::pa
   if (std::filesystem::exists(from)) std::filesystem::rename(from, to);
 }
 
+void use_delete_journal_for_rebuild(Db& db) {
+  sqlite3_stmt* stmt = nullptr;
+  if (sqlite3_prepare_v2(
+          db.handle(), "PRAGMA journal_mode = DELETE;", -1, &stmt, nullptr
+      ) != SQLITE_OK) {
+    throw std::runtime_error("failed to prepare rebuild journal mode");
+  }
+  const int rc = sqlite3_step(stmt);
+  const std::string mode = rc == SQLITE_ROW && sqlite3_column_text(stmt, 0)
+                               ? reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0))
+                               : std::string();
+  sqlite3_finalize(stmt);
+  if (mode != "delete") {
+    throw std::runtime_error("failed to switch rebuild database out of WAL mode");
+  }
+}
+
+void remove_rebuild_sidecars(const std::filesystem::path& database_path) {
+  for (const auto& path : {
+           std::filesystem::path(database_path.string() + "-wal"),
+           std::filesystem::path(database_path.string() + "-shm"),
+       }) {
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+    if (ec) {
+      throw std::runtime_error(
+          "failed to remove rebuild database sidecar " + path.string() + ": " + ec.message()
+      );
+    }
+  }
+}
+
 void sync_directory(const std::filesystem::path& path) {
 #ifndef _WIN32
   const int fd = ::open(path.c_str(), O_RDONLY | O_DIRECTORY);
@@ -419,15 +451,25 @@ DatabaseRebuildReport rebuild_database_projection(const DatabaseRebuildRequest& 
   report.previous_health = health_name(health.health);
   auto temporary = request.database_path;
   temporary += ".rebuild.tmp";
-  if (std::filesystem::exists(temporary) || std::filesystem::exists(temporary.string() + "-wal") ||
-      std::filesystem::exists(temporary.string() + "-shm")) {
-    throw std::runtime_error("stale rebuild temporary database exists: " + temporary.string());
+  for (const auto& artifact : {
+           temporary,
+           std::filesystem::path(temporary.string() + "-wal"),
+           std::filesystem::path(temporary.string() + "-shm"),
+       }) {
+    if (std::filesystem::exists(artifact)) {
+      throw std::runtime_error("stale rebuild temporary database exists: " + artifact.string());
+    }
   }
 
   std::map<std::string, long long> new_counts;
   try {
     Db rebuilt;
     rebuilt.open(temporary);
+    // Rebuild is an offline, single-connection operation. Using a rollback
+    // journal ensures the finished database is one self-contained file before
+    // the atomic rename. In particular, Apple SQLite may persist empty WAL/SHM
+    // sidecars after the final connection closes.
+    use_delete_journal_for_rebuild(rebuilt);
     rebuilt.exec(request.schema_sql);
     if (request.hooks.restore_before_projects) request.hooks.restore_before_projects(rebuilt);
     holder::index::FtsIndexer fts(rebuilt);
@@ -443,6 +485,7 @@ DatabaseRebuildReport rebuild_database_projection(const DatabaseRebuildRequest& 
       throw std::runtime_error("rebuilt database durable object counts do not match source database");
     }
     rebuilt.close();
+    remove_rebuild_sidecars(temporary);
   } catch (...) {
     std::error_code ignored;
     std::filesystem::remove(temporary, ignored);
