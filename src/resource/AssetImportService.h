@@ -24,6 +24,7 @@ struct AssetImportResult {
   std::string resource_id;
   std::string asset_id;
   bool duplicate_reused = false;
+  bool link_created = false;
 };
 
 enum class AssetImportStage {

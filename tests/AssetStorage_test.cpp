@@ -308,6 +308,7 @@ TEST_CASE("Asset import stores, links, deduplicates and retrieves", "[asset]") {
 
   const auto first = importer.import_file(request, provider);
   REQUIRE_FALSE(first.duplicate_reused);
+  REQUIRE(first.link_created);
   REQUIRE(git.commits.size() == 1);
   const auto bundle = holder::resource::ResourceRepo(db).get_bundle(first.resource_id);
   REQUIRE(bundle.has_value());
@@ -316,6 +317,7 @@ TEST_CASE("Asset import stores, links, deduplicates and retrieves", "[asset]") {
 
   const auto second = importer.import_file(request, provider);
   REQUIRE(second.duplicate_reused);
+  REQUIRE_FALSE(second.link_created);
   REQUIRE(second.resource_id == first.resource_id);
   REQUIRE(second.asset_id == first.asset_id);
   REQUIRE(git.commits.size() == 1);

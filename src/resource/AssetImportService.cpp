@@ -287,7 +287,12 @@ AssetImportResult AssetImportService::import_file(
     throw;
   }
   remove_quietly(staging_file);
-  return {resource_id, asset_id, duplicate.has_value()};
+  return {
+      .resource_id = resource_id,
+      .asset_id = asset_id,
+      .duplicate_reused = duplicate.has_value(),
+      .link_created = !link_exists,
+  };
 }
 
 void AssetImportService::retrieve(
