@@ -3140,10 +3140,10 @@ TEST_CASE(
     );
   }
 
-  SECTION("'local' cannot be overridden") {
+  SECTION("'local_directory' cannot be overridden") {
     REQUIRE(
         holder_storage_provider_register(
-            "local", fake_storage_put, fake_storage_get, fake_storage_exists, fake_storage_remove,
+            "local_directory", fake_storage_put, fake_storage_get, fake_storage_exists, fake_storage_remove,
             &destroy_count, destroy, &error
         ) == HOLDER_ERROR_INVALID_ARGUMENT
     );
@@ -3213,7 +3213,7 @@ TEST_CASE("C API asset_import_file/asset_retrieve round-trip through the built-i
       {"location_id", "loc-local-1"},
       {"project_id", project_id},
       {"name", "Local"},
-      {"provider", "local"},
+      {"provider", "local_directory"},
       {"configuration", nlohmann::json::object()},
       {"created_at", now},
       {"updated_at", now},

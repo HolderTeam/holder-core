@@ -578,10 +578,12 @@ int holder_keyring_set_provider(
 
 // -- Asset storage providers --
 //
-// A Location's `provider` field (e.g. "local", "google-drive") selects which storage
-// provider actually holds an Asset's bytes; holder_asset_import_file/holder_asset_retrieve
-// look one up by that name. "local" always resolves to a built-in filesystem provider
-// rooted at data_dir/resource-store, with no registration required. Any other provider
+// A Location's `provider` field (e.g. "local_directory", "google-drive") selects which
+// storage provider actually holds an Asset's bytes; holder_asset_import_file/
+// holder_asset_retrieve look one up by that name. "local_directory" always resolves to
+// a built-in filesystem provider rooted at data_dir/resource-store, with no
+// registration required -- named to match holder-desktop's own local-storage Location
+// provider string, since Locations are portable/git-synced. Any other provider
 // name must be registered first via holder_storage_provider_register -- there is
 // deliberately no bundled network client in this library; the host supplies one, exactly
 // like holder_keyring_set_provider does for platform keyrings.

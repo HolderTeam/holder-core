@@ -428,14 +428,17 @@ std::map<std::string, std::shared_ptr<CApiStorageProviderHandle>>& storage_provi
   return registry;
 }
 
-// "local" is always available with no registration required, rooted per data_dir; every
-// other provider name (e.g. "google-drive") must have been registered first via
-// holder_storage_provider_register.
+// "local_directory" is always available with no registration required, rooted per
+// data_dir; every other provider name (e.g. "google-drive", "s3_compatible") must have
+// been registered first via holder_storage_provider_register. Named to match
+// holder-desktop's own local-storage Location provider string (see
+// resources_tool_view.vala) -- Locations are portable/git-synced, so a client-specific
+// name here would silently fail to resolve a Location another client created.
 holder::resource::StorageProvider& resolve_storage_provider(
     holder_context* context,
     const std::string& provider_name
 ) {
-  if (provider_name == "local") {
+  if (provider_name == "local_directory") {
     static std::mutex local_mutex;
     static std::map<std::filesystem::path, std::unique_ptr<holder::resource::LocalDirectoryProvider>>
         local_by_root;
@@ -1230,11 +1233,11 @@ int holder_storage_provider_register(
   if (provider_name == nullptr || provider_name[0] == '\0') {
     return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "provider_name must not be empty");
   }
-  if (std::string(provider_name) == "local") {
+  if (std::string(provider_name) == "local_directory") {
     return set_error(
         out_error,
         HOLDER_ERROR_INVALID_ARGUMENT,
-        "'local' is a built-in provider name and cannot be overridden"
+        "'local_directory' is a built-in provider name and cannot be overridden"
     );
   }
   if (put_fn == nullptr || get_fn == nullptr || exists_fn == nullptr || remove_fn == nullptr) {
