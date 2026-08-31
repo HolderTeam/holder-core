@@ -3013,6 +3013,463 @@ TEST_CASE(
   holder::privacy::platform_keyring_clear_external_provider();
 }
 
+namespace {
+
+// A minimal StorageProvider stand-in for the tests below: objects are just files under
+// `root`, named by their object_key (which already contains '/', so it doubles as a
+// relative path). Exercises the same C callback shape a real Kotlin/JNI-backed provider
+// would implement.
+struct FakeStorageBackend {
+  std::filesystem::path root;
+  int put_calls = 0;
+  int get_calls = 0;
+  int exists_calls = 0;
+  int remove_calls = 0;
+};
+
+std::filesystem::path fake_storage_object_path(FakeStorageBackend* backend, const std::string& object_key) {
+  const auto path = backend->root / object_key;
+  std::filesystem::create_directories(path.parent_path());
+  return path;
+}
+
+int fake_storage_put(
+    void* user_data,
+    const char* object_key,
+    const char* staged_file_path,
+    long long /*stored_size*/,
+    const char* /*stored_sha256*/,
+    int* /*out_error_code*/,
+    char** /*out_error*/
+) {
+  auto* backend = static_cast<FakeStorageBackend*>(user_data);
+  backend->put_calls++;
+  std::filesystem::copy_file(
+      staged_file_path,
+      fake_storage_object_path(backend, object_key),
+      std::filesystem::copy_options::overwrite_existing
+  );
+  return 0;
+}
+
+int fake_storage_get(
+    void* user_data,
+    const char* object_key,
+    const char* destination_file_path,
+    int* out_error_code,
+    char** out_error
+) {
+  auto* backend = static_cast<FakeStorageBackend*>(user_data);
+  backend->get_calls++;
+  const auto path = backend->root / object_key;
+  if (!std::filesystem::is_regular_file(path)) {
+    *out_error_code = HOLDER_STORAGE_ERROR_INTEGRITY;
+    *out_error = malloc_copy("object not found");
+    return 1;
+  }
+  std::filesystem::copy_file(path, destination_file_path, std::filesystem::copy_options::overwrite_existing);
+  return 0;
+}
+
+int fake_storage_exists(
+    void* user_data,
+    const char* object_key,
+    int* out_exists,
+    int* /*out_error_code*/,
+    char** /*out_error*/
+) {
+  auto* backend = static_cast<FakeStorageBackend*>(user_data);
+  backend->exists_calls++;
+  *out_exists = std::filesystem::is_regular_file(backend->root / object_key) ? 1 : 0;
+  return 0;
+}
+
+int fake_storage_remove(
+    void* user_data,
+    const char* object_key,
+    int* /*out_error_code*/,
+    char** /*out_error*/
+) {
+  auto* backend = static_cast<FakeStorageBackend*>(user_data);
+  backend->remove_calls++;
+  std::error_code ec;
+  std::filesystem::remove(backend->root / object_key, ec);
+  return 0;
+}
+
+int failing_storage_put_with_message(
+    void*,
+    const char*,
+    const char*,
+    long long,
+    const char*,
+    int* out_error_code,
+    char** out_error
+) {
+  *out_error_code = HOLDER_STORAGE_ERROR_CAPACITY;
+  *out_error = malloc_copy("quota exceeded");
+  return 1;
+}
+
+void noop_storage_destroy(void*) {}
+
+std::string write_source_file(const std::filesystem::path& path, const std::string& content) {
+  std::filesystem::create_directories(path.parent_path());
+  std::ofstream out(path, std::ios::binary);
+  out << content;
+  out.close();
+  return path.string();
+}
+
+} // namespace
+
+TEST_CASE(
+    "C API storage_provider_register validates arguments, still destroying user_data exactly once",
+    "[capi][resource]"
+) {
+  int destroy_count = 0;
+  auto destroy = [](void* user_data) { *static_cast<int*>(user_data) += 1; };
+  holder_error* error = nullptr;
+
+  SECTION("empty provider_name") {
+    REQUIRE(
+        holder_storage_provider_register(
+            "", fake_storage_put, fake_storage_get, fake_storage_exists, fake_storage_remove,
+            &destroy_count, destroy, &error
+        ) == HOLDER_ERROR_INVALID_ARGUMENT
+    );
+  }
+
+  SECTION("'local' cannot be overridden") {
+    REQUIRE(
+        holder_storage_provider_register(
+            "local", fake_storage_put, fake_storage_get, fake_storage_exists, fake_storage_remove,
+            &destroy_count, destroy, &error
+        ) == HOLDER_ERROR_INVALID_ARGUMENT
+    );
+  }
+
+  SECTION("null callback") {
+    REQUIRE(
+        holder_storage_provider_register(
+            "google-drive", nullptr, fake_storage_get, fake_storage_exists, fake_storage_remove,
+            &destroy_count, destroy, &error
+        ) == HOLDER_ERROR_INVALID_ARGUMENT
+    );
+  }
+
+  REQUIRE(destroy_count == 1);
+}
+
+TEST_CASE("C API storage_provider_register destroys user_data exactly once on replace", "[capi][resource]") {
+  int first_destroy_count = 0;
+  int second_destroy_count = 0;
+  auto destroy_first = [](void* user_data) { *static_cast<int*>(user_data) += 1; };
+  auto destroy_second = [](void* user_data) { *static_cast<int*>(user_data) += 1; };
+  holder_error* error = nullptr;
+
+  REQUIRE(
+      holder_storage_provider_register(
+          "storage-replace-test", fake_storage_put, fake_storage_get, fake_storage_exists, fake_storage_remove,
+          &first_destroy_count, destroy_first, &error
+      ) == HOLDER_OK
+  );
+  REQUIRE(first_destroy_count == 0);
+
+  REQUIRE(
+      holder_storage_provider_register(
+          "storage-replace-test", fake_storage_put, fake_storage_get, fake_storage_exists, fake_storage_remove,
+          &second_destroy_count, destroy_second, &error
+      ) == HOLDER_OK
+  );
+  REQUIRE(first_destroy_count == 1);
+  REQUIRE(second_destroy_count == 0);
+}
+
+TEST_CASE("C API asset_import_file/asset_retrieve round-trip through the built-in local provider", "[capi][resource]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* project_json = nullptr;
+  REQUIRE(holder_project_create(context, "Photos", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
+  const auto project_id = nlohmann::json::parse(project_json).at("project_id").get<std::string>();
+  holder_string_free(project_json);
+
+  char* card_json = nullptr;
+  REQUIRE(
+      holder_card_create(context, project_id.c_str(), "Trip", nullptr, nullptr, &card_json, &error) == HOLDER_OK
+  );
+  const auto card_id = nlohmann::json::parse(card_json).at("card_id").get<std::string>();
+  holder_string_free(card_json);
+
+  const auto now = std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::system_clock::now().time_since_epoch()
+  )
+                        .count();
+  const nlohmann::json location_body = {
+      {"location_id", "loc-local-1"},
+      {"project_id", project_id},
+      {"name", "Local"},
+      {"provider", "local"},
+      {"configuration", nlohmann::json::object()},
+      {"created_at", now},
+      {"updated_at", now},
+  };
+  char* location_json = nullptr;
+  REQUIRE(
+      holder_location_put_json(context, location_body.dump().c_str(), &location_json, &error) == HOLDER_OK
+  );
+  holder_string_free(location_json);
+
+  const auto source_path = write_source_file(data_dir / "source" / "photo.jpg", "fake jpeg bytes");
+
+  char* import_json = nullptr;
+  REQUIRE(
+      holder_asset_import_file(
+          context, project_id.c_str(), card_id.c_str(), "loc-local-1", source_path.c_str(), &import_json, &error
+      ) == HOLDER_OK
+  );
+  const auto import_result = nlohmann::json::parse(import_json);
+  holder_string_free(import_json);
+  REQUIRE(import_result.at("duplicate_reused").get<bool>() == false);
+  REQUIRE(import_result.at("link_created").get<bool>() == true);
+  const auto resource_id = import_result.at("resource_id").get<std::string>();
+  const auto asset_id = import_result.at("asset_id").get<std::string>();
+
+  char* resource_json = nullptr;
+  REQUIRE(holder_resource_get(context, resource_id.c_str(), &resource_json, &error) == HOLDER_OK);
+  const auto resource_body = nlohmann::json::parse(resource_json);
+  holder_string_free(resource_json);
+  const auto placement_id =
+      resource_body.at("assets").at(0).at("placements").at(0).at("placement_id").get<std::string>();
+
+  const auto destination = (data_dir / "downloaded" / "photo.jpg").string();
+  REQUIRE(
+      holder_asset_retrieve(
+          context, resource_id.c_str(), asset_id.c_str(), placement_id.c_str(), destination.c_str(), &error
+      ) == HOLDER_OK
+  );
+  std::ifstream downloaded(destination, std::ios::binary);
+  const std::string downloaded_content(
+      (std::istreambuf_iterator<char>(downloaded)), std::istreambuf_iterator<char>()
+  );
+  REQUIRE(downloaded_content == "fake jpeg bytes");
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE(
+    "C API asset_import_file/asset_retrieve round-trip through a registered storage provider",
+    "[capi][resource]"
+) {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  FakeStorageBackend backend{.root = data_dir / "fake-drive"};
+  REQUIRE(
+      holder_storage_provider_register(
+          "google-drive", fake_storage_put, fake_storage_get, fake_storage_exists, fake_storage_remove,
+          &backend, noop_storage_destroy, &error
+      ) == HOLDER_OK
+  );
+
+  char* project_json = nullptr;
+  REQUIRE(holder_project_create(context, "Photos", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
+  const auto project_id = nlohmann::json::parse(project_json).at("project_id").get<std::string>();
+  holder_string_free(project_json);
+
+  char* card_json = nullptr;
+  REQUIRE(
+      holder_card_create(context, project_id.c_str(), "Trip", nullptr, nullptr, &card_json, &error) == HOLDER_OK
+  );
+  const auto card_id = nlohmann::json::parse(card_json).at("card_id").get<std::string>();
+  holder_string_free(card_json);
+
+  const auto now = std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::system_clock::now().time_since_epoch()
+  )
+                        .count();
+  const nlohmann::json location_body = {
+      {"location_id", "loc-drive-1"},
+      {"project_id", project_id},
+      {"name", "My Drive"},
+      {"provider", "google-drive"},
+      {"configuration", {{"folder_id", "drive-folder-abc"}}},
+      {"created_at", now},
+      {"updated_at", now},
+  };
+  char* location_json = nullptr;
+  REQUIRE(
+      holder_location_put_json(context, location_body.dump().c_str(), &location_json, &error) == HOLDER_OK
+  );
+  holder_string_free(location_json);
+
+  const auto source_path = write_source_file(data_dir / "source" / "photo.jpg", "drive-backed bytes");
+
+  char* import_json = nullptr;
+  REQUIRE(
+      holder_asset_import_file(
+          context, project_id.c_str(), card_id.c_str(), "loc-drive-1", source_path.c_str(), &import_json, &error
+      ) == HOLDER_OK
+  );
+  const auto import_result = nlohmann::json::parse(import_json);
+  holder_string_free(import_json);
+  REQUIRE(backend.put_calls == 1);
+  REQUIRE(backend.exists_calls >= 1);
+  const auto resource_id = import_result.at("resource_id").get<std::string>();
+  const auto asset_id = import_result.at("asset_id").get<std::string>();
+
+  char* resource_json = nullptr;
+  REQUIRE(holder_resource_get(context, resource_id.c_str(), &resource_json, &error) == HOLDER_OK);
+  const auto placement_id = nlohmann::json::parse(resource_json)
+                                 .at("assets")
+                                 .at(0)
+                                 .at("placements")
+                                 .at(0)
+                                 .at("placement_id")
+                                 .get<std::string>();
+  holder_string_free(resource_json);
+
+  const auto destination = (data_dir / "downloaded" / "photo.jpg").string();
+  REQUIRE(
+      holder_asset_retrieve(
+          context, resource_id.c_str(), asset_id.c_str(), placement_id.c_str(), destination.c_str(), &error
+      ) == HOLDER_OK
+  );
+  REQUIRE(backend.get_calls == 1);
+  std::ifstream downloaded(destination, std::ios::binary);
+  const std::string downloaded_content(
+      (std::istreambuf_iterator<char>(downloaded)), std::istreambuf_iterator<char>()
+  );
+  REQUIRE(downloaded_content == "drive-backed bytes");
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API asset_import_file surfaces a registered provider's put failure", "[capi][resource]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  REQUIRE(
+      holder_storage_provider_register(
+          "quota-limited", failing_storage_put_with_message, fake_storage_get, fake_storage_exists,
+          fake_storage_remove, nullptr, noop_storage_destroy, &error
+      ) == HOLDER_OK
+  );
+
+  char* project_json = nullptr;
+  REQUIRE(holder_project_create(context, "Photos", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
+  const auto project_id = nlohmann::json::parse(project_json).at("project_id").get<std::string>();
+  holder_string_free(project_json);
+
+  char* card_json = nullptr;
+  REQUIRE(
+      holder_card_create(context, project_id.c_str(), "Trip", nullptr, nullptr, &card_json, &error) == HOLDER_OK
+  );
+  const auto card_id = nlohmann::json::parse(card_json).at("card_id").get<std::string>();
+  holder_string_free(card_json);
+
+  const auto now = std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::system_clock::now().time_since_epoch()
+  )
+                        .count();
+  const nlohmann::json location_body = {
+      {"location_id", "loc-quota-1"},
+      {"project_id", project_id},
+      {"name", "Full Drive"},
+      {"provider", "quota-limited"},
+      {"configuration", nlohmann::json::object()},
+      {"created_at", now},
+      {"updated_at", now},
+  };
+  char* location_json = nullptr;
+  REQUIRE(
+      holder_location_put_json(context, location_body.dump().c_str(), &location_json, &error) == HOLDER_OK
+  );
+  holder_string_free(location_json);
+
+  const auto source_path = write_source_file(data_dir / "source" / "photo.jpg", "won't fit");
+
+  char* import_json = nullptr;
+  const int rc = holder_asset_import_file(
+      context, project_id.c_str(), card_id.c_str(), "loc-quota-1", source_path.c_str(), &import_json, &error
+  );
+  REQUIRE(rc == HOLDER_ERROR_RUNTIME);
+  REQUIRE(error != nullptr);
+  REQUIRE(std::string(holder_error_message(error)).find("quota exceeded") != std::string::npos);
+  holder_error_destroy(error);
+
+  // Nothing should have been left behind for a resource that never actually got stored.
+  char* resource_list_json = nullptr;
+  error = nullptr;
+  REQUIRE(holder_resource_list(context, project_id.c_str(), &resource_list_json, &error) == HOLDER_OK);
+  REQUIRE(nlohmann::json::parse(resource_list_json).empty());
+  holder_string_free(resource_list_json);
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API asset_import_file reports an unregistered provider by name", "[capi][resource]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* project_json = nullptr;
+  REQUIRE(holder_project_create(context, "Photos", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
+  const auto project_id = nlohmann::json::parse(project_json).at("project_id").get<std::string>();
+  holder_string_free(project_json);
+
+  char* card_json = nullptr;
+  REQUIRE(
+      holder_card_create(context, project_id.c_str(), "Trip", nullptr, nullptr, &card_json, &error) == HOLDER_OK
+  );
+  const auto card_id = nlohmann::json::parse(card_json).at("card_id").get<std::string>();
+  holder_string_free(card_json);
+
+  const auto now = std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::system_clock::now().time_since_epoch()
+  )
+                        .count();
+  const nlohmann::json location_body = {
+      {"location_id", "loc-unregistered-1"},
+      {"project_id", project_id},
+      {"name", "Dropbox (not wired up yet)"},
+      {"provider", "dropbox"},
+      {"configuration", nlohmann::json::object()},
+      {"created_at", now},
+      {"updated_at", now},
+  };
+  char* location_json = nullptr;
+  REQUIRE(
+      holder_location_put_json(context, location_body.dump().c_str(), &location_json, &error) == HOLDER_OK
+  );
+  holder_string_free(location_json);
+
+  const auto source_path = write_source_file(data_dir / "source" / "photo.jpg", "bytes");
+
+  char* import_json = nullptr;
+  const int rc = holder_asset_import_file(
+      context, project_id.c_str(), card_id.c_str(), "loc-unregistered-1", source_path.c_str(), &import_json, &error
+  );
+  REQUIRE(rc == HOLDER_ERROR_RUNTIME);
+  REQUIRE(error != nullptr);
+  REQUIRE(std::string(holder_error_message(error)).find("dropbox") != std::string::npos);
+  holder_error_destroy(error);
+
+  holder_context_destroy(context);
+}
+
 TEST_CASE("C API encryption_check reports plain projects safe without touching disk", "[capi][privacy]") {
   const auto data_dir = holder::test::make_temp_dir();
   seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
