@@ -12,6 +12,7 @@
 #include <sqlite3.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -25,12 +26,27 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#else
+#include <process.h>
 #endif
 
 namespace holder::platform {
 namespace {
 
 constexpr int kReadinessVersion = 1;
+
+// A fixed ".tmp" name would let two concurrent writers race on the same temp file
+// before either atomic rename happens, corrupting it. Make each writer's temp file
+// unique.
+std::string unique_temp_suffix() {
+  static std::atomic<unsigned long long> counter{0};
+#ifdef _WIN32
+  const auto pid = static_cast<unsigned long>(::_getpid());
+#else
+  const auto pid = static_cast<unsigned long>(::getpid());
+#endif
+  return "." + std::to_string(pid) + "." + std::to_string(counter.fetch_add(1));
+}
 
 bool is_sqlite_corruption_failure(int code) {
   switch (code & 0xff) {
@@ -286,7 +302,7 @@ bool database_rebuild_is_ready(const std::filesystem::path& readiness_path) {
 void mark_database_rebuild_ready(const std::filesystem::path& readiness_path) {
   std::filesystem::create_directories(readiness_path.parent_path());
   auto temporary = readiness_path;
-  temporary += ".tmp";
+  temporary += ".tmp" + unique_temp_suffix();
   {
     std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
     if (!output) throw std::runtime_error("failed to write database rebuild readiness marker");

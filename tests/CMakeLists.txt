@@ -78,6 +78,11 @@ elseif(TARGET Catch2::Catch2WithMain)
   target_link_libraries(holder_core_tests PRIVATE Catch2::Catch2WithMain)
 endif()
 
+# HOLDER_TEST_KEYSTORE_DIR isolates the keystore; XDG_DATA_HOME/XDG_CONFIG_HOME/
+# XDG_CACHE_HOME isolation is applied unconditionally in catch_main.cpp instead of
+# here — catch_discover_tests()'s PROPERTIES argument can't carry a multi-entry
+# ENVIRONMENT value (see the matching comment in holder-daemon/tests/CMakeLists.txt
+# for why, and why a TEST_INCLUDE_FILES-based fixup doesn't work either).
 set(HOLDER_CORE_TEST_ENVIRONMENT
   "HOLDER_TEST_KEYSTORE_DIR=${CMAKE_CURRENT_BINARY_DIR}/test-keystore"
 )

@@ -6,6 +6,7 @@
 #include <nlohmann/json.hpp>
 
 #include <array>
+#include <atomic>
 #include <cctype>
 #include <filesystem>
 #include <fstream>
@@ -13,11 +14,33 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <unordered_map>
 #include <vector>
 
+#ifndef _WIN32
+#include <unistd.h>
+#else
+#include <process.h>
+#endif
+
 namespace holder::privacy {
 namespace {
+
+// A direct, in-place write here would let two concurrent upsert()/remove() calls
+// (e.g. HOLDER_TEST_KEYSTORE_DIR is a single shared path across parallel test
+// processes) truncate and interleave writes to the same file, corrupting it before
+// either finishes — write to a unique temp file and atomically rename it into place
+// instead.
+std::string unique_temp_suffix() {
+  static std::atomic<unsigned long long> counter{0};
+#ifdef _WIN32
+  const auto pid = static_cast<unsigned long>(::_getpid());
+#else
+  const auto pid = static_cast<unsigned long>(::getpid());
+#endif
+  return "." + std::to_string(pid) + "." + std::to_string(counter.fetch_add(1));
+}
 
 constexpr const char* kMetadataFilename = "secret_store_index.json";
 constexpr const char* kFallbackSecretsFilename = "secret_store_fallback.enc";
@@ -65,13 +88,37 @@ nlohmann::json read_json_or_empty(const std::filesystem::path& path) {
 
 void write_json(const std::filesystem::path& path, const nlohmann::json& body) {
   std::filesystem::create_directories(path.parent_path());
-  std::ofstream out(path, std::ios::binary | std::ios::trunc);
-  if (!out) {
+  auto temporary = path;
+  temporary += ".tmp" + unique_temp_suffix();
+  {
+    std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
+    if (!out) {
+      // LCOV_EXCL_START
+      throw std::runtime_error("failed to write secret metadata file: " + temporary.string());
+      // LCOV_EXCL_STOP
+    }
+    out << body.dump(2);
+    out.flush();
+    if (!out) {
+      // LCOV_EXCL_START
+      throw std::runtime_error("failed to flush secret metadata file: " + temporary.string());
+      // LCOV_EXCL_STOP
+    }
+  }
+  std::error_code ec;
+  std::filesystem::rename(temporary, path, ec);
+#ifdef _WIN32
+  if (ec && std::filesystem::exists(path)) {
+    std::filesystem::remove(path, ec);
+    if (!ec) std::filesystem::rename(temporary, path, ec);
+  }
+#endif
+  if (ec) {
     // LCOV_EXCL_START
-    throw std::runtime_error("failed to write secret metadata file: " + path.string());
+    std::filesystem::remove(temporary);
+    throw std::runtime_error("failed to replace secret metadata file: " + ec.message());
     // LCOV_EXCL_STOP
   }
-  out << body.dump(2);
 }
 
 SecretMetadata metadata_from_json(const nlohmann::json& item) {
