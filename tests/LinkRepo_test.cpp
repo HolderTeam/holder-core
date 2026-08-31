@@ -123,6 +123,11 @@ TEST_CASE("LinkRepo upsert/list/delete", "[linkrepo]") {
   REQUIRE(backlinks[0].from_card_id == "card-a");
   REQUIRE(backlinks[0].label.has_value());
 
+  const auto incoming_resources = repo.list_incoming_typed("proj-1", "resource");
+  REQUIRE(incoming_resources.size() == 1);
+  REQUIRE(incoming_resources[0].to_card_id == "res-1");
+  REQUIRE(incoming_resources[0].from_card_id == "card-a");
+
   link1.label = "New Label";
   link1.created_at = 12;
   repo.upsert_links("proj-1", "card-a", {link1});
@@ -268,6 +273,7 @@ TEST_CASE("LinkRepo methods throw sqlite errors when DB is closed", "[linkrepo]"
   REQUIRE_THROWS(repo.list_outgoing("proj-1", "card-a"));
   REQUIRE_THROWS(repo.list_backlinks("proj-1", "card-b"));
   REQUIRE_THROWS(repo.list_backlinks_typed("proj-1", "card-b", "card"));
+  REQUIRE_THROWS(repo.list_incoming_typed("proj-1", "card"));
   REQUIRE_THROWS(repo.delete_link("proj-1", "card-a", "card-b", std::nullopt, std::nullopt));
   REQUIRE_THROWS(repo.delete_links_to_typed("proj-1", "card-b", "card"));
   REQUIRE_THROWS(repo.delete_links_from("proj-1", "card-a"));
@@ -330,6 +336,7 @@ TEST_CASE("LinkRepo list methods throw when sqlite step is interrupted", "[linkr
   REQUIRE_THROWS(repo.list_outgoing("proj-1", "card-a"));
   REQUIRE_THROWS(repo.list_backlinks("proj-1", "card-b"));
   REQUIRE_THROWS(repo.list_backlinks_typed("proj-1", "card-b", "card"));
+  REQUIRE_THROWS(repo.list_incoming_typed("proj-1", "card"));
   sqlite3_progress_handler(db.handle(), 0, nullptr, nullptr);
 }
 

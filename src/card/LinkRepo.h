@@ -33,6 +33,10 @@ class LinkRepo {
       const std::string& to_card_id,
       const std::string& to_type
   ) const;
+  std::vector<holder::model::CardLink> list_incoming_typed(
+      const std::string& project_id,
+      const std::string& to_type
+  ) const;
 
   void delete_link(
       const std::string& project_id,
