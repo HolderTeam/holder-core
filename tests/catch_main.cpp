@@ -1,6 +1,7 @@
 #if __has_include(<catch2/catch_session.hpp>)
 #include <catch2/catch_session.hpp>
 
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <string>
@@ -17,17 +18,19 @@
 namespace {
 
 void ensure_test_keystore_env() {
-  if (std::getenv("HOLDER_TEST_KEYSTORE_DIR")) {
-    return;
+  std::filesystem::path dir;
+  if (const char* configured_dir = std::getenv("HOLDER_TEST_KEYSTORE_DIR")) {
+    dir = configured_dir;
+  } else {
+    dir = std::filesystem::temp_directory_path() / "holder_test_keystore";
   }
-
-  std::filesystem::path dir = std::filesystem::temp_directory_path() / "holder_test_keystore";
 #ifdef _WIN32
   const int pid = static_cast<int>(GetCurrentProcessId());
 #else
   const int pid = static_cast<int>(::getpid());
 #endif
-  dir /= std::to_string(pid);
+  const auto started_at = std::chrono::steady_clock::now().time_since_epoch().count();
+  dir /= std::to_string(pid) + "-" + std::to_string(started_at);
   std::filesystem::create_directories(dir);
 
 #ifdef _WIN32
