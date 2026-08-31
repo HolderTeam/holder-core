@@ -10,7 +10,10 @@
 namespace holder::platform {
 namespace {
 
-int read_schema_version(Db& db) {
+// Named distinctly from Migrations::read_schema_version (below): that public static
+// method has the same name and, called unqualified from inside another Migrations member
+// function, would resolve to itself via class-scope lookup instead of down to here.
+int read_schema_version_impl(Db& db) {
   static constexpr const char* SQL = "SELECT version FROM schema_version LIMIT 1;";
 
   sqlite3_stmt* stmt = nullptr;
@@ -232,7 +235,7 @@ void Migrations::ensure_schema(Db& db, const std::filesystem::path& schema_sql_p
 }
 
 bool Migrations::migrate_to_latest(Db& db) {
-  int version = read_schema_version(db);
+  int version = read_schema_version_impl(db);
   if (version > latest_schema_version) {
     throw std::runtime_error(
         "Schema version mismatch. Expected at most " + std::to_string(latest_schema_version) +
@@ -266,7 +269,7 @@ bool Migrations::migrate_to_latest(Db& db) {
 }
 
 void Migrations::ensure_schema_version(Db& db, int expected_version) {
-  const int version = read_schema_version(db);
+  const int version = read_schema_version_impl(db);
   if (version != expected_version) {
     throw std::runtime_error(
         "Schema version mismatch. Expected " + std::to_string(expected_version) + ", got " +
@@ -274,5 +277,7 @@ void Migrations::ensure_schema_version(Db& db, int expected_version) {
     );
   }
 }
+
+int Migrations::read_schema_version(Db& db) { return read_schema_version_impl(db); }
 
 } // namespace holder::platform

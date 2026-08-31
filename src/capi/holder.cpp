@@ -914,8 +914,29 @@ int holder_context_open(
     if (health.health == holder::platform::DatabaseHealth::IoError) {
       throw std::runtime_error("database I/O failure: " + health.detail);
     }
-    if (health.health == holder::platform::DatabaseHealth::Corrupt ||
-        (health.health == holder::platform::DatabaseHealth::Missing && !roots.empty())) {
+    bool needs_rebuild = health.health == holder::platform::DatabaseHealth::Corrupt ||
+                         (health.health == holder::platform::DatabaseHealth::Missing && !roots.empty());
+    // quick_check (what `health` reflects) only catches corruption, not staleness: a
+    // structurally intact database left behind by an older build can still be on an
+    // older schema_version than this one expects -- the one case this whole codebase's
+    // callers actually hit is an in-place app update on Android, which has no other
+    // migration path wired up (unlike the desktop daemon, which calls
+    // Migrations::migrate_to_latest() directly from its own startup). Reuse the same
+    // rebuild-from-durable-git-source-of-truth path already used for Corrupt/Missing
+    // rather than running incremental migrations in place here: every future schema
+    // bump gets this for free with no migration script of its own to write or forget,
+    // and rebuild_database_projection's durable-object-count check means it fails loudly
+    // instead of silently if anything doesn't come back the same.
+    if (!needs_rebuild && health.health == holder::platform::DatabaseHealth::Healthy) {
+      holder::platform::Db probe;
+      probe.open(context->db_path);
+      const bool stale =
+          holder::platform::Migrations::read_schema_version(probe) <
+          holder::platform::Migrations::latest_schema_version;
+      probe.close();
+      needs_rebuild = stale;
+    }
+    if (needs_rebuild) {
       if (schema_sql == nullptr || schema_sql[0] == '\0') {
         throw std::runtime_error("schema SQL is required to reconstruct the database");
       }

@@ -16,6 +16,11 @@ class Migrations {
   // at least one migration was applied.
   static bool migrate_to_latest(Db& db);
   static void ensure_schema_version(Db& db, int expected_version);
+  // The schema_version currently stamped on an already-open database. Callers that only
+  // need to detect staleness (e.g. deciding whether to trigger a rebuild rather than run
+  // migrate_to_latest in place) can use this without triggering ensure_schema_version's
+  // throw-on-mismatch behavior.
+  static int read_schema_version(Db& db);
 
  private:
   static bool has_any_tables(Db& db);

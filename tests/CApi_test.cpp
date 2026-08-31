@@ -13,6 +13,7 @@
 #include "model/Card.h"
 #include "model/Project.h"
 #include "platform/Db.h"
+#include "platform/Migrations.h"
 #include "privacy/PlatformKeyring.h"
 #include "privacy/ProjectPrivacy.h"
 #include "project/ProjectRepo.h"
@@ -292,6 +293,60 @@ TEST_CASE("C API rebuilds its SQLite projection from managed project files", "[c
   REQUIRE(std::string(content) == "Body survives");
   holder_string_free(content);
   holder_context_destroy(context);
+}
+
+TEST_CASE(
+    "C API rebuilds a healthy database left on an older schema_version than this build",
+    "[capi][rebuild]"
+) {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* project_json = nullptr;
+  REQUIRE(holder_project_create(context, "Stale schema", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
+  const auto project_id = nlohmann::json::parse(project_json).at("project_id").get<std::string>();
+  holder_string_free(project_json);
+
+  char* card_json = nullptr;
+  REQUIRE(
+      holder_card_create(
+          context, project_id.c_str(), "Durable card", "Body survives an in-place app update",
+          nullptr, &card_json, &error
+      ) == HOLDER_OK
+  );
+  const auto card_id = nlohmann::json::parse(card_json).at("card_id").get<std::string>();
+  holder_string_free(card_json);
+  holder_context_destroy(context);
+
+  // Simulate what an older app build would leave behind: a fully intact database (this
+  // is the case quick_check-based health inspection alone can't distinguish from
+  // "current"), just stamped with an older schema_version than this build expects.
+  {
+    holder::platform::Db db;
+    db.open(data_dir / "server" / "holder.db");
+    db.exec(
+        "UPDATE schema_version SET version = " +
+        std::to_string(holder::platform::Migrations::latest_schema_version - 1) + ";"
+    );
+  }
+
+  context = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  char* content = nullptr;
+  REQUIRE(holder_card_get_content(context, card_id.c_str(), &content, &error) == HOLDER_OK);
+  REQUIRE(std::string(content) == "Body survives an in-place app update");
+  holder_string_free(content);
+  holder_context_destroy(context);
+
+  holder::platform::Db reopened;
+  reopened.open(data_dir / "server" / "holder.db");
+  REQUIRE(
+      holder::platform::Migrations::read_schema_version(reopened) ==
+      holder::platform::Migrations::latest_schema_version
+  );
 }
 
 TEST_CASE("C API lists empty cards as JSON", "[capi]") {
