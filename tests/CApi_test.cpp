@@ -3832,6 +3832,79 @@ TEST_CASE(
   holder_context_destroy(context);
 }
 
+TEST_CASE(
+    "C API recovery_token_import_global's failed pull does not block a later retry from "
+    "fast-forwarding cleanly",
+    "[capi][privacy]"
+) {
+  // Regression test: a failed recovery pull used to still commit a local-only project
+  // manifest ("Restore encrypted project metadata") regardless. That commit shares no
+  // ancestry with whatever the remote eventually receives, so fixing the remote/auth
+  // problem (e.g. registering this device's deploy key) and retrying used to fail anyway,
+  // this time with "no merge base found" (git_merge_base failed) instead of the original
+  // problem -- exactly what the paved-road GitHub recovery flow hit in real testing.
+  const auto data_dir = holder::test::make_temp_dir();
+  holder::test::EnvGuard keystore_env("HOLDER_TEST_KEYSTORE_DIR", (data_dir / "keystore").string());
+
+  const auto remote_dir = data_dir / "remote";
+  init_bare_repo(remote_dir); // empty at first -- the recovery pull below is expected to fail
+
+  seed_encrypted_project(data_dir, "project-1", data_dir / "repo", "Synced Notes", remote_dir.string());
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(holder_recovery_token_export(context, "project-1", "1234", &json, &error) == HOLDER_OK);
+  const std::string token = nlohmann::json::parse(json)["recovery_token"].get<std::string>();
+  holder_string_free(json);
+
+  const auto other_data_dir = holder::test::make_temp_dir();
+  holder_context* other_context = nullptr;
+  REQUIRE(
+      holder_context_open(other_data_dir.string().c_str(), schema.c_str(), &other_context, &error) ==
+      HOLDER_OK
+  );
+
+  json = nullptr;
+  REQUIRE(
+      holder_recovery_token_import_global(other_context, "1234", token.c_str(), &json, &error) ==
+      HOLDER_OK
+  );
+  REQUIRE(nlohmann::json::parse(json)["pull_status"] == "failed");
+  holder_string_free(json);
+
+  // The remote now actually gets real content -- e.g. the recovering device's deploy key
+  // finally getting registered lets a push from elsewhere land, or another device
+  // finishes its own setup first.
+  json = nullptr;
+  REQUIRE(holder_card_create(context, "project-1", "Secret", "hidden", nullptr, &json, &error) == HOLDER_OK);
+  holder_string_free(json);
+  json = nullptr;
+  REQUIRE(holder_git_push(context, "project-1", nullptr, 1, &json, &error) == HOLDER_OK);
+  holder_string_free(json);
+
+  // The actual regression check: retrying the pull on the recovering device must succeed
+  // cleanly -- not fail with "no merge base found" against a local placeholder commit that
+  // was never supposed to survive an unsuccessful first pull.
+  json = nullptr;
+  REQUIRE(holder_git_pull(other_context, "project-1", &json, &error) == HOLDER_OK);
+  REQUIRE(nlohmann::json::parse(json)["status"] == "succeeded");
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(holder_card_list(other_context, "project-1", &json, &error) == HOLDER_OK);
+  const auto cards = nlohmann::json::parse(json);
+  REQUIRE(cards.size() == 1);
+  REQUIRE(cards[0]["title"] == "Secret");
+  holder_string_free(json);
+
+  holder_context_destroy(other_context);
+  holder_context_destroy(context);
+}
+
 // ---------------------------------------------------------------------------
 // Argument validation for functions that had no coverage of it at all. Every
 // one of these follows holder.cpp's own convention: check first, mutate

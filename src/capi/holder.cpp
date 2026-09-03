@@ -3596,9 +3596,22 @@ int holder_recovery_token_import_global(
 
     // A newly recovered repository must pull before its first local metadata
     // commit; otherwise that commit makes an otherwise empty checkout diverge
-    // from the hinted remote before recovery has even begun.
-    if (const auto imported = repo.get(metadata.project_id); imported.has_value()) {
-      persist_project_metadata(context, *imported, "Restore encrypted project metadata");
+    // from the hinted remote before recovery has even begun. That's why this is
+    // skipped entirely -- not just deferred -- when a remote hint is present but
+    // the pull didn't succeed (failed, or never attempted because set_remote
+    // itself failed): committing here regardless of pull outcome used to create
+    // exactly the divergence this comment warns about, just delayed until
+    // whatever's blocking the pull (auth, network, an unregistered device key...)
+    // gets fixed and the pull is retried -- at which point it fails again, this
+    // time with "no merge base found", because the local-only placeholder commit
+    // shares no ancestry with the remote it's now trying to fast-forward onto.
+    // Safe to skip: this commit only ever writes the project's own manifest, never
+    // card content, so nothing is lost by leaving it for a later successful pull to
+    // establish from the remote's real history instead.
+    if (!remote_hint_present || pull_status == "succeeded") {
+      if (const auto imported = repo.get(metadata.project_id); imported.has_value()) {
+        persist_project_metadata(context, *imported, "Restore encrypted project metadata");
+      }
     }
 
     nlohmann::json body = {
