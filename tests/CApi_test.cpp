@@ -25,6 +25,7 @@
 #include <holder/holder.h>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -123,6 +124,33 @@ void seed_git_project(
 
   holder::project::ProjectRepo repo(db);
   repo.create(project);
+}
+
+// Counts commits reachable from HEAD -- used to confirm a bulk operation made exactly one
+// commit rather than one per card. Same approach as CardStore_test.cpp's own count_commits.
+int count_commits(const std::filesystem::path& repo_dir) {
+  git_repository* repo = nullptr;
+  if (git_repository_open(&repo, repo_dir.string().c_str()) != 0) {
+    return -1; // LCOV_EXCL_LINE
+  }
+
+  git_revwalk* walk = nullptr;
+  if (git_revwalk_new(&walk, repo) != 0) {
+    git_repository_free(repo); // LCOV_EXCL_LINE
+    return -1; // LCOV_EXCL_LINE
+  }
+
+  int count = 0;
+  if (git_revwalk_push_head(walk) == 0) {
+    git_oid oid{};
+    while (git_revwalk_next(&oid, walk) == 0) {
+      ++count;
+    }
+  }
+
+  git_revwalk_free(walk);
+  git_repository_free(repo);
+  return count;
 }
 
 // Seeds an encrypted_git project with real key material (generating it via
@@ -1016,6 +1044,182 @@ TEST_CASE(
   REQUIRE(page2["cards"].size() == 1);
   REQUIRE(page2["cards"][0]["title"] == "Oldest");
   REQUIRE(page2["next_cursor"].is_null());
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE(
+    "C API backup_restore bulk-writes a snapshot page into a fresh flat project with one commit",
+    "[capi]"
+) {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  // Same source setup as the backup_snapshot_page test above: three cards, one card-to-card
+  // link, one milestone -- so this test proves the actual round trip, not just a hand-built
+  // input shape.
+  std::vector<std::string> card_ids;
+  for (const std::string& title : {"Oldest", "Middle", "Newest"}) {
+    char* json = nullptr;
+    REQUIRE(holder_card_create(context, "project-1", title.c_str(), "body text", nullptr, &json, &error) == HOLDER_OK);
+    card_ids.push_back(nlohmann::json::parse(json)["card_id"].get<std::string>());
+    holder_string_free(json);
+  }
+
+  {
+    holder::platform::Db db;
+    db.open(data_dir / "server" / "holder.db");
+    holder::card::CardRepo card_repo(db);
+    card_repo.touch_updated(card_ids[0], 100);
+    card_repo.touch_updated(card_ids[1], 200);
+    card_repo.touch_updated(card_ids[2], 300);
+
+    holder::card::LinkRepo link_repo(db);
+    link_repo.upsert_links(
+        "project-1", card_ids[2],
+        {{"project-1", card_ids[2], card_ids[0], "card", "related", std::string("see also"), 300}}
+    );
+
+    holder::card::MilestoneRepo milestone_repo(db);
+    milestone_repo.replace_for_card(
+        "project-1", card_ids[2],
+        {{"m1", "project-1", card_ids[2], 999, std::nullopt, true, std::string("Deadline"),
+          std::string("ship it"), 300, 300}}
+    );
+  }
+
+  char* page_json = nullptr;
+  REQUIRE(holder_backup_snapshot_page(context, "project-1", 0, nullptr, 10, &page_json, &error) == HOLDER_OK);
+  const auto page = nlohmann::json::parse(page_json);
+  holder_string_free(page_json);
+  REQUIRE(page["cards"].size() == 3);
+  const std::string cards_json = page["cards"].dump();
+
+  char* restored_json = nullptr;
+  const int restore_rc = holder_backup_restore(
+      context, "Restored Project", "plain", cards_json.c_str(), "Restored from Android backup",
+      &restored_json, &error
+  );
+  const std::string restore_error_message = error != nullptr ? holder_error_message(error) : "no error";
+  INFO(restore_error_message);
+  REQUIRE(restore_rc == HOLDER_OK);
+  const auto restored_project = nlohmann::json::parse(restored_json);
+  holder_string_free(restored_json);
+
+  const std::string new_project_id = restored_project["project_id"].get<std::string>();
+  REQUIRE(new_project_id != "project-1");
+  REQUIRE(restored_project["name"] == "Restored Project");
+  REQUIRE(restored_project["privacy_mode"] == "plain");
+  REQUIRE(restored_project["git_remote_url"].is_null());
+
+  // Same cards, flattened (no parent_card_id) -- but a fresh card_id per card, since card_id
+  // is a global primary key and the source project ("project-1") still exists in this same
+  // database, so reusing its ids would collide.
+  char* list_json = nullptr;
+  REQUIRE(holder_card_list(context, new_project_id.c_str(), &list_json, &error) == HOLDER_OK);
+  const auto cards = nlohmann::json::parse(list_json);
+  holder_string_free(list_json);
+  REQUIRE(cards.size() == 3);
+  std::set<std::string> restored_ids;
+  std::set<std::string> restored_titles;
+  for (const auto& card : cards) {
+    REQUIRE(card["parent_card_id"].is_null());
+    restored_ids.insert(card["card_id"].get<std::string>());
+    restored_titles.insert(card["title"].get<std::string>());
+  }
+  REQUIRE(restored_titles == std::set<std::string>{"Oldest", "Middle", "Newest"});
+  for (const auto& original_id : card_ids) {
+    REQUIRE(restored_ids.count(original_id) == 0);
+  }
+
+  // The link and milestone survived, re-fetchable the same way the original page was built --
+  // with the link's target remapped to the restored "Oldest" card's new id.
+  char* restored_page_json = nullptr;
+  REQUIRE(
+      holder_backup_snapshot_page(
+          context, new_project_id.c_str(), 0, nullptr, 10, &restored_page_json, &error
+      ) == HOLDER_OK
+  );
+  const auto restored_page = nlohmann::json::parse(restored_page_json);
+  holder_string_free(restored_page_json);
+  const auto& restored_cards = restored_page["cards"];
+  const auto find_by_title = [&](const std::string& title) {
+    return std::find_if(restored_cards.begin(), restored_cards.end(), [&](const auto& c) {
+      return c["title"] == title;
+    });
+  };
+  const auto newest = find_by_title("Newest");
+  const auto oldest = find_by_title("Oldest");
+  REQUIRE(newest != restored_cards.end());
+  REQUIRE(oldest != restored_cards.end());
+  REQUIRE((*newest)["links"][0]["to_id"] == (*oldest)["card_id"]);
+  REQUIRE((*newest)["links"][0]["label"] == "see also");
+  REQUIRE((*newest)["milestones"][0]["kind"] == "Deadline");
+
+  // One commit for the whole batch, on top of ProjectStore::create's own "Create project
+  // metadata" -- not one commit per card.
+  REQUIRE(count_commits(restored_project["root_path"].get<std::string>()) == 2);
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE(
+    "C API backup_restore rolls back the new project if the batch fails partway",
+    "[capi]"
+) {
+  const auto data_dir = holder::test::make_temp_dir();
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* list_before_json = nullptr;
+  REQUIRE(holder_project_list(context, &list_before_json, &error) == HOLDER_OK);
+  const std::size_t projects_before = nlohmann::json::parse(list_before_json).size();
+  holder_string_free(list_before_json);
+
+  // Two items sharing the same (corrupt/duplicate) original card_id: both remap to the same
+  // fresh card_id, so the second insert must fail with a primary-key conflict partway through
+  // the batch -- a real, if unusual, way for create_batch to throw after already writing and
+  // staging (but not yet committing) the first card.
+  nlohmann::json cards_json = nlohmann::json::array();
+  cards_json.push_back({
+      {"card_id", "dup"},
+      {"title", "A"},
+      {"body", "a body"},
+      {"created_at", 1},
+      {"updated_at", 1},
+  });
+  cards_json.push_back({
+      {"card_id", "dup"},
+      {"title", "B"},
+      {"body", "b body"},
+      {"created_at", 2},
+      {"updated_at", 2},
+  });
+
+  char* restored_json = nullptr;
+  const int rc = holder_backup_restore(
+      context, "Restored Project", "plain", cards_json.dump().c_str(), "Restored from Android backup",
+      &restored_json, &error
+  );
+  REQUIRE(rc == HOLDER_ERROR_RUNTIME);
+  REQUIRE(restored_json == nullptr);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  // No half-written project left behind: same project count as before the failed attempt.
+  char* list_after_json = nullptr;
+  REQUIRE(holder_project_list(context, &list_after_json, &error) == HOLDER_OK);
+  REQUIRE(nlohmann::json::parse(list_after_json).size() == projects_before);
+  holder_string_free(list_after_json);
 
   holder_context_destroy(context);
 }

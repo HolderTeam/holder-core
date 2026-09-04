@@ -298,6 +298,52 @@ holder::model::ResourceBundle resource_bundle_from_json(const nlohmann::json& bo
   return bundle;
 }
 
+// -- holder_backup_restore's input parsing: accepts the shape holder_backup_snapshot_page
+// emits per card, so the Android snapshot writer/restorer round-trip without remapping. --
+
+holder::model::CardLink batch_card_link_from_json(const nlohmann::json& body) {
+  holder::model::CardLink link;
+  link.to_card_id = body.value("to_id", body.value("to_card_id", std::string()));
+  link.to_type = body.value("to_type", std::string("card"));
+  link.kind = body.value("kind", std::string());
+  if (body.contains("label") && !body.at("label").is_null()) {
+    link.label = body.at("label").get<std::string>();
+  }
+  return link;
+}
+
+holder::model::Milestone batch_milestone_from_json(const nlohmann::json& body) {
+  holder::model::Milestone milestone;
+  milestone.start_at = body.at("start_at").get<long long>();
+  milestone.all_day = body.value("all_day", false);
+  if (body.contains("end_at") && !body.at("end_at").is_null()) {
+    milestone.end_at = body.at("end_at").get<long long>();
+  }
+  if (body.contains("kind") && !body.at("kind").is_null()) {
+    milestone.kind = body.at("kind").get<std::string>();
+  }
+  if (body.contains("description") && !body.at("description").is_null()) {
+    milestone.description = body.at("description").get<std::string>();
+  }
+  return milestone;
+}
+
+holder::card::BatchCardInput batch_card_input_from_json(const nlohmann::json& body) {
+  holder::card::BatchCardInput item;
+  item.card_id = body.at("card_id").get<std::string>();
+  item.title = body.at("title").get<std::string>();
+  item.content = body.value("body", std::string());
+  item.created_at = body.at("created_at").get<long long>();
+  item.updated_at = body.at("updated_at").get<long long>();
+  for (const auto& link_json : body.value("links", nlohmann::json::array())) {
+    item.links.push_back(batch_card_link_from_json(link_json));
+  }
+  for (const auto& milestone_json : body.value("milestones", nlohmann::json::array())) {
+    item.milestones.push_back(batch_milestone_from_json(milestone_json));
+  }
+  return item;
+}
+
 holder::model::Location location_from_json(const nlohmann::json& body) {
   holder::model::Location location;
   location.location_id = body.at("location_id").get<std::string>();
@@ -1583,6 +1629,80 @@ int holder_backup_snapshot_page(
     if (out == nullptr) {
       return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
     }
+    *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
+  }  // LCOV_EXCL_LINE
+}
+
+int holder_backup_restore(
+    holder_context* context,
+    const char* project_name,
+    const char* privacy_mode,
+    const char* cards_json,
+    const char* commit_message,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (project_name == nullptr || project_name[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "project_name must not be empty");
+  }
+  if (cards_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "cards_json must not be null");
+  }
+  if (commit_message == nullptr || commit_message[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "commit_message must not be empty");
+  }
+
+  try {
+    std::vector<holder::card::BatchCardInput> items;
+    for (const auto& card_json : nlohmann::json::parse(cards_json)) {
+      items.push_back(batch_card_input_from_json(card_json));
+    }
+
+    holder::model::Project project;
+    project.name = project_name;
+    project.privacy_mode =
+        (privacy_mode != nullptr && privacy_mode[0] != '\0') ? std::string(privacy_mode) : "plain";
+
+    holder::project::ProjectStore project_store(context->db);
+    const auto created =
+        project_store.create(project, uuid_v4, context->data_dir / "projects");
+
+    try {
+      holder::card::CardStore card_store(context->db, &context->fts);
+      card_store.create_batch(created.project_id, items, uuid_v4, commit_message);
+    } catch (...) {
+      // The project is brand new and this whole restore attempt failed -- don't leave a
+      // half-populated project around for the caller to stumble on. Same rollback shape as
+      // ProjectStore::create's own on-failure cleanup: remove the row (cascades to any cards
+      // that did get created before the failure), not the working directory.
+      holder::project::ProjectRepo(context->db).remove(created.project_id);
+      throw;
+    }
+
+    holder::project::ProjectRepo repo(context->db);
+    const auto final_project = repo.get(created.project_id).value();
+
+    auto* out = duplicate_string(project_to_json(final_project).dump());
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+    }
+
     *out_json = out;
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {

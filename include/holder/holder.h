@@ -139,6 +139,37 @@ int holder_backup_snapshot_page(
     holder_error** out_error
 );
 
+// Bulk-restores a batch of cards (the shape holder_backup_snapshot_page emits) into a brand
+// new project: fresh project_id, fresh git repo, no remote, one commit for the whole batch
+// (message "Restored from Android backup" is the caller's convention, not enforced here --
+// pass whatever commit_message you want). Every restored card also gets a fresh card_id --
+// card_id is a global primary key, not scoped per project, so reusing the snapshot's original
+// ids isn't safe (the source project this snapshot came from may still exist on the same
+// device); the input's "card_id" values are used only to resolve link targets within the
+// batch, not preserved on the restored cards. Every card lands at the root (no
+// parent_card_id -- restore is deliberately flat, no hierarchy). A link only survives if its
+// to_type is "card" and its to_card_id matches another item's original card_id in the same
+// batch; anything else (a resource-ref, or a link whose target didn't make it into this batch)
+// is dropped rather than written dangling. On failure the partially-created project is removed
+// (row and files) before the error is returned, so a failed restore never leaves a
+// half-written project behind.
+// cards_json shape: a JSON array of {"card_id", "title", "body", "created_at", "updated_at",
+// "links": [{"to_id"|"to_card_id", "to_type", "kind", "label"}],
+// "milestones": [{"start_at", "all_day", "end_at", "kind", "description"}]}. Extra fields
+// (project_id, project_name, privacy_mode) present because the input came straight from
+// holder_backup_snapshot_page are ignored -- project_name/privacy_mode are passed separately
+// since they're project-level, not per-card. Sets *out_json to the created project, same
+// shape as holder_project_create. See BACKUP_RESTORE_IMPLEMENTATION_PLAN.md step 4.
+int holder_backup_restore(
+    holder_context* context,
+    const char* project_name,
+    const char* privacy_mode,
+    const char* cards_json,
+    const char* commit_message,
+    char** out_json,
+    holder_error** out_error
+);
+
 // Returns the card's markdown body (not front matter). Fails with
 // HOLDER_ERROR_RUNTIME if the card is not found or its content file is missing.
 int holder_card_get_content(

@@ -11,6 +11,7 @@
 #include <yaml-cpp/yaml.h>
 
 #include <filesystem>
+#include <map>
 #include <stdexcept>
 namespace holder::card {
 namespace {
@@ -148,6 +149,95 @@ void CardStore::create(
   );
 
   git_->commit("Add card " + card.title);
+}
+
+void CardStore::create_batch(
+    const std::string& project_id,
+    const std::vector<BatchCardInput>& items,
+    const std::function<std::string()>& uuid_v4,
+    const std::string& commit_message
+) {
+  const auto project = require_project(project_id);
+
+  // card_id is a global primary key, not scoped per project -- restored cards always get a
+  // fresh id (see BatchCardInput's doc comment), so link targets need remapping from the
+  // snapshot's original card_id to the id it was actually written under here.
+  std::map<std::string, std::string> id_remap;
+  for (const auto& item : items) {
+    id_remap[item.card_id] = uuid_v4();
+  }
+
+  std::vector<std::string> staged_paths;
+  staged_paths.reserve(items.size());
+
+  for (const auto& item : items) {
+    holder::model::Card card;
+    card.card_id = id_remap.at(item.card_id);
+    card.project_id = project_id;
+    card.title = item.title;
+    card.rel_path = holder::core::card_rel_path(card.card_id);
+    card.sort_key = card_repo_.next_sort_key(project_id, std::nullopt);
+    card.created_at = item.created_at;
+    card.updated_at = item.updated_at;
+
+    std::vector<holder::model::CardLink> links;
+    for (const auto& link : item.links) {
+      const auto remapped = id_remap.find(link.to_card_id);
+      if (link.to_type != "card" || remapped == id_remap.end()) {
+        // Dropped, not written dangling: the target either wasn't a card link or didn't make
+        // it into this restore batch (evicted from the snapshot, or a resource-ref -- see
+        // BACKUP_RESTORE_DESIGN.md's "open" section on resource-ref hydration being deferred).
+        continue;
+      }
+      holder::model::CardLink resolved = link;
+      resolved.to_card_id = remapped->second;
+      resolved.project_id = project_id;
+      resolved.from_card_id = card.card_id;
+      if (resolved.created_at <= 0) {
+        resolved.created_at = card.updated_at;
+      }
+      links.push_back(std::move(resolved));
+    }
+
+    std::vector<holder::model::Milestone> milestones;
+    for (const auto& milestone : item.milestones) {
+      holder::model::Milestone resolved = milestone;
+      resolved.milestone_id = uuid_v4();
+      resolved.project_id = project_id;
+      resolved.card_id = card.card_id;
+      if (resolved.created_at <= 0) {
+        resolved.created_at = card.updated_at;
+      }
+      if (resolved.updated_at <= 0) {
+        resolved.updated_at = card.updated_at;
+      }
+      milestones.push_back(std::move(resolved));
+    }
+
+    write_card_file(*git_, project, card, links, milestones, item.content);
+    git_->stage_path(card.rel_path);
+    staged_paths.push_back(card.rel_path);
+
+    card_repo_.create(card);
+    if (fts_) {
+      fts_->upsert_card(card.card_id, card.project_id, card.title, item.content);
+    }
+    tag_repo_.set_tags_for_card(
+        project_id, card.card_id, holder::core::extract_tags(item.content), card.updated_at
+    );
+    if (!links.empty()) {
+      link_repo_.upsert_links(project_id, card.card_id, links);
+    }
+    if (!milestones.empty()) {
+      milestone_repo_.replace_for_card(project_id, card.card_id, milestones);
+    }
+  }
+
+  assert_project_staged_blobs_safe(project, staged_paths);
+
+  if (!items.empty()) {
+    git_->commit(commit_message);
+  }
 }
 
 void CardStore::update_content(
