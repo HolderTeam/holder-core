@@ -6,6 +6,7 @@
 #include "card/TagExtractor.h"
 #include "git/GitOps.h"
 #include "platform/Fs.h"
+#include "platform/Tx.h"
 #include "privacy/ProjectPrivacy.h"
 
 #include <yaml-cpp/yaml.h>
@@ -79,7 +80,8 @@ CardStore::CardStore(
     holder::core::Fs* fs,
     holder::git::GitOps* git
 )
-    : fs_(&resolve_fs(fs)),
+    : db_(db),
+      fs_(&resolve_fs(fs)),
       git_(&resolve_git(git)),
       card_repo_(db),
       link_repo_(db),
@@ -170,6 +172,12 @@ void CardStore::create_batch(
   std::vector<std::string> staged_paths;
   staged_paths.reserve(items.size());
 
+  // One transaction for every card's rows, not one auto-committed statement group per card --
+  // at snapshot-restore scale (tens of thousands of cards) each individual commit's fsync-ish
+  // cost adds up the same way stage_path's per-call index rewrite did (see the comment on
+  // git_->stage_paths below). Rolled back automatically if anything throws before commit().
+  holder::platform::Tx tx(db_);
+
   for (const auto& item : items) {
     holder::model::Card card;
     card.card_id = id_remap.at(item.card_id);
@@ -215,7 +223,6 @@ void CardStore::create_batch(
     }
 
     write_card_file(*git_, project, card, links, milestones, item.content);
-    git_->stage_path(card.rel_path);
     staged_paths.push_back(card.rel_path);
 
     card_repo_.create(card);
@@ -231,6 +238,16 @@ void CardStore::create_batch(
     if (!milestones.empty()) {
       milestone_repo_.replace_for_card(project_id, card.card_id, milestones);
     }
+  }
+
+  tx.commit();
+
+  if (!staged_paths.empty()) {
+    // One index open/write for every path (see GitOps::stage_paths), not one per card --
+    // stage_path's own per-call git_index_write is O(n) over the growing index, which made
+    // this O(n^2) over the whole batch at snapshot-restore scale before this existed.
+    std::vector<std::filesystem::path> paths(staged_paths.begin(), staged_paths.end());
+    git_->stage_paths(paths);
   }
 
   assert_project_staged_blobs_safe(project, staged_paths);

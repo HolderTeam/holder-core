@@ -21,6 +21,10 @@ void RealGitOps::stage_path(const std::filesystem::path& relative_path) {
   repo_.stage_path(relative_path);
 }
 
+void RealGitOps::stage_paths(const std::vector<std::filesystem::path>& relative_paths) {
+  repo_.stage_paths(relative_paths);
+}
+
 void RealGitOps::remove_path(const std::filesystem::path& relative_path) {
   repo_.remove_path(relative_path);
 }

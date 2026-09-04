@@ -127,6 +127,35 @@ TEST_CASE("GitRepo stage_path throws on missing file", "[git]") {
   REQUIRE_THROWS(repo.stage_path("missing.txt"));
 }
 
+TEST_CASE("GitRepo stage_paths stages every path in one commit", "[git]") {
+  const auto dir = make_temp_dir();
+  holder::git::GitRepo repo;
+  repo.open_or_init(dir);
+
+  repo.write_file("cards/a.md", "a");
+  repo.write_file("cards/b.md", "b");
+  repo.write_file("cards/c.md", "c");
+  repo.stage_paths({"cards/a.md", "cards/b.md", "cards/c.md"});
+  REQUIRE_NOTHROW(repo.commit("stage many"));
+}
+
+TEST_CASE("GitRepo stage_paths does nothing for an empty list", "[git]") {
+  const auto dir = make_temp_dir();
+  holder::git::GitRepo repo;
+  repo.open_or_init(dir);
+
+  REQUIRE_NOTHROW(repo.stage_paths({}));
+}
+
+TEST_CASE("GitRepo stage_paths throws on a missing file, leaving the index untouched", "[git]") {
+  const auto dir = make_temp_dir();
+  holder::git::GitRepo repo;
+  repo.open_or_init(dir);
+
+  repo.write_file("cards/a.md", "a");
+  REQUIRE_THROWS(repo.stage_paths({"cards/a.md", "cards/missing.md"}));
+}
+
 TEST_CASE("GitRepo pull_remote_ff_only pulls from local remote", "[git]") {
   const auto dir = make_temp_dir();
   const auto remote_dir = dir / "remote";

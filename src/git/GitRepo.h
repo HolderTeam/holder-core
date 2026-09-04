@@ -49,6 +49,12 @@ class GitRepo {
 
   // Stage (add) a path (relative to repo root).
   void stage_path(const std::filesystem::path& relative_path);
+  // Stage (add) many paths in one open/write of the index, instead of stage_path's
+  // open-add-write per call -- stage_path's per-call git_index_write rewrites the whole index
+  // file every time, which is O(n^2) over a large batch. Use this instead of looping
+  // stage_path when staging more than a handful of paths at once (see
+  // CardStore::create_batch, added for tens-of-thousands-of-cards snapshot restore).
+  void stage_paths(const std::vector<std::filesystem::path>& relative_paths);
   // Stage a deletion (relative to repo root).
   void remove_path(const std::filesystem::path& relative_path);
 

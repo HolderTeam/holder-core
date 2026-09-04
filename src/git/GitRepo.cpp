@@ -433,6 +433,30 @@ void GitRepo::stage_path(const fs::path& relative_path) {
   spdlog::info("Staged path: {}", p);
 }
 
+void GitRepo::stage_paths(const std::vector<fs::path>& relative_paths) {
+  ensure_open();
+  if (relative_paths.empty()) return;
+
+  git_index* index = nullptr;
+  int rc = git_repository_index(&index, reinterpret_cast<git_repository*>(repo_));
+  if (rc != 0) throw git_err("git_repository_index failed", rc);
+
+  for (const auto& relative_path : relative_paths) {
+    const std::string p = relative_path.generic_string();
+    rc = git_index_add_bypath(index, p.c_str());
+    if (rc != 0) {
+      git_index_free(index);
+      throw git_err("git_index_add_bypath failed for " + p, rc);
+    }
+  }
+
+  rc = git_index_write(index);
+  git_index_free(index);
+  if (rc != 0) throw git_err("git_index_write failed", rc); // LCOV_EXCL_LINE
+
+  spdlog::info("Staged {} paths", relative_paths.size());
+}
+
 void GitRepo::remove_path(const fs::path& relative_path) {
   ensure_open();
 

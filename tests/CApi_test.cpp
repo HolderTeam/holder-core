@@ -1224,6 +1224,57 @@ TEST_CASE(
   holder_context_destroy(context);
 }
 
+TEST_CASE(
+    "C API backup_restore stays a single commit at realistic snapshot scale",
+    "[capi]"
+) {
+  const auto data_dir = holder::test::make_temp_dir();
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  // Spike 2's simple profile fit ~174,000 cards in a 20 MiB snapshot; 20,000 here is enough to
+  // make an accidental per-card commit (or any other O(n) git operation) show up immediately
+  // without making the test itself slow.
+  constexpr int kCardCount = 20000;
+  nlohmann::json cards_json = nlohmann::json::array();
+  for (int i = 0; i < kCardCount; ++i) {
+    cards_json.push_back({
+        {"card_id", "card-" + std::to_string(i)},
+        {"title", "Card " + std::to_string(i)},
+        {"body", "body text"},
+        {"created_at", i},
+        {"updated_at", i},
+    });
+  }
+
+  char* restored_json = nullptr;
+  REQUIRE(
+      holder_backup_restore(
+          context, "Restored Project", "plain", cards_json.dump().c_str(), "Restored from Android backup",
+          &restored_json, &error
+      ) == HOLDER_OK
+  );
+  const auto restored_project = nlohmann::json::parse(restored_json);
+  holder_string_free(restored_json);
+
+  char* list_json = nullptr;
+  REQUIRE(
+      holder_card_list(
+          context, restored_project["project_id"].get<std::string>().c_str(), &list_json, &error
+      ) == HOLDER_OK
+  );
+  REQUIRE(nlohmann::json::parse(list_json).size() == kCardCount);
+  holder_string_free(list_json);
+
+  // One commit for all 20,000 cards, not one per card.
+  REQUIRE(count_commits(restored_project["root_path"].get<std::string>()) == 2);
+
+  holder_context_destroy(context);
+}
+
 TEST_CASE("C API card_list_trashed lists only soft-deleted cards", "[capi]") {
   const auto data_dir = holder::test::make_temp_dir();
   seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);

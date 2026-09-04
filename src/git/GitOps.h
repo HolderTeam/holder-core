@@ -9,6 +9,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace holder::git {
 
@@ -28,6 +29,16 @@ class GitOps {
       const std::string& content
   ) = 0;
   virtual void stage_path(const std::filesystem::path& relative_path) = 0;
+  // Default: repeated stage_path calls. RealGitOps overrides this to add every path to a
+  // single open index and write it once, instead of reopening/rewriting the whole index file
+  // per path -- see GitRepo::stage_paths. Callers staging more than a handful of paths at once
+  // (CardStore::create_batch's tens-of-thousands-of-cards snapshot restore) should call this,
+  // not loop stage_path, or they pay stage_path's per-call index rewrite anyway.
+  virtual void stage_paths(const std::vector<std::filesystem::path>& relative_paths) {
+    for (const auto& path : relative_paths) {
+      stage_path(path);
+    }
+  }
   virtual void remove_path(const std::filesystem::path& relative_path) = 0;
   virtual void commit(const std::string& message) = 0;
   virtual void set_remote(const std::string& name, const std::string& url) = 0;
@@ -48,6 +59,7 @@ class RealGitOps final : public GitOps {
   void open_or_init(const std::filesystem::path& repo_dir) override;
   void write_file(const std::filesystem::path& relative_path, const std::string& content) override;
   void stage_path(const std::filesystem::path& relative_path) override;
+  void stage_paths(const std::vector<std::filesystem::path>& relative_paths) override;
   void remove_path(const std::filesystem::path& relative_path) override;
   void commit(const std::string& message) override;
   void set_remote(const std::string& name, const std::string& url) override;
