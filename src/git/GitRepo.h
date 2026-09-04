@@ -11,6 +11,15 @@
 
 namespace holder::git {
 
+struct GitHistoryCommit {
+  std::string oid;
+  std::vector<std::string> parent_oids;
+  std::string author_name;
+  std::string author_email;
+  long long committed_at = 0;
+  std::string message;
+};
+
 // Thrown by pull_remote_ff_only when local and remote have diverged (neither is an ancestor of
 // the other). Carries both OIDs (hex) so a caller that wants to resolve the divergence -- rather
 // than just surface the failure -- doesn't have to re-derive them via its own branch/ref lookup.
@@ -103,6 +112,19 @@ class GitRepo {
       const std::string& commit_oid_hex,
       const std::filesystem::path& relative_path
   );
+
+  // Return commits reachable from HEAD, newest first, whose tree changes at least one of the
+  // supplied paths. cursor_oid is the last commit returned by a previous page; when supplied,
+  // results begin after it. One extra matching commit is read to determine has_more.
+  std::vector<GitHistoryCommit> history_for_paths(
+      const std::vector<std::filesystem::path>& relative_paths,
+      std::size_t limit,
+      const std::optional<std::string>& cursor_oid,
+      bool& has_more
+  );
+
+  // Current commit OID, or nullopt for an unborn repository.
+  std::optional<std::string> head_oid();
 
   // Test hook: invoke the internal credential callback and report whether a credential was
   // produced.
