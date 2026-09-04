@@ -448,4 +448,53 @@ void CardRepo::move(
   }
 }
 
+std::vector<holder::model::Card> CardRepo::list_recent_page(
+    const std::string& project_id,
+    const std::optional<long long>& before_updated_at,
+    const std::optional<std::string>& before_card_id,
+    int limit
+) const {
+  static constexpr const char* SQL_FIRST =
+      "SELECT card_id, project_id, title, rel_path, parent_card_id, sort_key, "
+      "created_at, updated_at, deleted_at "
+      "FROM cards WHERE project_id = ? AND deleted_at IS NULL "
+      "ORDER BY updated_at DESC, card_id DESC LIMIT ?;";
+  static constexpr const char* SQL_PAGE =
+      "SELECT card_id, project_id, title, rel_path, parent_card_id, sort_key, "
+      "created_at, updated_at, deleted_at "
+      "FROM cards WHERE project_id = ? AND deleted_at IS NULL "
+      "AND (updated_at < ? OR (updated_at = ? AND card_id < ?)) "
+      "ORDER BY updated_at DESC, card_id DESC LIMIT ?;";
+
+  const bool first_page = !before_updated_at.has_value();
+  sqlite3_stmt* stmt = nullptr;
+  if (sqlite3_prepare_v2(db_.handle(), first_page ? SQL_FIRST : SQL_PAGE, -1, &stmt, nullptr) !=
+      SQLITE_OK) {
+    throw_sqlite(db_.handle(), "prepare list recent cards failed");
+  }
+  bind_text(stmt, 1, project_id);
+  if (first_page) {
+    sqlite3_bind_int(stmt, 2, limit);
+  } else {
+    sqlite3_bind_int64(stmt, 2, *before_updated_at);
+    sqlite3_bind_int64(stmt, 3, *before_updated_at);
+    bind_text(stmt, 4, *before_card_id);
+    sqlite3_bind_int(stmt, 5, limit);
+  }
+
+  std::vector<holder::model::Card> out;
+  while (true) {
+    const int rc2 = sqlite3_step(stmt);
+    if (rc2 == SQLITE_ROW) {
+      out.push_back(read_card(stmt));
+      continue;
+    }
+    if (rc2 == SQLITE_DONE) break;
+    sqlite3_finalize(stmt); // LCOV_EXCL_LINE
+    throw_sqlite(db_.handle(), "list recent cards failed"); // LCOV_EXCL_LINE
+  }
+  sqlite3_finalize(stmt); // LCOV_EXCL_LINE
+  return out;
+} // LCOV_EXCL_LINE
+
 } // namespace holder::card

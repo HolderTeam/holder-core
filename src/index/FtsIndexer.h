@@ -2,6 +2,7 @@
 
 #include "platform/Db.h"
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -18,6 +19,11 @@ class FtsIndexer {
       const std::string& body
   );
   void delete_card(const std::string& card_id);
+
+  // Reads a single card's indexed body text back out, without going through search -- e.g.
+  // for the Android backup snapshot (BACKUP_RESTORE_IMPLEMENTATION_PLAN.md step 1), which
+  // needs plain card text. Returns nullopt if the card has no cards_fts row (e.g. mid-rebuild).
+  std::optional<std::string> get_body(const std::string& card_id) const;
 
   void upsert_message(
       const std::string& message_id,

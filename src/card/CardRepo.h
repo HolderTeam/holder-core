@@ -22,6 +22,19 @@ class CardRepo {
       const std::string& parent_card_id
   ) const;
   std::vector<holder::model::Card> list_all(const std::string& project_id) const;
+
+  // Cursor-paginated, most-recently-updated first (ties broken by card_id descending, for
+  // stable pagination across calls) -- distinct from list_all's sort_key-then-updated_at
+  // ordering, which is for normal card-listing UI, not this. Pass std::nullopt for both
+  // cursor fields to get the first page; for subsequent pages, pass the last row's own
+  // updated_at/card_id back in. Never includes a soft-deleted card. See
+  // BACKUP_RESTORE_IMPLEMENTATION_PLAN.md step 1 -- the Android backup snapshot's query.
+  std::vector<holder::model::Card> list_recent_page(
+      const std::string& project_id,
+      const std::optional<long long>& before_updated_at,
+      const std::optional<std::string>& before_card_id,
+      int limit
+  ) const;
   int count_all_not_deleted(const std::string& project_id) const;
   int count_roots_not_deleted(const std::string& project_id) const;
   int count_children_not_deleted(const std::string& project_id, const std::string& parent_card_id)

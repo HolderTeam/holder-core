@@ -119,6 +119,26 @@ int holder_card_list(
     holder_error** out_error
 );
 
+// The Android backup snapshot's query: project_id's cards, most-recently-updated first,
+// cursor-paginated (pass cursor_card_id as null/empty for the first page; for later pages,
+// pass back the previous response's next_cursor fields). Each returned card carries its own
+// project's name/privacy_mode, its body text, and its links/milestones (not its tags -- those
+// are always #hashtags already present in the body, re-derived by the normal card-write path
+// on restore rather than carried here too). Response shape:
+// {"cards": [{"card_id", "project_id", "project_name", "privacy_mode", "title", "body",
+//             "created_at", "updated_at", "links": [...], "milestones": [...]}, ...],
+//  "next_cursor": {"updated_at", "card_id"} | null}
+// See BACKUP_RESTORE_IMPLEMENTATION_PLAN.md step 1.
+int holder_backup_snapshot_page(
+    holder_context* context,
+    const char* project_id,
+    long long cursor_updated_at,
+    const char* cursor_card_id,
+    int limit,
+    char** out_json,
+    holder_error** out_error
+);
+
 // Returns the card's markdown body (not front matter). Fails with
 // HOLDER_ERROR_RUNTIME if the card is not found or its content file is missing.
 int holder_card_get_content(

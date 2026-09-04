@@ -7,6 +7,8 @@
 
 #include "card/CardPaths.h"
 #include "card/CardRepo.h"
+#include "card/LinkRepo.h"
+#include "card/MilestoneRepo.h"
 #include "core_test_helpers.h"
 #include "git/GitRepo.h"
 #include "index/FtsIndexer.h"
@@ -927,6 +929,93 @@ TEST_CASE("C API reports invalid card list_trashed/restore/purge arguments", "[c
   REQUIRE(holder_card_purge(context, "missing-card", &error) == HOLDER_ERROR_RUNTIME);
   REQUIRE(error != nullptr);
   holder_error_destroy(error);
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE(
+    "C API backup_snapshot_page returns cards most-recently-updated first, with links/"
+    "milestones and project fields, paginated by cursor",
+    "[capi]"
+) {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  // Three plain cards via the C ABI, same as any normal card creation.
+  std::vector<std::string> card_ids;
+  for (const std::string& title : {"Oldest", "Middle", "Newest"}) {
+    char* json = nullptr;
+    REQUIRE(holder_card_create(context, "project-1", title.c_str(), "body text", nullptr, &json, &error) == HOLDER_OK);
+    card_ids.push_back(nlohmann::json::parse(json)["card_id"].get<std::string>());
+    holder_string_free(json);
+  }
+
+  // Control updated_at directly (holder_card_create always uses "now", too fast to produce
+  // distinct timestamps in a test) via a second raw connection to the same database, same
+  // pattern seed_git_project itself uses for setup outside the C ABI.
+  {
+    holder::platform::Db db;
+    db.open(data_dir / "server" / "holder.db");
+    holder::card::CardRepo card_repo(db);
+    card_repo.touch_updated(card_ids[0], 100); // Oldest
+    card_repo.touch_updated(card_ids[1], 200); // Middle
+    card_repo.touch_updated(card_ids[2], 300); // Newest
+
+    holder::card::LinkRepo link_repo(db);
+    link_repo.upsert_links(
+        "project-1", card_ids[2],
+        {{"project-1", card_ids[2], card_ids[0], "card", "related", std::string("see also"), 300}}
+    );
+
+    holder::card::MilestoneRepo milestone_repo(db);
+    milestone_repo.replace_for_card(
+        "project-1", card_ids[2],
+        {{"m1", "project-1", card_ids[2], 999, std::nullopt, true, std::string("Deadline"),
+          std::string("ship it"), 300, 300}}
+    );
+  }
+
+  // First page: the two most recently updated cards, newest first.
+  char* json = nullptr;
+  REQUIRE(holder_backup_snapshot_page(context, "project-1", 0, nullptr, 2, &json, &error) == HOLDER_OK);
+  auto page1 = nlohmann::json::parse(json);
+  holder_string_free(json);
+
+  REQUIRE(page1["cards"].size() == 2);
+  REQUIRE(page1["cards"][0]["title"] == "Newest");
+  REQUIRE(page1["cards"][0]["body"] == "body text");
+  REQUIRE(page1["cards"][0]["project_name"] == "Git Project");
+  REQUIRE(page1["cards"][0]["privacy_mode"] == "plain");
+  REQUIRE(page1["cards"][0]["links"][0]["to_id"] == card_ids[0]);
+  REQUIRE(page1["cards"][0]["links"][0]["label"] == "see also");
+  REQUIRE(page1["cards"][0]["milestones"][0]["kind"] == "Deadline");
+  REQUIRE(page1["cards"][0]["milestones"][0]["description"] == "ship it");
+  REQUIRE(page1["cards"][1]["title"] == "Middle");
+  REQUIRE_FALSE(page1["cards"][1].contains("links"));
+  REQUIRE_FALSE(page1["next_cursor"].is_null());
+
+  // Second page, using the cursor the first page returned: the one remaining card, and no
+  // further cursor since the page came back shorter than the requested limit.
+  const long long cursor_updated_at = page1["next_cursor"]["updated_at"].get<long long>();
+  const std::string cursor_card_id = page1["next_cursor"]["card_id"].get<std::string>();
+
+  json = nullptr;
+  REQUIRE(
+      holder_backup_snapshot_page(
+          context, "project-1", cursor_updated_at, cursor_card_id.c_str(), 2, &json, &error
+      ) == HOLDER_OK
+  );
+  auto page2 = nlohmann::json::parse(json);
+  holder_string_free(json);
+
+  REQUIRE(page2["cards"].size() == 1);
+  REQUIRE(page2["cards"][0]["title"] == "Oldest");
+  REQUIRE(page2["next_cursor"].is_null());
 
   holder_context_destroy(context);
 }

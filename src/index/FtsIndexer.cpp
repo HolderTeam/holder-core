@@ -240,4 +240,25 @@ std::vector<FtsIndexer::SearchRow> FtsIndexer::search_messages(
   return out;
 }
 
+std::optional<std::string> FtsIndexer::get_body(const std::string& card_id) const {
+  static constexpr const char* SQL = "SELECT body FROM cards_fts WHERE card_id = ?;";
+  sqlite3_stmt* stmt = nullptr;
+  if (sqlite3_prepare_v2(db_.handle(), SQL, -1, &stmt, nullptr) != SQLITE_OK) {
+    throw_sqlite(db_.handle(), "prepare get body failed");
+  }
+  bind_text(stmt, 1, card_id);
+
+  std::optional<std::string> out;
+  const int rc = sqlite3_step(stmt);
+  if (rc == SQLITE_ROW) {
+    const auto* text = sqlite3_column_text(stmt, 0);
+    out = text ? std::string(reinterpret_cast<const char*>(text)) : std::string();
+  } else if (rc != SQLITE_DONE) {
+    sqlite3_finalize(stmt); // LCOV_EXCL_LINE
+    throw_sqlite(db_.handle(), "get body failed"); // LCOV_EXCL_LINE
+  }
+  sqlite3_finalize(stmt);
+  return out;
+}
+
 } // namespace holder::index

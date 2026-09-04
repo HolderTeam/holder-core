@@ -1459,6 +1459,141 @@ int holder_card_list(
   }  // LCOV_EXCL_LINE
 }
 
+// The Android backup snapshot's query (BACKUP_RESTORE_IMPLEMENTATION_PLAN.md step 1):
+// project_id's cards, most-recently-updated first, cursor-paginated so the caller (Kotlin,
+// deciding based on accumulated JSON+gzip size, which holder-core knows nothing about) can
+// stop whenever it wants rather than holder-core needing a byte budget of its own. Each card
+// carries its own project's name/privacy_mode denormalized inline (simpler than a separate
+// per-project header the caller would have to track across pages) plus links and milestones
+// -- both are frontmatter-only, not recoverable from body text alone, so the snapshot must
+// carry them explicitly. Tags are deliberately NOT included: they're always #hashtags already
+// present in the card's own body (see GITHUB_INTEGRATION_ANDROID_PLAN.md's card_tags note),
+// so restore's normal card-write path re-derives them from body text the same way any other
+// card write already does -- carrying them here too would just be redundant. Resource
+// references are also not yet included (the resource/asset metadata a card_links
+// to_type='resource' entry points at needs its own ResourceRepo/AssetRepo join, deferred as
+// a follow-up rather than blocking this step) -- the link itself, if a card has one, is not
+// silently dropped, only its target's own descriptive metadata.
+//
+// cursor_card_id empty/null means "first page." next_cursor in the response is null once a
+// page comes back shorter than limit (nothing left); otherwise it's the caller's cursor for
+// the next call.
+int holder_backup_snapshot_page(
+    holder_context* context,
+    const char* project_id,
+    long long cursor_updated_at,
+    const char* cursor_card_id,
+    int limit,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (project_id == nullptr || project_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "project_id must not be empty");
+  }
+  if (limit <= 0) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "limit must be positive");
+  }
+
+  try {
+    holder::project::ProjectRepo project_repo(context->db);
+    const auto project = project_repo.get(project_id);
+    if (!project.has_value()) {
+      return set_error(out_error, HOLDER_ERROR_RUNTIME, "project not found: " + std::string(project_id));
+    }
+
+    holder::card::CardRepo card_repo(context->db);
+    holder::card::LinkRepo link_repo(context->db);
+    holder::card::MilestoneRepo milestone_repo(context->db);
+    holder::index::FtsIndexer fts(context->db);
+
+    const bool has_cursor = cursor_card_id != nullptr && cursor_card_id[0] != '\0';
+    const auto cards = card_repo.list_recent_page(
+        project_id,
+        has_cursor ? std::optional<long long>(cursor_updated_at) : std::nullopt,
+        has_cursor ? std::optional<std::string>(cursor_card_id) : std::nullopt,
+        limit
+    );
+
+    nlohmann::json cards_json = nlohmann::json::array();
+    for (const auto& card : cards) {
+      nlohmann::json entry = {
+          {"card_id", card.card_id},
+          {"project_id", card.project_id},
+          {"project_name", project->name},
+          {"privacy_mode", project->privacy_mode},
+          {"title", card.title},
+          {"body", fts.get_body(card.card_id).value_or("")},
+          {"created_at", card.created_at},
+          {"updated_at", card.updated_at},
+      };
+
+      nlohmann::json links = nlohmann::json::array();
+      for (const auto& link : link_repo.list_outgoing(project_id, card.card_id)) {
+        nlohmann::json link_json = {
+            {"to_id", link.to_card_id},
+            {"to_type", link.to_type},
+            {"kind", link.kind},
+        };
+        link_json["label"] = link.label.has_value() ? nlohmann::json(*link.label) : nlohmann::json(nullptr);
+        links.push_back(link_json);
+      }
+      if (!links.empty()) entry["links"] = links;
+
+      nlohmann::json milestones = nlohmann::json::array();
+      for (const auto& milestone : milestone_repo.list_for_card(project_id, card.card_id)) {
+        nlohmann::json milestone_json = {
+            {"start_at", milestone.start_at},
+            {"all_day", milestone.all_day},
+        };
+        milestone_json["end_at"] =
+            milestone.end_at.has_value() ? nlohmann::json(*milestone.end_at) : nlohmann::json(nullptr);
+        milestone_json["kind"] =
+            milestone.kind.has_value() ? nlohmann::json(*milestone.kind) : nlohmann::json(nullptr);
+        milestone_json["description"] = milestone.description.has_value()
+                                             ? nlohmann::json(*milestone.description)
+                                             : nlohmann::json(nullptr);
+        milestones.push_back(milestone_json);
+      }
+      if (!milestones.empty()) entry["milestones"] = milestones;
+
+      cards_json.push_back(entry);
+    }
+
+    nlohmann::json body = {{"cards", cards_json}};
+    if (!cards.empty() && static_cast<int>(cards.size()) == limit) {
+      const auto& last = cards.back();
+      body["next_cursor"] = {
+          {"updated_at", last.updated_at},
+          {"card_id", last.card_id},
+      };
+    } else {
+      body["next_cursor"] = nullptr;
+    }
+
+    auto* out = duplicate_string(body.dump());
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+    }
+    *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
+  }  // LCOV_EXCL_LINE
+}
+
 int holder_card_get_content(
     holder_context* context,
     const char* card_id,
