@@ -8,6 +8,12 @@
 
 namespace holder::history {
 
+struct CardHistorySave {
+  std::string oid;
+  std::vector<std::string> parent_oids;
+  long long committed_at = 0;
+};
+
 struct CardHistoryEntry {
   std::string first_oid;
   std::string last_oid;
@@ -20,6 +26,8 @@ struct CardHistoryEntry {
   std::string summary;
   std::size_t commit_count = 0;
   bool is_merge = false;
+  // Ordered from the first save in an editing session to its final save.
+  std::vector<CardHistorySave> saves;
 };
 
 struct CardHistoryPage {

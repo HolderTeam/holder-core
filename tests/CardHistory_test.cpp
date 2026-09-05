@@ -96,6 +96,10 @@ TEST_CASE("Card history lists card-only commits and groups adjacent edits", "[hi
   CHECK(page.entries[0].kind == "links");
   CHECK(page.entries[1].kind == "updated");
   CHECK(page.entries[1].commit_count == 2);
+  REQUIRE(page.entries[1].saves.size() == 2);
+  CHECK(page.entries[1].saves.front().oid == page.entries[1].first_oid);
+  CHECK(page.entries[1].saves.back().oid == page.entries[1].last_oid);
+  CHECK(page.entries[1].saves.front().parent_oids.size() == 1);
   CHECK(page.entries[2].kind == "created");
   CHECK(page.entries[2].summary == "Card created");
 }
