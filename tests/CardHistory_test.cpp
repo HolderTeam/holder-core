@@ -231,6 +231,36 @@ TEST_CASE("Card history splits editing sessions at author and time boundaries", 
   CHECK(span_page.entries[1].commit_count == 1);
 }
 
+TEST_CASE("Card history preserves parent order when commit clocks move backwards", "[history][git]") {
+  const auto root = history_temp_dir();
+  const std::string card_id = "abcd-clock-skew";
+  holder::git::GitRepo repo;
+  repo.open_or_init(root);
+  write_commit_at(repo, root, card_id, "Skew", "One\n", "Add card Skew",
+                  "Alice", "alice@example.test", 1'000);
+  write_commit_at(repo, root, card_id, "Skew", "Two\n", "Update card Skew",
+                  "Alice", "alice@example.test", 1'200);
+  write_commit_at(repo, root, card_id, "Skew", "Three\n", "Update card Skew",
+                  "Alice", "alice@example.test", 900);
+  const auto head_oid = repo.head_oid();
+  REQUIRE(head_oid.has_value());
+
+  holder::model::Project project;
+  project.project_id = "project-history";
+  project.root_path = root.string();
+  project.privacy_mode = "plain";
+  const auto page = holder::history::CardHistoryService().list(project, card_id);
+
+  REQUIRE(page.entries.size() == 3);
+  CHECK(page.entries[0].last_oid == *head_oid);
+  CHECK(page.entries[0].ended_at == 900);
+  CHECK(page.entries[0].parent_oids.size() == 1);
+  CHECK(page.entries[0].parent_oids.front() == page.entries[1].last_oid);
+  CHECK(page.entries[1].ended_at == 1'200);
+  CHECK(page.entries[0].commit_count == 1);
+  CHECK(page.entries[1].commit_count == 1);
+}
+
 TEST_CASE("Card history compares a selected version with current HEAD", "[history][git]") {
   const auto root = history_temp_dir();
   const std::string card_id = "abcd-compare-card";
