@@ -252,6 +252,36 @@ TEST_CASE("Card history splits editing sessions at author and time boundaries", 
   CHECK(span_page.entries[1].commit_count == 1);
 }
 
+TEST_CASE("Card history groups direct-parent updates at exact session time limits", "[history][git]") {
+  const auto root = history_temp_dir();
+  const std::string card_id = "abcd-session-exact-limits";
+  holder::git::GitRepo repo;
+  repo.open_or_init(root);
+  write_commit_at(repo, root, card_id, "Limits", "One\n", "Add card Limits",
+                  "Alice", "alice@example.test", 1'000);
+  write_commit_at(repo, root, card_id, "Limits", "Two\n", "Update card Limits",
+                  "Alice", "alice@example.test", 1'100);
+  write_commit_at(repo, root, card_id, "Limits", "Three\n", "Update card Limits",
+                  "Alice", "alice@example.test", 1'700);
+  write_commit_at(repo, root, card_id, "Limits", "Four\n", "Update card Limits",
+                  "Alice", "alice@example.test", 2'300);
+  write_commit_at(repo, root, card_id, "Limits", "Five\n", "Update card Limits",
+                  "Alice", "alice@example.test", 2'900);
+
+  holder::model::Project project;
+  project.project_id = "project-history";
+  project.root_path = root.string();
+  project.privacy_mode = "plain";
+  const auto page = holder::history::CardHistoryService().list(project, card_id);
+
+  REQUIRE(page.entries.size() == 2);
+  CHECK(page.entries[0].kind == "updated");
+  CHECK(page.entries[0].commit_count == 4);
+  CHECK(page.entries[0].started_at == 1'100);
+  CHECK(page.entries[0].ended_at == 2'900);
+  CHECK(page.entries[1].kind == "created");
+}
+
 TEST_CASE("Card history preserves parent order when commit clocks move backwards", "[history][git]") {
   const auto root = history_temp_dir();
   const std::string card_id = "abcd-clock-skew";
