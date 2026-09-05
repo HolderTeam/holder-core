@@ -345,6 +345,72 @@ TEST_CASE("Card history retains both merge parents and the resulting card state"
   CHECK(comparison.to.body == "Combined branches\n");
 }
 
+TEST_CASE("Card history follows the same UUID through live and Trash paths", "[history][git]") {
+  const auto root = history_temp_dir();
+  const std::string card_id = "abcd-live-trash";
+  holder::git::GitRepo repo;
+  repo.open_or_init(root);
+  const auto created_oid = write_commit_at(
+      repo, root, card_id, "Trash", "Live version\n", "Add card Trash",
+      "Alice", "alice@example.test", 1'000
+  );
+
+  const auto live_path = holder::core::card_rel_path(card_id);
+  const auto trash_path = holder::core::card_trash_rel_path(card_id);
+  repo.remove_path(live_path);
+  repo.write_file(trash_path, card_file(card_id, "Trash", "Trashed version\n"));
+  repo.stage_path(trash_path);
+  const auto trashed_parent = repo.head_oid();
+  REQUIRE(trashed_parent.has_value());
+  const auto trashed_oid = commit_staged_at(
+      root,
+      "Delete card Trash",
+      "Alice",
+      "alice@example.test",
+      1'100,
+      {*trashed_parent},
+      "HEAD"
+  );
+
+  repo.remove_path(trash_path);
+  repo.write_file(live_path, card_file(card_id, "Trash", "Restored version\n"));
+  repo.stage_path(live_path);
+  const auto restored_parent = repo.head_oid();
+  REQUIRE(restored_parent.has_value());
+  const auto restored_oid = commit_staged_at(
+      root,
+      "Restore card Trash",
+      "Alice",
+      "alice@example.test",
+      1'200,
+      {*restored_parent},
+      "HEAD"
+  );
+
+  holder::model::Project project;
+  project.project_id = "project-history";
+  project.root_path = root.string();
+  project.privacy_mode = "plain";
+  holder::history::CardHistoryService service;
+  const auto page = service.list(project, card_id);
+
+  REQUIRE(page.head_oid.has_value());
+  CHECK(*page.head_oid == restored_oid);
+  REQUIRE(page.entries.size() == 3);
+  CHECK(page.entries[0].kind == "restored");
+  CHECK(page.entries[0].last_oid == restored_oid);
+  CHECK(page.entries[1].kind == "deleted");
+  CHECK(page.entries[1].last_oid == trashed_oid);
+  CHECK(page.entries[2].kind == "created");
+  CHECK(page.entries[2].last_oid == created_oid);
+
+  const auto trashed_to_restored = service.compare(project, card_id, trashed_oid, restored_oid);
+  CHECK(trashed_to_restored.from.exists);
+  CHECK(trashed_to_restored.from.body == "Trashed version\n");
+  CHECK(trashed_to_restored.to.exists);
+  CHECK(trashed_to_restored.to.body == "Restored version\n");
+}
+
 TEST_CASE("Card history compares a selected version with current HEAD", "[history][git]") {
   const auto root = history_temp_dir();
   const std::string card_id = "abcd-compare-card";
