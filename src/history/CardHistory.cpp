@@ -9,6 +9,7 @@
 #include <cctype>
 #include <filesystem>
 #include <stdexcept>
+#include <unordered_set>
 #include <utility>
 
 namespace holder::history {
@@ -288,7 +289,16 @@ CardHistoryPage CardHistoryService::list(
     raw_cursor = last_consumed_oid;
   }
 
+  std::unordered_set<std::string> visible_entry_oids;
+  visible_entry_oids.reserve(page.entries.size());
+  for (const auto& entry : page.entries) visible_entry_oids.insert(entry.last_oid);
+
   for (auto& entry : page.entries) {
+    for (const auto& parent_oid : entry.parent_oids) {
+      if (visible_entry_oids.contains(parent_oid)) {
+        entry.visible_parent_oids.push_back(parent_oid);
+      }
+    }
     const auto before_oid = entry.parent_oids.empty()
         ? std::optional<std::string>{}
         : std::optional<std::string>{entry.parent_oids.front()};

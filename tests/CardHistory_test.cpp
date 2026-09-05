@@ -314,6 +314,7 @@ TEST_CASE("Card history preserves parent order when commit clocks move backwards
   CHECK(page.entries[0].ended_at == 900);
   CHECK(page.entries[0].parent_oids.size() == 1);
   CHECK(page.entries[0].parent_oids.front() == page.entries[1].last_oid);
+  CHECK(page.entries[0].visible_parent_oids == page.entries[0].parent_oids);
   CHECK(page.entries[1].ended_at == 1'200);
   CHECK(page.entries[0].commit_count == 1);
   CHECK(page.entries[1].commit_count == 1);
@@ -375,6 +376,7 @@ TEST_CASE("Card history retains both merge parents and the resulting card state"
   REQUIRE(merge.parent_oids.size() == 2);
   CHECK(merge.parent_oids[0] == first_parent_oid);
   CHECK(merge.parent_oids[1] == second_parent_oid);
+  CHECK(merge.visible_parent_oids == merge.parent_oids);
   CHECK(merge.commit_count == 1);
 
   const auto comparison = service.compare(project, card_id, first_parent_oid, merge_oid);

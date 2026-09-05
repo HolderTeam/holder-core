@@ -20,6 +20,10 @@ struct CardHistoryEntry {
   std::string first_oid;
   std::string last_oid;
   std::vector<std::string> parent_oids;
+  // Direct parents which are also represented by an entry in this page. This is
+  // deliberately page-local so consumers never need to infer a connection
+  // through filtered commits or across a pagination boundary.
+  std::vector<std::string> visible_parent_oids;
   std::string author_name;
   std::string author_email;
   long long started_at = 0;
