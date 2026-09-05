@@ -1235,10 +1235,10 @@ TEST_CASE(
   const auto schema = read_schema_sql();
   REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
 
-  // Spike 2's simple profile fit ~174,000 cards in a 20 MiB snapshot; 20,000 here is enough to
-  // make an accidental per-card commit (or any other O(n) git operation) show up immediately
-  // without making the test itself slow.
-  constexpr int kCardCount = 20000;
+  // Exercise a substantial end-to-end restore without turning filesystem speed into a unit-test
+  // assertion. CardStore_test directly verifies that a batch uses one bulk stage and one commit;
+  // this fixture checks that the same contract survives the C API at representative scale.
+  constexpr int kCardCount = 2000;
   nlohmann::json cards_json = nlohmann::json::array();
   for (int i = 0; i < kCardCount; ++i) {
     cards_json.push_back({
@@ -1269,7 +1269,7 @@ TEST_CASE(
   REQUIRE(nlohmann::json::parse(list_json).size() == kCardCount);
   holder_string_free(list_json);
 
-  // One commit for all 20,000 cards, not one per card.
+  // One commit for the whole batch, not one per card.
   REQUIRE(count_commits(restored_project["root_path"].get<std::string>()) == 2);
 
   holder_context_destroy(context);

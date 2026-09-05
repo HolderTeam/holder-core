@@ -221,6 +221,59 @@ class CloseDbOnStageGitOps final : public holder::git::GitOps {
   holder::git::RealGitOps real_;
 };
 
+class BulkTrackingGitOps final : public holder::git::GitOps {
+ public:
+  void open_or_init(const std::filesystem::path& repo_dir) override {
+    real_.open_or_init(repo_dir);
+  }
+  void write_file(
+      const std::filesystem::path& relative_path,
+      const std::string& content
+  ) override {
+    real_.write_file(relative_path, content);
+  }
+  void stage_path(const std::filesystem::path& relative_path) override {
+    ++stage_path_calls;
+    real_.stage_path(relative_path);
+  }
+  void stage_paths(const std::vector<std::filesystem::path>& relative_paths) override {
+    ++stage_paths_calls;
+    staged_path_count += relative_paths.size();
+    real_.stage_paths(relative_paths);
+  }
+  void remove_path(const std::filesystem::path& relative_path) override {
+    real_.remove_path(relative_path);
+  }
+  void commit(const std::string& message) override {
+    ++commit_calls;
+    real_.commit(message);
+  }
+  void set_remote(const std::string& name, const std::string& url) override {
+    real_.set_remote(name, url);
+  }
+  void remove_remote(const std::string& name) override { real_.remove_remote(name); }
+  void pull_remote_ff_only(const std::string& name) override { real_.pull_remote_ff_only(name); }
+  holder::git::RemoteProbeResult probe_remote(const std::string& name) override {
+    return real_.probe_remote(name);
+  }
+  holder::git::PushResult push_branch(
+      const std::string& name,
+      const std::string& branch,
+      bool set_upstream
+  ) override {
+    return real_.push_branch(name, branch, set_upstream);
+  }
+  std::filesystem::path repo_dir() const override { return real_.repo_dir(); }
+
+  int stage_path_calls = 0;
+  int stage_paths_calls = 0;
+  std::size_t staged_path_count = 0;
+  int commit_calls = 0;
+
+ private:
+  holder::git::RealGitOps real_;
+};
+
 } // namespace
 
 TEST_CASE("CardStore create writes file and DB", "[cardstore]") {
@@ -263,6 +316,41 @@ TEST_CASE("CardStore create writes file and DB", "[cardstore]") {
   const auto fetched = card_repo.get("abcd1234");
   REQUIRE(fetched.has_value());
   REQUIRE(fetched->rel_path == rel_path);
+}
+
+TEST_CASE("CardStore create_batch stages and commits the batch once", "[cardstore][backup]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  const auto project_root = dir / "project_repo";
+  create_project(db, "proj-1", project_root.string());
+
+  BulkTrackingGitOps git;
+  holder::card::CardStore store(db, nullptr, nullptr, &git);
+  std::vector<holder::card::BatchCardInput> items;
+  for (int i = 0; i < 3; ++i) {
+    holder::card::BatchCardInput item;
+    item.card_id = "old-card-" + std::to_string(i);
+    item.title = "Card " + std::to_string(i);
+    item.content = "body";
+    item.created_at = i + 1;
+    item.updated_at = i + 1;
+    items.push_back(std::move(item));
+  }
+  int next_id = 0;
+  store.create_batch(
+      "proj-1",
+      items,
+      [&next_id]() { return "new-card-" + std::to_string(next_id++); },
+      "Restore batch"
+  );
+
+  CHECK(git.stage_path_calls == 0);
+  CHECK(git.stage_paths_calls == 1);
+  CHECK(git.staged_path_count == items.size());
+  CHECK(git.commit_calls == 1);
+  CHECK(count_commits(project_root) == 1);
 }
 
 TEST_CASE("CardStore update writes file and updates metadata", "[cardstore]") {
