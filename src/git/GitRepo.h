@@ -53,6 +53,10 @@ class GitRepo {
   // Open existing or init a new repo at repo_dir (non-bare, has working tree).
   void open_or_init(const std::filesystem::path& repo_dir);
 
+  // Open an existing repository without creating directories or initializing Git state.
+  // Use this for read-only operations such as history inspection.
+  void open_existing(const std::filesystem::path& repo_dir);
+
   // Write a file under the repo working tree (creates directories).
   void write_file(const std::filesystem::path& relative_path, const std::string& content);
 

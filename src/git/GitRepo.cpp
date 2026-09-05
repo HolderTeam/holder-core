@@ -436,6 +436,19 @@ void GitRepo::open_or_init(const fs::path& repo_dir) {
   spdlog::info("Initialized new git repo: {}", repo_dir_.string());
 }
 
+void GitRepo::open_existing(const fs::path& repo_dir) {
+  if (repo_) {
+    git_repository_free(reinterpret_cast<git_repository*>(repo_));
+    repo_ = nullptr;
+  }
+
+  repo_dir_ = repo_dir;
+  git_repository* r = nullptr;
+  const int rc = git_repository_open(&r, repo_dir_.string().c_str());
+  if (rc != 0) throw git_err("git_repository_open failed", rc);
+  repo_ = r;
+}
+
 void GitRepo::write_file(const fs::path& relative_path, const std::string& content) {
   ensure_open();
 

@@ -16,6 +16,8 @@ namespace {
 
 constexpr long long kSessionGapSeconds = 10 * 60;
 constexpr long long kSessionMaxSeconds = 30 * 60;
+constexpr std::size_t kHistoryBatchSize = 64;
+constexpr std::size_t kMaxDiffLines = 5'000;
 
 struct Snapshot {
   bool exists = false;
@@ -25,7 +27,10 @@ struct Snapshot {
 std::string decode(const holder::model::Project& project, const std::string& raw) {
   if (project.privacy_mode != "encrypted_git") return raw;
   if (!project.project_key_id.has_value() || project.project_key_id->empty()) {
-    throw std::runtime_error("Encrypted project is missing its project key id");
+    throw holder::privacy::PrivacyError(
+        holder::privacy::PrivacyErrorCode::KeyMaterialMissing,
+        "Encrypted project is missing its project key id"
+    );
   }
   return holder::privacy::decrypt_project_blob(project.project_id, *project.project_key_id, raw);
 }
@@ -123,17 +128,34 @@ std::vector<std::string> lines_of(const std::string& text) {
   return lines;
 }
 
-std::vector<CardDiffLine> line_diff(const std::string& old_text, const std::string& new_text) {
+std::vector<CardDiffLine> line_diff(
+    const std::string& old_text,
+    const std::string& new_text,
+    bool& truncated
+) {
+  truncated = false;
   const auto old_lines = lines_of(old_text);
   const auto new_lines = lines_of(new_text);
   // Card bodies are normally small. Keep pathological imported documents bounded; the fallback
   // remains truthful, merely less compact.
-  if (old_lines.size() * new_lines.size() > 1'000'000U) {
+  if (!old_lines.empty() && new_lines.size() > 1'000'000U / old_lines.size()) {
     std::vector<CardDiffLine> out;
     long long old_no = 1;
-    for (const auto& line : old_lines) out.push_back({'-', line, old_no++, -1});
+    for (const auto& line : old_lines) {
+      if (out.size() == kMaxDiffLines) {
+        truncated = true;
+        return out;
+      }
+      out.push_back({'-', line, old_no++, -1});
+    }
     long long new_no = 1;
-    for (const auto& line : new_lines) out.push_back({'+', line, -1, new_no++});
+    for (const auto& line : new_lines) {
+      if (out.size() == kMaxDiffLines) {
+        truncated = true;
+        return out;
+      }
+      out.push_back({'+', line, -1, new_no++});
+    }
     return out;
   }
 
@@ -152,6 +174,10 @@ std::vector<CardDiffLine> line_diff(const std::string& old_text, const std::stri
   std::size_t i = 0;
   std::size_t j = 0;
   while (i < old_lines.size() || j < new_lines.size()) {
+    if (out.size() == kMaxDiffLines) {
+      truncated = true;
+      break;
+    }
     if (i < old_lines.size() && j < new_lines.size() && old_lines[i] == new_lines[j]) {
       out.push_back({' ', old_lines[i], static_cast<long long>(i + 1), static_cast<long long>(j + 1)});
       ++i;
@@ -179,6 +205,13 @@ CardVersion version_from(const Snapshot& snapshot, const std::optional<std::stri
   return result;
 }
 
+std::string comparison_text(const CardVersion& version) {
+  if (!version.exists) return {};
+  auto text = std::string("# ") + version.title;
+  if (!version.body.empty()) text += "\n" + version.body;
+  return text;
+}
+
 } // namespace
 
 CardHistoryPage CardHistoryService::list(
@@ -191,38 +224,53 @@ CardHistoryPage CardHistoryService::list(
   if (limit == 0 || limit > 200) throw std::invalid_argument("history limit must be between 1 and 200");
 
   holder::git::GitRepo repo;
-  repo.open_or_init(project.root_path);
+  repo.open_existing(project.root_path);
   CardHistoryPage page;
   page.head_oid = repo.head_oid();
-  bool has_more = false;
-  const auto commits = repo.history_for_paths(
-      {holder::core::card_rel_path(card_id), holder::core::card_trash_rel_path(card_id)},
-      limit,
-      cursor,
-      has_more
-  );
+  const std::vector<std::filesystem::path> paths{
+      holder::core::card_rel_path(card_id), holder::core::card_trash_rel_path(card_id)
+  };
+  auto raw_cursor = cursor;
+  std::optional<std::string> last_consumed_oid;
+  bool source_has_more = true;
+  while (source_has_more) {
+    bool batch_has_more = false;
+    const auto commits = repo.history_for_paths(
+        paths, std::max(kHistoryBatchSize, limit), raw_cursor, batch_has_more
+    );
+    if (commits.empty()) break;
 
-  for (const auto& commit : commits) {
-    if (!page.entries.empty() && may_group(page.entries.back(), commit)) {
-      auto& entry = page.entries.back();
+    for (const auto& commit : commits) {
+      if (!page.entries.empty() && may_group(page.entries.back(), commit)) {
+        auto& entry = page.entries.back();
+        entry.first_oid = commit.oid;
+        entry.started_at = commit.committed_at;
+        entry.parent_oids = commit.parent_oids;
+        ++entry.commit_count;
+        last_consumed_oid = commit.oid;
+        continue;
+      }
+      if (page.entries.size() == limit) {
+        page.next_cursor = last_consumed_oid;
+        source_has_more = false;
+        break;
+      }
+      CardHistoryEntry entry;
       entry.first_oid = commit.oid;
-      entry.started_at = commit.committed_at;
+      entry.last_oid = commit.oid;
       entry.parent_oids = commit.parent_oids;
-      ++entry.commit_count;
-      continue;
+      entry.author_name = commit.author_name.empty() ? "Holder" : commit.author_name;
+      entry.author_email = commit.author_email;
+      entry.started_at = commit.committed_at;
+      entry.ended_at = commit.committed_at;
+      entry.kind = kind_for(commit);
+      entry.commit_count = 1;
+      entry.is_merge = commit.parent_oids.size() > 1;
+      page.entries.push_back(std::move(entry));
+      last_consumed_oid = commit.oid;
     }
-    CardHistoryEntry entry;
-    entry.first_oid = commit.oid;
-    entry.last_oid = commit.oid;
-    entry.parent_oids = commit.parent_oids;
-    entry.author_name = commit.author_name.empty() ? "Holder" : commit.author_name;
-    entry.author_email = commit.author_email;
-    entry.started_at = commit.committed_at;
-    entry.ended_at = commit.committed_at;
-    entry.kind = kind_for(commit);
-    entry.commit_count = 1;
-    entry.is_merge = commit.parent_oids.size() > 1;
-    page.entries.push_back(std::move(entry));
+    if (!source_has_more || !batch_has_more) break;
+    raw_cursor = last_consumed_oid;
   }
 
   for (auto& entry : page.entries) {
@@ -235,7 +283,6 @@ CardHistoryPage CardHistoryService::list(
         entry.kind
     );
   }
-  if (has_more && !commits.empty()) page.next_cursor = commits.back().oid;
   return page;
 }
 
@@ -247,7 +294,7 @@ CardHistoryComparison CardHistoryService::compare(
 ) const {
   if (card_id.size() < 4) throw std::invalid_argument("card_id is invalid");
   holder::git::GitRepo repo;
-  repo.open_or_init(project.root_path);
+  repo.open_existing(project.root_path);
   const auto resolved_to = to_oid.has_value() ? to_oid : repo.head_oid();
   const auto before = snapshot_at(repo, project, card_id, from_oid);
   const auto after = snapshot_at(repo, project, card_id, resolved_to);
@@ -256,7 +303,9 @@ CardHistoryComparison CardHistoryService::compare(
   result.from = version_from(before, from_oid);
   result.to = version_from(after, resolved_to);
   result.summary = describe_change(before, after, "updated");
-  result.lines = line_diff(result.from.body, result.to.body);
+  result.lines = line_diff(
+      comparison_text(result.from), comparison_text(result.to), result.truncated
+  );
   return result;
 }
 

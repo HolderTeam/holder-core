@@ -47,6 +47,7 @@ struct CardHistoryComparison {
   CardVersion to;
   std::string summary;
   std::vector<CardDiffLine> lines;
+  bool truncated = false;
 };
 
 class CardHistoryService {
