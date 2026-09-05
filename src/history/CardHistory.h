@@ -11,7 +11,9 @@ namespace holder::history {
 struct CardHistorySave {
   std::string oid;
   std::vector<std::string> parent_oids;
+  long long authored_at = 0;
   long long committed_at = 0;
+  std::string message;
 };
 
 struct CardHistoryEntry {

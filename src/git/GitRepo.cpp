@@ -1239,6 +1239,7 @@ std::vector<GitHistoryCommit> GitRepo::history_for_paths(
     if (const auto* author = git_commit_author(commit); author != nullptr) {
       if (author->name != nullptr) item.author_name = author->name;
       if (author->email != nullptr) item.author_email = author->email;
+      item.authored_at = static_cast<long long>(author->when.time);
     }
     item.committed_at = static_cast<long long>(git_commit_time(commit));
     if (const auto* message = git_commit_message(commit); message != nullptr) item.message = message;

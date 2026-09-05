@@ -248,7 +248,11 @@ CardHistoryPage CardHistoryService::list(
         entry.parent_oids = commit.parent_oids;
         entry.saves.insert(
             entry.saves.begin(),
-            {.oid = commit.oid, .parent_oids = commit.parent_oids, .committed_at = commit.committed_at}
+            {.oid = commit.oid,
+             .parent_oids = commit.parent_oids,
+             .authored_at = commit.authored_at,
+             .committed_at = commit.committed_at,
+             .message = commit.message}
         );
         ++entry.commit_count;
         last_consumed_oid = commit.oid;
@@ -271,7 +275,11 @@ CardHistoryPage CardHistoryService::list(
       entry.commit_count = 1;
       entry.is_merge = commit.parent_oids.size() > 1;
       entry.saves.push_back(
-          {.oid = commit.oid, .parent_oids = commit.parent_oids, .committed_at = commit.committed_at}
+          {.oid = commit.oid,
+           .parent_oids = commit.parent_oids,
+           .authored_at = commit.authored_at,
+           .committed_at = commit.committed_at,
+           .message = commit.message}
       );
       page.entries.push_back(std::move(entry));
       last_consumed_oid = commit.oid;

@@ -16,6 +16,7 @@ struct GitHistoryCommit {
   std::vector<std::string> parent_oids;
   std::string author_name;
   std::string author_email;
+  long long authored_at = 0;
   long long committed_at = 0;
   std::string message;
 };
