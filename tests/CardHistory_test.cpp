@@ -599,6 +599,45 @@ TEST_CASE("Card history decrypts encrypted project versions", "[history][git][pr
   CHECK(comparison.to.body == "Second secret\n");
 }
 
+TEST_CASE("Card history fails closed for a damaged encrypted envelope", "[history][git][privacy]") {
+  const auto root = history_temp_dir();
+  holder::test::EnvGuard keystore_env("HOLDER_TEST_KEYSTORE_DIR", (root / "keystore").string());
+  const std::string card_id = "abcd-corrupt-encrypted-history";
+  holder::model::Project project;
+  project.project_id = "project-history";
+  project.root_path = (root / "repo").string();
+  project.privacy_mode = "encrypted_git";
+  project.created_at = 1;
+  project.updated_at = 1;
+  auto db = holder::test::open_db_with_schema(root / "holder.db");
+  holder::project::ProjectRepo projects(db);
+  projects.create(project);
+  project.project_key_id = holder::privacy::ensure_project_key_material(
+      projects,
+      project.project_id,
+      std::nullopt,
+      2,
+      []() { return std::string("history-corrupt-key"); }
+  );
+
+  holder::git::GitRepo repo;
+  repo.open_or_init(project.root_path);
+  write_encrypted_commit(repo, project, card_id, "Secret", "Valid secret\n", "Add card Secret");
+  const auto path = holder::core::card_rel_path(card_id);
+  // This would be a valid plaintext Holder card if History ever retried corrupt
+  // encrypted data as plaintext. Encrypted projects must reject it instead.
+  repo.write_file(path, card_file(card_id, "Secret", "Plaintext must not be read\n"));
+  repo.stage_path(path);
+  repo.commit("Update card Secret");
+
+  try {
+    (void)holder::history::CardHistoryService().list(project, card_id);
+    FAIL("Corrupt encrypted history must not be parsed as plaintext");
+  } catch (const holder::privacy::PrivacyError& error) {
+    CHECK(error.code() == holder::privacy::PrivacyErrorCode::EnvelopeInvalid);
+  }
+}
+
 TEST_CASE("Card history never initializes a missing repository", "[history][git]") {
   const auto root = history_temp_dir() / "missing-project";
   holder::model::Project project;
