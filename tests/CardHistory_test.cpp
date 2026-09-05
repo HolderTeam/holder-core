@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 
 namespace {
 
@@ -28,6 +29,12 @@ std::filesystem::path history_temp_dir() {
   const auto path = std::filesystem::temp_directory_path() / ("holder_history_test_" + suffix);
   std::filesystem::create_directories(path);
   return path;
+}
+
+std::string read_file_bytes(const std::filesystem::path& path) {
+  std::ifstream input(path, std::ios::binary);
+  REQUIRE(input.is_open());
+  return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
 }
 
 std::string card_file(const std::string& card_id, const std::string& title, const std::string& body) {
@@ -647,4 +654,48 @@ TEST_CASE("Card history never initializes a missing repository", "[history][git]
 
   CHECK_THROWS(holder::history::CardHistoryService().list(project, "abcd-missing-card"));
   CHECK_FALSE(std::filesystem::exists(root));
+}
+
+TEST_CASE("Card history reads leave an existing repository unchanged", "[history][git]") {
+  const auto root = history_temp_dir();
+  const std::string card_id = "abcd-read-only-history";
+  holder::git::GitRepo repo;
+  repo.open_or_init(root);
+  write_commit(repo, card_id, "Read only", "First saved version\n", "Add card Read only");
+  const auto first_oid = repo.head_oid();
+  REQUIRE(first_oid.has_value());
+  write_commit(repo, card_id, "Read only", "Second saved version\n", "Update card Read only");
+  const auto head_before = repo.head_oid();
+  REQUIRE(head_before.has_value());
+
+  const auto card_path = root / holder::core::card_rel_path(card_id);
+  const auto index_path = root / ".git" / "index";
+  const auto head_path = root / ".git" / "HEAD";
+  const auto untracked_path = root / "untracked-draft.txt";
+  repo.write_file(holder::core::card_rel_path(card_id), "Unsaved working-tree draft\n");
+  {
+    std::ofstream untracked(untracked_path, std::ios::binary);
+    REQUIRE(untracked.is_open());
+    untracked << "Keep this untracked file exactly as it is.\n";
+  }
+  const auto index_before = read_file_bytes(index_path);
+  const auto head_file_before = read_file_bytes(head_path);
+  const auto card_before = read_file_bytes(card_path);
+  const auto untracked_before = read_file_bytes(untracked_path);
+
+  holder::model::Project project;
+  project.project_id = "project-history";
+  project.root_path = root.string();
+  project.privacy_mode = "plain";
+  holder::history::CardHistoryService service;
+  const auto page = service.list(project, card_id);
+  const auto comparison = service.compare(project, card_id, first_oid, head_before);
+
+  REQUIRE_FALSE(page.entries.empty());
+  CHECK(comparison.to.body == "Second saved version\n");
+  CHECK(repo.head_oid() == head_before);
+  CHECK(read_file_bytes(index_path) == index_before);
+  CHECK(read_file_bytes(head_path) == head_file_before);
+  CHECK(read_file_bytes(card_path) == card_before);
+  CHECK(read_file_bytes(untracked_path) == untracked_before);
 }
