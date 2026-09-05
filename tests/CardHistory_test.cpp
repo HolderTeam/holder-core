@@ -54,21 +54,15 @@ void write_commit(
   repo.commit(message);
 }
 
-void write_commit_at(
-    holder::git::GitRepo& repo,
+std::string commit_staged_at(
     const std::filesystem::path& root,
-    const std::string& card_id,
-    const std::string& title,
-    const std::string& body,
     const std::string& message,
     const std::string& author_name,
     const std::string& author_email,
-    git_time_t committed_at
+    git_time_t committed_at,
+    const std::vector<std::string>& parent_oids,
+    const char* update_ref
 ) {
-  const auto path = holder::core::card_rel_path(card_id);
-  repo.write_file(path, card_file(card_id, title, body));
-  repo.stage_path(path);
-
   git_repository* raw = nullptr;
   REQUIRE(git_repository_open(&raw, root.string().c_str()) == 0);
   git_index* index = nullptr;
@@ -82,34 +76,61 @@ void write_commit_at(
   git_signature* signature = nullptr;
   REQUIRE(git_signature_new(&signature, author_name.c_str(), author_email.c_str(), committed_at, 0) == 0);
 
-  git_commit* parent = nullptr;
-  git_reference* head = nullptr;
-  const auto head_result = git_repository_head(&head, raw);
-  if (head_result == 0) {
-    REQUIRE(git_commit_lookup(&parent, raw, git_reference_target(head)) == 0);
-    git_reference_free(head);
-  } else {
-    REQUIRE((head_result == GIT_ENOTFOUND || head_result == GIT_EUNBORNBRANCH));
+  std::vector<git_commit*> parents;
+  std::vector<const git_commit*> parent_pointers;
+  for (const auto& parent_oid_text : parent_oids) {
+    git_oid parent_oid{};
+    REQUIRE(git_oid_fromstr(&parent_oid, parent_oid_text.c_str()) == 0);
+    git_commit* parent = nullptr;
+    REQUIRE(git_commit_lookup(&parent, raw, &parent_oid) == 0);
+    parents.push_back(parent);
+    parent_pointers.push_back(parent);
   }
 
   git_oid commit_oid{};
-  const git_commit* parents[] = {parent};
   REQUIRE(git_commit_create(
       &commit_oid,
       raw,
-      "HEAD",
+      update_ref,
       signature,
       signature,
       nullptr,
       message.c_str(),
       tree,
-      parent == nullptr ? 0 : 1,
-      parent == nullptr ? nullptr : parents
+      parent_pointers.size(),
+      parent_pointers.empty() ? nullptr : parent_pointers.data()
   ) == 0);
-  git_commit_free(parent);
+  for (auto* parent : parents) git_commit_free(parent);
   git_signature_free(signature);
   git_tree_free(tree);
   git_repository_free(raw);
+  return std::string(git_oid_tostr_s(&commit_oid));
+}
+
+std::string write_commit_at(
+    holder::git::GitRepo& repo,
+    const std::filesystem::path& root,
+    const std::string& card_id,
+    const std::string& title,
+    const std::string& body,
+    const std::string& message,
+    const std::string& author_name,
+    const std::string& author_email,
+    git_time_t committed_at
+) {
+  const auto path = holder::core::card_rel_path(card_id);
+  repo.write_file(path, card_file(card_id, title, body));
+  repo.stage_path(path);
+  const auto head_oid = repo.head_oid();
+  return commit_staged_at(
+      root,
+      message,
+      author_name,
+      author_email,
+      committed_at,
+      head_oid.has_value() ? std::vector<std::string>{*head_oid} : std::vector<std::string>{},
+      "HEAD"
+  );
 }
 
 void write_encrypted_commit(
@@ -259,6 +280,69 @@ TEST_CASE("Card history preserves parent order when commit clocks move backwards
   CHECK(page.entries[1].ended_at == 1'200);
   CHECK(page.entries[0].commit_count == 1);
   CHECK(page.entries[1].commit_count == 1);
+}
+
+TEST_CASE("Card history retains both merge parents and the resulting card state", "[history][git]") {
+  const auto root = history_temp_dir();
+  const std::string card_id = "abcd-merge-history";
+  holder::git::GitRepo repo;
+  repo.open_or_init(root);
+  const auto base_oid = write_commit_at(
+      repo, root, card_id, "Merge", "Base\n", "Add card Merge",
+      "Alice", "alice@example.test", 1'000
+  );
+  const auto first_parent_oid = write_commit_at(
+      repo, root, card_id, "Merge", "Main branch\n", "Update card Merge",
+      "Alice", "alice@example.test", 1'100
+  );
+
+  const auto path = holder::core::card_rel_path(card_id);
+  repo.write_file(path, card_file(card_id, "Merge", "Other branch\n"));
+  repo.stage_path(path);
+  const auto second_parent_oid = commit_staged_at(
+      root,
+      "Update card Merge",
+      "Bob",
+      "bob@example.test",
+      1'150,
+      {base_oid},
+      nullptr
+  );
+
+  repo.write_file(path, card_file(card_id, "Merge", "Combined branches\n"));
+  repo.stage_path(path);
+  const auto merge_oid = commit_staged_at(
+      root,
+      "Merge branches for Merge",
+      "Alice",
+      "alice@example.test",
+      1'200,
+      {first_parent_oid, second_parent_oid},
+      "HEAD"
+  );
+
+  holder::model::Project project;
+  project.project_id = "project-history";
+  project.root_path = root.string();
+  project.privacy_mode = "plain";
+  holder::history::CardHistoryService service;
+  const auto page = service.list(project, card_id);
+
+  REQUIRE(page.head_oid.has_value());
+  CHECK(*page.head_oid == merge_oid);
+  REQUIRE_FALSE(page.entries.empty());
+  const auto& merge = page.entries.front();
+  CHECK(merge.last_oid == merge_oid);
+  CHECK(merge.kind == "merged");
+  CHECK(merge.is_merge);
+  REQUIRE(merge.parent_oids.size() == 2);
+  CHECK(merge.parent_oids[0] == first_parent_oid);
+  CHECK(merge.parent_oids[1] == second_parent_oid);
+  CHECK(merge.commit_count == 1);
+
+  const auto comparison = service.compare(project, card_id, first_parent_oid, merge_oid);
+  CHECK(comparison.from.body == "Main branch\n");
+  CHECK(comparison.to.body == "Combined branches\n");
 }
 
 TEST_CASE("Card history compares a selected version with current HEAD", "[history][git]") {
