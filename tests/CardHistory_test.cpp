@@ -13,6 +13,8 @@
 #include "privacy/ProjectPrivacy.h"
 #include "core_test_helpers.h"
 
+#include <git2.h>
+
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
@@ -50,6 +52,64 @@ void write_commit(
   repo.write_file(path, card_file(card_id, title, body));
   repo.stage_path(path);
   repo.commit(message);
+}
+
+void write_commit_at(
+    holder::git::GitRepo& repo,
+    const std::filesystem::path& root,
+    const std::string& card_id,
+    const std::string& title,
+    const std::string& body,
+    const std::string& message,
+    const std::string& author_name,
+    const std::string& author_email,
+    git_time_t committed_at
+) {
+  const auto path = holder::core::card_rel_path(card_id);
+  repo.write_file(path, card_file(card_id, title, body));
+  repo.stage_path(path);
+
+  git_repository* raw = nullptr;
+  REQUIRE(git_repository_open(&raw, root.string().c_str()) == 0);
+  git_index* index = nullptr;
+  REQUIRE(git_repository_index(&index, raw) == 0);
+  git_oid tree_oid{};
+  REQUIRE(git_index_write_tree(&tree_oid, index) == 0);
+  REQUIRE(git_index_write(index) == 0);
+  git_index_free(index);
+  git_tree* tree = nullptr;
+  REQUIRE(git_tree_lookup(&tree, raw, &tree_oid) == 0);
+  git_signature* signature = nullptr;
+  REQUIRE(git_signature_new(&signature, author_name.c_str(), author_email.c_str(), committed_at, 0) == 0);
+
+  git_commit* parent = nullptr;
+  git_reference* head = nullptr;
+  const auto head_result = git_repository_head(&head, raw);
+  if (head_result == 0) {
+    REQUIRE(git_commit_lookup(&parent, raw, git_reference_target(head)) == 0);
+    git_reference_free(head);
+  } else {
+    REQUIRE((head_result == GIT_ENOTFOUND || head_result == GIT_EUNBORNBRANCH));
+  }
+
+  git_oid commit_oid{};
+  const git_commit* parents[] = {parent};
+  REQUIRE(git_commit_create(
+      &commit_oid,
+      raw,
+      "HEAD",
+      signature,
+      signature,
+      nullptr,
+      message.c_str(),
+      tree,
+      parent == nullptr ? 0 : 1,
+      parent == nullptr ? nullptr : parents
+  ) == 0);
+  git_commit_free(parent);
+  git_signature_free(signature);
+  git_tree_free(tree);
+  git_repository_free(raw);
 }
 
 void write_encrypted_commit(
@@ -102,6 +162,73 @@ TEST_CASE("Card history lists card-only commits and groups adjacent edits", "[hi
   CHECK(page.entries[1].saves.front().parent_oids.size() == 1);
   CHECK(page.entries[2].kind == "created");
   CHECK(page.entries[2].summary == "Card created");
+}
+
+TEST_CASE("Card history splits editing sessions at author and time boundaries", "[history][git]") {
+  const auto root = history_temp_dir();
+  const std::string card_id = "abcd-session-boundaries";
+  holder::git::GitRepo repo;
+  repo.open_or_init(root);
+
+  write_commit_at(repo, root, card_id, "Sessions", "One\n",
+                  "Add card Sessions", "Alice", "alice@example.test", 1'000);
+  write_commit_at(repo, root, card_id, "Sessions", "Two\n", "Update card Sessions",
+                  "Alice", "alice@example.test", 1'100);
+  write_commit_at(repo, root, card_id, "Sessions", "Three\n", "Update card Sessions",
+                  "Bob", "bob@example.test", 1'200);
+  write_commit_at(repo, root, card_id, "Sessions", "Four\n", "Update card Sessions",
+                  "Bob", "bob@example.test", 1'300);
+
+  holder::model::Project project;
+  project.project_id = "project-history";
+  project.root_path = root.string();
+  project.privacy_mode = "plain";
+  const auto author_page = holder::history::CardHistoryService().list(project, card_id);
+  REQUIRE(author_page.entries.size() == 3);
+  CHECK(author_page.entries[0].commit_count == 2);
+  CHECK(author_page.entries[0].author_name == "Bob");
+  CHECK(author_page.entries[1].commit_count == 1);
+  CHECK(author_page.entries[1].author_name == "Alice");
+
+  const auto gap_root = history_temp_dir();
+  const std::string gap_card_id = "abcd-session-gap";
+  holder::git::GitRepo gap_repo;
+  gap_repo.open_or_init(gap_root);
+  write_commit_at(gap_repo, gap_root, gap_card_id, "Gap", "One\n", "Add card Gap",
+                  "Alice", "alice@example.test", 2'000);
+  write_commit_at(gap_repo, gap_root, gap_card_id, "Gap", "Two\n", "Update card Gap",
+                  "Alice", "alice@example.test", 2'100);
+  write_commit_at(gap_repo, gap_root, gap_card_id, "Gap", "Three\n", "Update card Gap",
+                  "Alice", "alice@example.test", 2'701);
+
+  project.root_path = gap_root.string();
+  const auto gap_page = holder::history::CardHistoryService().list(project, gap_card_id);
+  REQUIRE(gap_page.entries.size() == 3);
+  CHECK(gap_page.entries[0].commit_count == 1);
+  CHECK(gap_page.entries[1].commit_count == 1);
+
+  const auto span_root = history_temp_dir();
+  const std::string span_card_id = "abcd-session-span";
+  holder::git::GitRepo span_repo;
+  span_repo.open_or_init(span_root);
+  write_commit_at(span_repo, span_root, span_card_id, "Span", "One\n", "Add card Span",
+                  "Alice", "alice@example.test", 3'000);
+  write_commit_at(span_repo, span_root, span_card_id, "Span", "Two\n", "Update card Span",
+                  "Alice", "alice@example.test", 3'100);
+  write_commit_at(span_repo, span_root, span_card_id, "Span", "Three\n", "Update card Span",
+                  "Alice", "alice@example.test", 3'700);
+  write_commit_at(span_repo, span_root, span_card_id, "Span", "Four\n", "Update card Span",
+                  "Alice", "alice@example.test", 4'300);
+  write_commit_at(span_repo, span_root, span_card_id, "Span", "Five\n", "Update card Span",
+                  "Alice", "alice@example.test", 4'900);
+  write_commit_at(span_repo, span_root, span_card_id, "Span", "Six\n", "Update card Span",
+                  "Alice", "alice@example.test", 5'500);
+
+  project.root_path = span_root.string();
+  const auto span_page = holder::history::CardHistoryService().list(project, span_card_id);
+  REQUIRE(span_page.entries.size() == 3);
+  CHECK(span_page.entries[0].commit_count == 4);
+  CHECK(span_page.entries[1].commit_count == 1);
 }
 
 TEST_CASE("Card history compares a selected version with current HEAD", "[history][git]") {
