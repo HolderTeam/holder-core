@@ -525,6 +525,37 @@ TEST_CASE("Card history paginates using the last matching commit", "[history][gi
   CHECK_FALSE(second.next_cursor.has_value());
 }
 
+TEST_CASE("Card history bounds unrelated revision scanning with a continuation", "[history][git]") {
+  const auto root = history_temp_dir();
+  const std::string card_id = "abcd-bounded-scan";
+  holder::git::GitRepo repo;
+  repo.open_or_init(root);
+  write_commit(repo, card_id, "Bounded", "Older card version\n", "Add card Bounded");
+  for (int i = 0; i < 3; ++i) {
+    const auto path = "notes-" + std::to_string(i) + ".txt";
+    repo.write_file(path, "Unrelated revision " + std::to_string(i) + "\n");
+    repo.stage_path(path);
+    repo.commit("Update unrelated project note");
+  }
+
+  holder::model::Project project;
+  project.project_id = "project-history";
+  project.root_path = root.string();
+  project.privacy_mode = "plain";
+  holder::history::CardHistoryService service(3);
+
+  const auto first = service.list(project, card_id);
+  CHECK(first.entries.empty());
+  CHECK(first.scan_limited);
+  REQUIRE(first.next_cursor.has_value());
+
+  const auto second = service.list(project, card_id, 50, first.next_cursor);
+  REQUIRE(second.entries.size() == 1);
+  CHECK(second.entries.front().kind == "created");
+  CHECK_FALSE(second.scan_limited);
+  CHECK_FALSE(second.next_cursor.has_value());
+}
+
 TEST_CASE("Card history pagination does not split an editing session", "[history][git]") {
   const auto root = history_temp_dir();
   const std::string card_id = "abcd-session-page";

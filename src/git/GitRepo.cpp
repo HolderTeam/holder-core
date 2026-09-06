@@ -1162,15 +1162,15 @@ std::optional<std::string> GitRepo::head_oid() {
   return oid_to_hex(oid);
 }
 
-std::vector<GitHistoryCommit> GitRepo::history_for_paths(
+GitHistoryPage GitRepo::history_for_paths(
     const std::vector<fs::path>& relative_paths,
     std::size_t limit,
     const std::optional<std::string>& cursor_oid,
-    bool& has_more
+    std::size_t max_scanned_commits
 ) {
   ensure_open();
-  has_more = false;
-  if (relative_paths.empty() || limit == 0) return {};
+  GitHistoryPage page;
+  if (relative_paths.empty() || limit == 0 || max_scanned_commits == 0) return page;
 
   auto* repo = reinterpret_cast<git_repository*>(repo_);
   git_revwalk* walk = nullptr;
@@ -1180,17 +1180,29 @@ std::vector<GitHistoryCommit> GitRepo::history_for_paths(
   rc = git_revwalk_push_head(walk);
   if (rc == GIT_EUNBORNBRANCH || rc == GIT_ENOTFOUND) {
     git_revwalk_free(walk);
-    return {};
+    return page;
   }
   if (rc != 0) {
     git_revwalk_free(walk);
     throw git_err("git_revwalk_push_head failed", rc);
   }
 
-  std::vector<GitHistoryCommit> result;
   bool cursor_seen = !cursor_oid.has_value();
+  std::size_t scanned_commits = 0;
   git_oid oid{};
   while ((rc = git_revwalk_next(&oid, walk)) == 0) {
+    const auto oid_text = oid_to_hex(oid);
+    if (!cursor_seen) {
+      cursor_seen = oid_text == *cursor_oid;
+      continue;
+    }
+    if (scanned_commits == max_scanned_commits) {
+      page.scan_limited = true;
+      break;
+    }
+    ++scanned_commits;
+    page.scan_cursor = oid_text;
+
     git_commit* commit = nullptr;
     const int lookup_rc = git_commit_lookup(&commit, repo, &oid);
     if (lookup_rc != 0) {
@@ -1216,15 +1228,8 @@ std::vector<GitHistoryCommit> GitRepo::history_for_paths(
       continue;
     }
 
-    const auto oid_text = oid_to_hex(oid);
-    if (!cursor_seen) {
-      cursor_seen = oid_text == *cursor_oid;
-      git_commit_free(commit);
-      continue;
-    }
-
-    if (result.size() == limit) {
-      has_more = true;
+    if (page.commits.size() == limit) {
+      page.has_more = true;
       git_commit_free(commit);
       break;
     }
@@ -1243,7 +1248,7 @@ std::vector<GitHistoryCommit> GitRepo::history_for_paths(
     }
     item.committed_at = static_cast<long long>(git_commit_time(commit));
     if (const auto* message = git_commit_message(commit); message != nullptr) item.message = message;
-    result.push_back(std::move(item));
+    page.commits.push_back(std::move(item));
     git_commit_free(commit);
   }
 
@@ -1252,7 +1257,7 @@ std::vector<GitHistoryCommit> GitRepo::history_for_paths(
   if (cursor_oid.has_value() && !cursor_seen) {
     throw std::invalid_argument("history cursor is not reachable from HEAD");
   }
-  return result;
+  return page;
 }
 
 int GitRepo::credential_callback_for_tests(

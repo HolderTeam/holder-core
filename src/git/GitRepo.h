@@ -21,6 +21,16 @@ struct GitHistoryCommit {
   std::string message;
 };
 
+struct GitHistoryPage {
+  std::vector<GitHistoryCommit> commits;
+  bool has_more = false;
+  // The walk stopped after its bounded number of examined commits. scan_cursor is
+  // the last examined commit and can be used to continue without pretending the
+  // absence of a matching card commit is a complete history result.
+  bool scan_limited = false;
+  std::optional<std::string> scan_cursor;
+};
+
 // Thrown by pull_remote_ff_only when local and remote have diverged (neither is an ancestor of
 // the other). Carries both OIDs (hex) so a caller that wants to resolve the divergence -- rather
 // than just surface the failure -- doesn't have to re-derive them via its own branch/ref lookup.
@@ -119,13 +129,14 @@ class GitRepo {
   );
 
   // Return commits reachable from HEAD, newest first, whose tree changes at least one of the
-  // supplied paths. cursor_oid is the last commit returned by a previous page; when supplied,
-  // results begin after it. One extra matching commit is read to determine has_more.
-  std::vector<GitHistoryCommit> history_for_paths(
+  // supplied paths. cursor_oid is the last examined commit from a previous page; when supplied,
+  // results begin after it. One extra matching commit is read to determine has_more. The walk
+  // examines at most max_scanned_commits revisions and reports a continuation when it stops.
+  GitHistoryPage history_for_paths(
       const std::vector<std::filesystem::path>& relative_paths,
       std::size_t limit,
       const std::optional<std::string>& cursor_oid,
-      bool& has_more
+      std::size_t max_scanned_commits = 10'000
   );
 
   // Current commit OID, or nullopt for an unborn repository.

@@ -235,11 +235,17 @@ CardHistoryPage CardHistoryService::list(
   std::optional<std::string> last_consumed_oid;
   bool source_has_more = true;
   while (source_has_more) {
-    bool batch_has_more = false;
-    const auto commits = repo.history_for_paths(
-        paths, std::max(kHistoryBatchSize, limit), raw_cursor, batch_has_more
+    const auto batch = repo.history_for_paths(
+        paths, std::max(kHistoryBatchSize, limit), raw_cursor, max_scanned_commits_
     );
-    if (commits.empty()) break;
+    const auto& commits = batch.commits;
+    if (commits.empty()) {
+      if (batch.scan_limited) {
+        page.scan_limited = true;
+        page.next_cursor = batch.scan_cursor;
+      }
+      break;
+    }
 
     for (const auto& commit : commits) {
       if (!page.entries.empty() && may_group(page.entries.back(), commit)) {
@@ -285,7 +291,13 @@ CardHistoryPage CardHistoryService::list(
       page.entries.push_back(std::move(entry));
       last_consumed_oid = commit.oid;
     }
-    if (!source_has_more || !batch_has_more) break;
+    if (!source_has_more) break;
+    if (batch.scan_limited) {
+      page.scan_limited = true;
+      page.next_cursor = batch.scan_cursor;
+      break;
+    }
+    if (!batch.has_more) break;
     raw_cursor = last_consumed_oid;
   }
 

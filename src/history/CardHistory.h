@@ -40,6 +40,7 @@ struct CardHistoryPage {
   std::optional<std::string> head_oid;
   std::vector<CardHistoryEntry> entries;
   std::optional<std::string> next_cursor;
+  bool scan_limited = false;
 };
 
 struct CardVersion {
@@ -66,6 +67,9 @@ struct CardHistoryComparison {
 
 class CardHistoryService {
  public:
+  explicit CardHistoryService(std::size_t max_scanned_commits = 10'000)
+      : max_scanned_commits_(max_scanned_commits) {}
+
   CardHistoryPage list(
       const holder::model::Project& project,
       const std::string& card_id,
@@ -79,6 +83,9 @@ class CardHistoryService {
       const std::optional<std::string>& from_oid,
       const std::optional<std::string>& to_oid = std::nullopt
   ) const;
+
+ private:
+  std::size_t max_scanned_commits_;
 };
 
 } // namespace holder::history
