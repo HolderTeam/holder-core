@@ -49,7 +49,15 @@ Snapshot snapshot_at(
   auto raw = repo.read_blob_at(*oid, holder::core::card_rel_path(card_id));
   if (!raw.has_value()) raw = repo.read_blob_at(*oid, holder::core::card_trash_rel_path(card_id));
   if (!raw.has_value()) return {};
-  return {.exists = true, .card = holder::core::parse_card_file(decode(project, *raw))};
+  const auto decoded = decode(project, *raw);
+  if (decoded.find('\0') != std::string::npos) {
+    throw std::runtime_error("Historical card content is binary");
+  }
+  const auto parsed = holder::core::parse_card_file(decoded);
+  if (!parsed.has_front_matter || parsed.card.card_id != card_id) {
+    throw std::runtime_error("Historical card content is malformed");
+  }
+  return {.exists = true, .card = parsed};
 }
 
 std::string kind_for(const holder::git::GitHistoryCommit& commit) {

@@ -19,6 +19,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <stdexcept>
 
 namespace {
 
@@ -807,6 +808,40 @@ TEST_CASE("Card history fails closed for a damaged encrypted envelope", "[histor
     FAIL("Corrupt encrypted history must not be parsed as plaintext");
   } catch (const holder::privacy::PrivacyError& error) {
     CHECK(error.code() == holder::privacy::PrivacyErrorCode::EnvelopeInvalid);
+  }
+}
+
+TEST_CASE("Card history rejects malformed and binary historical card data", "[history][git]") {
+  const auto root = history_temp_dir();
+  const std::string card_id = "abcd-malformed-history";
+  holder::git::GitRepo repo;
+  repo.open_or_init(root);
+  write_commit(repo, card_id, "Valid", "First version\n", "Add card Valid");
+
+  holder::model::Project project;
+  project.project_id = "project-history";
+  project.root_path = root.string();
+  project.privacy_mode = "plain";
+
+  const auto path = holder::core::card_rel_path(card_id);
+  repo.write_file(path, "This is not a Holder card file\n");
+  repo.stage_path(path);
+  repo.commit("Update card Valid");
+  try {
+    (void)holder::history::CardHistoryService().list(project, card_id);
+    FAIL("Malformed historical card data must not be treated as a version");
+  } catch (const std::runtime_error& error) {
+    CHECK(std::string(error.what()) == "Historical card content is malformed");
+  }
+
+  repo.write_file(path, std::string("binary\0card", 11));
+  repo.stage_path(path);
+  repo.commit("Update card Valid");
+  try {
+    (void)holder::history::CardHistoryService().compare(project, card_id, std::nullopt);
+    FAIL("Binary historical card data must not be rendered as text");
+  } catch (const std::runtime_error& error) {
+    CHECK(std::string(error.what()) == "Historical card content is binary");
   }
 }
 
