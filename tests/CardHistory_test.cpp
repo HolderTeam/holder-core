@@ -601,6 +601,30 @@ TEST_CASE("Card history bounds very large comparison output", "[history][git]") 
   CHECK(comparison.lines.size() == 5'000);
 }
 
+TEST_CASE("Card history shortens an oversized diff line", "[history][git]") {
+  const auto root = history_temp_dir();
+  const std::string card_id = "abcd-large-diff-line";
+  holder::git::GitRepo repo;
+  repo.open_or_init(root);
+  write_commit(repo, card_id, "Large line", "", "Add card Large line");
+  const auto old_oid = repo.head_oid();
+  REQUIRE(old_oid.has_value());
+  write_commit(repo, card_id, "Large line", std::string(20'000, 'x'), "Update card Large line");
+
+  holder::model::Project project;
+  project.project_id = "project-history";
+  project.root_path = root.string();
+  project.privacy_mode = "plain";
+  const auto comparison = holder::history::CardHistoryService().compare(project, card_id, old_oid);
+
+  CHECK(comparison.truncated);
+  const auto added = std::find_if(comparison.lines.begin(), comparison.lines.end(), [](const auto& line) {
+    return line.origin == '+' && line.text.find("... [line shortened]") != std::string::npos;
+  });
+  REQUIRE(added != comparison.lines.end());
+  CHECK(added->text.size() <= 16 * 1024);
+}
+
 TEST_CASE("Card history decrypts encrypted project versions", "[history][git][privacy]") {
   const auto root = history_temp_dir();
   holder::test::EnvGuard keystore_env("HOLDER_TEST_KEYSTORE_DIR", (root / "keystore").string());

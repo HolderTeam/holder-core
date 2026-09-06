@@ -9,6 +9,7 @@
 #include <cctype>
 #include <filesystem>
 #include <stdexcept>
+#include <string_view>
 #include <unordered_set>
 #include <utility>
 
@@ -19,6 +20,8 @@ constexpr long long kSessionGapSeconds = 10 * 60;
 constexpr long long kSessionMaxSeconds = 30 * 60;
 constexpr std::size_t kHistoryBatchSize = 64;
 constexpr std::size_t kMaxDiffLines = 5'000;
+constexpr std::size_t kMaxDiffLineBytes = 16 * 1024;
+constexpr std::string_view kShortenedLineSuffix = "... [line shortened]";
 
 struct Snapshot {
   bool exists = false;
@@ -129,6 +132,26 @@ std::vector<std::string> lines_of(const std::string& text) {
   return lines;
 }
 
+std::string bounded_diff_text(const std::string& text, bool& truncated) {
+  if (text.size() <= kMaxDiffLineBytes) return text;
+  const auto prefix_limit = kMaxDiffLineBytes - kShortenedLineSuffix.size();
+  auto end = prefix_limit;
+  while (end > 0 && (static_cast<unsigned char>(text[end]) & 0xc0U) == 0x80U) --end;
+  truncated = true;
+  return text.substr(0, end) + std::string(kShortenedLineSuffix);
+}
+
+void append_diff_line(
+    std::vector<CardDiffLine>& out,
+    char origin,
+    const std::string& text,
+    long long old_line,
+    long long new_line,
+    bool& truncated
+) {
+  out.push_back({origin, bounded_diff_text(text, truncated), old_line, new_line});
+}
+
 std::vector<CardDiffLine> line_diff(
     const std::string& old_text,
     const std::string& new_text,
@@ -147,7 +170,7 @@ std::vector<CardDiffLine> line_diff(
         truncated = true;
         return out;
       }
-      out.push_back({'-', line, old_no++, -1});
+      append_diff_line(out, '-', line, old_no++, -1, truncated);
     }
     long long new_no = 1;
     for (const auto& line : new_lines) {
@@ -155,7 +178,7 @@ std::vector<CardDiffLine> line_diff(
         truncated = true;
         return out;
       }
-      out.push_back({'+', line, -1, new_no++});
+      append_diff_line(out, '+', line, -1, new_no++, truncated);
     }
     return out;
   }
@@ -180,15 +203,17 @@ std::vector<CardDiffLine> line_diff(
       break;
     }
     if (i < old_lines.size() && j < new_lines.size() && old_lines[i] == new_lines[j]) {
-      out.push_back({' ', old_lines[i], static_cast<long long>(i + 1), static_cast<long long>(j + 1)});
+      append_diff_line(
+          out, ' ', old_lines[i], static_cast<long long>(i + 1), static_cast<long long>(j + 1), truncated
+      );
       ++i;
       ++j;
     } else if (j < new_lines.size() &&
                (i == old_lines.size() || lcs[i][j + 1] >= lcs[i + 1][j])) {
-      out.push_back({'+', new_lines[j], -1, static_cast<long long>(j + 1)});
+      append_diff_line(out, '+', new_lines[j], -1, static_cast<long long>(j + 1), truncated);
       ++j;
     } else {
-      out.push_back({'-', old_lines[i], static_cast<long long>(i + 1), -1});
+      append_diff_line(out, '-', old_lines[i], static_cast<long long>(i + 1), -1, truncated);
       ++i;
     }
   }
