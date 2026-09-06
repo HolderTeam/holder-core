@@ -34,6 +34,7 @@ add_executable(holder_core_tests
   GitOps_test.cpp
   GitRepo_test.cpp
   CardHistory_test.cpp
+  ProjectHistory_test.cpp
   LinkKindCatalog_test.cpp
   LinkRepo_test.cpp
   MilestoneRepo_test.cpp

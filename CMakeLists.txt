@@ -141,6 +141,7 @@ add_library(holder STATIC
   src/git/RepoSyncMetrics.cpp
   src/git/SshAgentAndFileCredentialProvider.cpp
   src/history/CardHistory.cpp
+  src/history/ProjectHistory.cpp
   src/index/FtsIndexer.cpp
   src/index/Reindexer.cpp
   src/platform/Db.cpp
