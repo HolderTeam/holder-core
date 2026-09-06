@@ -19,6 +19,10 @@ struct GitHistoryCommit {
   long long authored_at = 0;
   long long committed_at = 0;
   std::string message;
+  // Paths changed against the first parent (or an empty tree for the initial
+  // commit). A rename contributes both paths so consumers can retain both
+  // affected Holder objects.
+  std::vector<std::string> changed_paths;
 };
 
 struct GitHistoryPage {
@@ -134,6 +138,15 @@ class GitRepo {
   // examines at most max_scanned_commits revisions and reports a continuation when it stops.
   GitHistoryPage history_for_paths(
       const std::vector<std::filesystem::path>& relative_paths,
+      std::size_t limit,
+      const std::optional<std::string>& cursor_oid,
+      std::size_t max_scanned_commits = 10'000
+  );
+
+  // Return all commits reachable from HEAD, newest first. Each item includes
+  // its changed paths against its first parent. Pagination and scan bounds have
+  // the same semantics as history_for_paths().
+  GitHistoryPage history_all(
       std::size_t limit,
       const std::optional<std::string>& cursor_oid,
       std::size_t max_scanned_commits = 10'000

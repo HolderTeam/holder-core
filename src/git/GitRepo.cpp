@@ -11,6 +11,7 @@
 #include <fstream>
 #include <set>
 #include <stdexcept>
+#include <string_view>
 #include <system_error>
 
 namespace fs = std::filesystem;
@@ -81,6 +82,70 @@ static bool commit_changes_path(
   git_tree_free(tree);
   (void)repo;
   return changed;
+}
+
+static std::vector<std::string> commit_changed_paths(
+    git_repository* repo,
+    git_commit* commit
+) {
+  git_tree* tree = nullptr;
+  int rc = git_commit_tree(&tree, commit);
+  if (rc != 0) throw git_err("git_commit_tree failed", rc);
+
+  git_tree* parent_tree = nullptr;
+  git_commit* parent = nullptr;
+  if (git_commit_parentcount(commit) > 0) {
+    rc = git_commit_parent(&parent, commit, 0);
+    if (rc == 0) rc = git_commit_tree(&parent_tree, parent);
+    if (rc != 0) {
+      git_tree_free(tree);
+      git_commit_free(parent);
+      throw git_err("git_commit parent tree lookup failed", rc);
+    }
+  }
+
+  git_diff_options options{};
+  rc = git_diff_options_init(&options, GIT_DIFF_OPTIONS_VERSION);
+  git_diff* diff = nullptr;
+  if (rc == 0) rc = git_diff_tree_to_tree(&diff, repo, parent_tree, tree, &options);
+  git_tree_free(parent_tree);
+  git_commit_free(parent);
+  git_tree_free(tree);
+  if (rc != 0) throw git_err("git_diff_tree_to_tree failed", rc);
+
+  std::vector<std::string> paths;
+  const auto count = git_diff_num_deltas(diff);
+  for (size_t i = 0; i < count; ++i) {
+    const auto* delta = git_diff_get_delta(diff, i);
+    if (delta->old_file.path != nullptr) paths.emplace_back(delta->old_file.path);
+    if (delta->new_file.path != nullptr &&
+        (delta->old_file.path == nullptr || std::string_view(delta->new_file.path) != delta->old_file.path)) {
+      paths.emplace_back(delta->new_file.path);
+    }
+  }
+  git_diff_free(diff);
+  std::sort(paths.begin(), paths.end());
+  paths.erase(std::unique(paths.begin(), paths.end()), paths.end());
+  return paths;
+}
+
+static GitHistoryCommit history_commit_from(git_repository* repo, git_commit* commit, const git_oid& oid) {
+  GitHistoryCommit item;
+  item.oid = oid_to_hex(oid);
+  const auto parent_count = git_commit_parentcount(commit);
+  item.parent_oids.reserve(parent_count);
+  for (unsigned int i = 0; i < parent_count; ++i) {
+    item.parent_oids.push_back(oid_to_hex(*git_commit_parent_id(commit, i)));
+  }
+  if (const auto* author = git_commit_author(commit); author != nullptr) {
+    if (author->name != nullptr) item.author_name = author->name;
+    if (author->email != nullptr) item.author_email = author->email;
+    item.authored_at = static_cast<long long>(author->when.time);
+  }
+  item.committed_at = static_cast<long long>(git_commit_time(commit));
+  if (const auto* message = git_commit_message(commit); message != nullptr) item.message = message;
+  item.changed_paths = commit_changed_paths(repo, commit);
+  return item;
 }
 
 static std::string git_error_message_or_default(const std::string& fallback) {
@@ -1249,6 +1314,75 @@ GitHistoryPage GitRepo::history_for_paths(
     item.committed_at = static_cast<long long>(git_commit_time(commit));
     if (const auto* message = git_commit_message(commit); message != nullptr) item.message = message;
     page.commits.push_back(std::move(item));
+    git_commit_free(commit);
+  }
+
+  git_revwalk_free(walk);
+  if (rc != GIT_ITEROVER && rc != 0) throw git_err("git_revwalk_next failed", rc);
+  if (cursor_oid.has_value() && !cursor_seen) {
+    throw std::invalid_argument("history cursor is not reachable from HEAD");
+  }
+  return page;
+}
+
+GitHistoryPage GitRepo::history_all(
+    std::size_t limit,
+    const std::optional<std::string>& cursor_oid,
+    std::size_t max_scanned_commits
+) {
+  ensure_open();
+  GitHistoryPage page;
+  if (limit == 0 || max_scanned_commits == 0) return page;
+
+  auto* repo = reinterpret_cast<git_repository*>(repo_);
+  git_revwalk* walk = nullptr;
+  int rc = git_revwalk_new(&walk, repo);
+  if (rc != 0) throw git_err("git_revwalk_new failed", rc);
+  git_revwalk_sorting(walk, GIT_SORT_TOPOLOGICAL | GIT_SORT_TIME);
+  rc = git_revwalk_push_head(walk);
+  if (rc == GIT_EUNBORNBRANCH || rc == GIT_ENOTFOUND) {
+    git_revwalk_free(walk);
+    return page;
+  }
+  if (rc != 0) {
+    git_revwalk_free(walk);
+    throw git_err("git_revwalk_push_head failed", rc);
+  }
+
+  bool cursor_seen = !cursor_oid.has_value();
+  std::size_t scanned_commits = 0;
+  git_oid oid{};
+  while ((rc = git_revwalk_next(&oid, walk)) == 0) {
+    const auto oid_text = oid_to_hex(oid);
+    if (!cursor_seen) {
+      cursor_seen = oid_text == *cursor_oid;
+      continue;
+    }
+    if (scanned_commits == max_scanned_commits) {
+      page.scan_limited = true;
+      break;
+    }
+    ++scanned_commits;
+    page.scan_cursor = oid_text;
+
+    git_commit* commit = nullptr;
+    const int lookup_rc = git_commit_lookup(&commit, repo, &oid);
+    if (lookup_rc != 0) {
+      git_revwalk_free(walk);
+      throw git_err("git_commit_lookup failed", lookup_rc);
+    }
+    if (page.commits.size() == limit) {
+      page.has_more = true;
+      git_commit_free(commit);
+      break;
+    }
+    try {
+      page.commits.push_back(history_commit_from(repo, commit, oid));
+    } catch (...) {
+      git_commit_free(commit);
+      git_revwalk_free(walk);
+      throw;
+    }
     git_commit_free(commit);
   }
 
