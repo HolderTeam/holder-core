@@ -48,6 +48,15 @@ std::string card_file(const std::string& card_id, const std::string& title, cons
   return holder::core::render_card_front_matter(card, {}, {}) + body;
 }
 
+std::string card_file_with_metadata(
+    const holder::model::Card& card,
+    const std::vector<holder::model::CardLink>& links,
+    const std::vector<holder::model::Milestone>& milestones,
+    const std::string& body
+) {
+  return holder::core::render_card_front_matter(card, links, milestones) + body;
+}
+
 void write_commit(
     holder::git::GitRepo& repo,
     const std::string& card_id,
@@ -58,6 +67,19 @@ void write_commit(
   const auto path = holder::core::card_rel_path(card_id);
   repo.write_file(path, card_file(card_id, title, body));
   repo.stage_path(path);
+  repo.commit(message);
+}
+
+void write_metadata_commit(
+    holder::git::GitRepo& repo,
+    const holder::model::Card& card,
+    const std::vector<holder::model::CardLink>& links,
+    const std::vector<holder::model::Milestone>& milestones,
+    const std::string& body,
+    const std::string& message
+) {
+  repo.write_file(card.rel_path, card_file_with_metadata(card, links, milestones, body));
+  repo.stage_path(card.rel_path);
   repo.commit(message);
 }
 
@@ -382,6 +404,92 @@ TEST_CASE("Card history retains both merge parents and the resulting card state"
   const auto comparison = service.compare(project, card_id, first_parent_oid, merge_oid);
   CHECK(comparison.from.body == "Main branch\n");
   CHECK(comparison.to.body == "Combined branches\n");
+}
+
+TEST_CASE("Card history classifies direct metadata, move, Trash, and deletion changes", "[history][git]") {
+  const auto root = history_temp_dir();
+  const std::string card_id = "abcd-semantic-history";
+  holder::git::GitRepo repo;
+  repo.open_or_init(root);
+
+  holder::model::Card card;
+  card.card_id = card_id;
+  card.project_id = "project-history";
+  card.title = "Semantics";
+  card.rel_path = holder::core::card_rel_path(card_id);
+  card.created_at = 1;
+  card.updated_at = 1;
+  write_metadata_commit(repo, card, {}, {}, "Original body\n", "Add card Semantics");
+
+  holder::model::CardLink link;
+  link.project_id = card.project_id;
+  link.from_card_id = card.card_id;
+  link.to_card_id = "efgh-related-card";
+  link.to_type = "card";
+  link.kind = "ref";
+  link.label = "Related";
+  link.created_at = 2;
+  card.updated_at = 2;
+  write_metadata_commit(repo, card, {link}, {}, "Original body\n", "Update links for Semantics");
+
+  holder::model::Milestone milestone;
+  milestone.milestone_id = "mile-semantic";
+  milestone.project_id = card.project_id;
+  milestone.card_id = card.card_id;
+  milestone.start_at = 1'000;
+  milestone.kind = "Review";
+  milestone.created_at = 3;
+  milestone.updated_at = 3;
+  card.updated_at = 3;
+  write_metadata_commit(
+      repo, card, {link}, {milestone}, "Original body\n", "Update milestones for Semantics"
+  );
+
+  card.parent_card_id = "parent-semantic";
+  card.sort_key = 1.0;
+  card.updated_at = 4;
+  const auto moved_contents = card_file_with_metadata(card, {link}, {milestone}, "Original body\n");
+  repo.write_file(card.rel_path, moved_contents);
+  repo.stage_path(card.rel_path);
+  repo.commit("Move card Semantics");
+  const auto moved_oid = repo.head_oid();
+  REQUIRE(moved_oid.has_value());
+
+  const auto trash_path = holder::core::card_trash_rel_path(card_id);
+  repo.remove_path(card.rel_path);
+  repo.write_file(trash_path, moved_contents);
+  repo.stage_path(trash_path);
+  repo.commit("Delete card Semantics");
+  const auto trashed_oid = repo.head_oid();
+  REQUIRE(trashed_oid.has_value());
+
+  repo.remove_path(trash_path);
+  repo.commit("Permanently delete card Semantics");
+  const auto deleted_oid = repo.head_oid();
+  REQUIRE(deleted_oid.has_value());
+
+  holder::model::Project project;
+  project.project_id = card.project_id;
+  project.root_path = root.string();
+  project.privacy_mode = "plain";
+  const auto page = holder::history::CardHistoryService().list(project, card_id);
+
+  REQUIRE(page.entries.size() == 6);
+  CHECK(page.entries[0].last_oid == *deleted_oid);
+  CHECK(page.entries[0].kind == "permanently_deleted");
+  CHECK(page.entries[0].summary == "Permanently deleted card");
+  CHECK(page.entries[1].last_oid == *trashed_oid);
+  CHECK(page.entries[1].kind == "deleted");
+  CHECK(page.entries[1].summary == "Moved card to Trash");
+  CHECK(page.entries[2].last_oid == *moved_oid);
+  CHECK(page.entries[2].kind == "moved");
+  CHECK(page.entries[2].summary == "Moved card");
+  CHECK(page.entries[3].kind == "milestones");
+  CHECK(page.entries[3].summary == "Changed milestones");
+  CHECK(page.entries[4].kind == "links");
+  CHECK(page.entries[4].summary == "Changed links or attachments");
+  CHECK(page.entries[5].kind == "created");
+  CHECK(page.entries[5].summary == "Card created");
 }
 
 TEST_CASE("Card history follows the same UUID through live and Trash paths", "[history][git]") {
