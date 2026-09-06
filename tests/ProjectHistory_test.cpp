@@ -89,3 +89,43 @@ TEST_CASE("Project history groups a commit's affected objects and filters activi
   REQUIRE(resource_page.activities.size() == 1);
   CHECK(resource_page.activities[0].message == "Attach example");
 }
+
+TEST_CASE("Project history paginates incrementally and exposes bounded scan continuations", "[history][git]") {
+  const auto root = project_history_temp_dir();
+  holder::git::GitRepo repo;
+  repo.open_or_init(root);
+
+  for (int revision = 0; revision < 70; ++revision) {
+    repo.write_file("cards/ab/cd/abcd-card.md", "revision " + std::to_string(revision));
+    repo.stage_path("cards/ab/cd/abcd-card.md");
+    repo.commit("Activity " + std::to_string(revision));
+  }
+
+  holder::model::Project project;
+  project.project_id = "project-history-pagination";
+  project.root_path = root.string();
+  project.privacy_mode = "plain";
+
+  const holder::history::ProjectHistoryService paged_service;
+  const auto first_page = paged_service.list(project, 2);
+  REQUIRE(first_page.activities.size() == 2);
+  REQUIRE(first_page.next_cursor.has_value());
+  CHECK_FALSE(first_page.scan_limited);
+
+  const auto second_page = paged_service.list(project, 2, first_page.next_cursor);
+  REQUIRE(second_page.activities.size() == 2);
+  CHECK(second_page.activities[0].oid != first_page.activities[0].oid);
+  CHECK(second_page.activities[0].oid != first_page.activities[1].oid);
+
+  const holder::history::ProjectHistoryService bounded_service(3);
+  const auto bounded_page = bounded_service.list(project, 50);
+  REQUIRE(bounded_page.activities.size() == 3);
+  CHECK(bounded_page.scan_limited);
+  REQUIRE(bounded_page.next_cursor.has_value());
+
+  const auto continued_page = bounded_service.list(project, 50, bounded_page.next_cursor);
+  REQUIRE(continued_page.activities.size() == 3);
+  CHECK(continued_page.scan_limited);
+  REQUIRE(continued_page.next_cursor.has_value());
+  CHECK(continued_page.activities[0].oid != bounded_page.activities[0].oid);
+}
