@@ -28,7 +28,11 @@ std::filesystem::path project_history_temp_dir() {
   return path;
 }
 
-std::string project_history_card_file(const std::string& card_id, const std::string& title) {
+std::string project_history_card_file(
+    const std::string& card_id,
+    const std::string& title,
+    const std::vector<holder::model::Milestone>& milestones = {}
+) {
   holder::model::Card card;
   card.card_id = card_id;
   card.project_id = "project-history";
@@ -36,7 +40,7 @@ std::string project_history_card_file(const std::string& card_id, const std::str
   card.rel_path = holder::core::card_rel_path(card_id);
   card.created_at = 1;
   card.updated_at = 1;
-  return holder::core::render_card_front_matter(card, {}, {}) + "Card body\n";
+  return holder::core::render_card_front_matter(card, {}, milestones) + "Card body\n";
 }
 
 std::string project_history_resource_manifest(const std::string& resource_id, const std::string& label) {
@@ -94,8 +98,15 @@ TEST_CASE("Project history groups a commit's affected objects and filters activi
   const auto root = project_history_temp_dir();
   holder::git::GitRepo repo;
   repo.open_or_init(root);
+  holder::model::Milestone milestone;
+  milestone.milestone_id = "project-history-milestone";
+  milestone.project_id = "project-history";
+  milestone.card_id = "abcd-card";
+  milestone.start_at = 1;
+  milestone.kind = "Review";
+  milestone.description = "Project review";
   repo.write_file(
-      "cards/ab/cd/abcd-card.md", project_history_card_file("abcd-card", "Project card")
+      "cards/ab/cd/abcd-card.md", project_history_card_file("abcd-card", "Project card", {milestone})
   );
   repo.write_file(
       "resources/ef/gh/efgh-resource.json",
@@ -124,6 +135,9 @@ TEST_CASE("Project history groups a commit's affected objects and filters activi
   REQUIRE(page.activities[1].affected_objects[0].items.size() == 1);
   REQUIRE(page.activities[1].affected_objects[0].items[0].title.has_value());
   CHECK(*page.activities[1].affected_objects[0].items[0].title == "Project card");
+  REQUIRE(page.activities[1].affected_objects[0].items[0].detail.has_value());
+  CHECK(*page.activities[1].affected_objects[0].items[0].detail ==
+        "Milestone: Review — Project review");
   CHECK(page.activities[1].affected_objects[1].kind == ProjectHistoryObjectKind::Resource);
   REQUIRE(page.activities[1].affected_objects[1].items[0].title.has_value());
   CHECK(*page.activities[1].affected_objects[1].items[0].title == "Project notes");

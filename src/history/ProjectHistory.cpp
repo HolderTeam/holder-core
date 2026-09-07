@@ -26,7 +26,33 @@ std::optional<std::string> decode_project_blob(
   return holder::privacy::decrypt_project_blob(project.project_id, *project.project_key_id, raw);
 }
 
-std::optional<std::string> card_title_at(
+struct HistoricalDisplayMetadata {
+  std::optional<std::string> title;
+  std::optional<std::string> detail;
+};
+
+std::optional<std::string> milestone_summary(
+    const std::vector<holder::model::Milestone>& milestones
+) {
+  if (milestones.empty()) return std::nullopt;
+  constexpr std::size_t kShownMilestones = 3;
+  std::string summary = milestones.size() == 1 ? "Milestone: " :
+      "Milestones (" + std::to_string(milestones.size()) + "): ";
+  for (std::size_t index = 0; index < milestones.size() && index < kShownMilestones; ++index) {
+    if (index > 0) summary += ", ";
+    const auto& milestone = milestones[index];
+    summary += milestone.kind.value_or("Milestone");
+    if (milestone.description.has_value() && !milestone.description->empty()) {
+      summary += " — " + *milestone.description;
+    }
+  }
+  if (milestones.size() > kShownMilestones) {
+    summary += " +" + std::to_string(milestones.size() - kShownMilestones) + " more";
+  }
+  return summary;
+}
+
+std::optional<HistoricalDisplayMetadata> card_display_at(
     holder::git::GitRepo& repo,
     const holder::model::Project& project,
     const std::string& commit_oid,
@@ -39,7 +65,7 @@ std::optional<std::string> card_title_at(
     if (!decoded.has_value() || decoded->find('\0') != std::string::npos) return std::nullopt;
     const auto parsed = holder::core::parse_card_file(*decoded);
     if (!parsed.has_front_matter || parsed.card.title.empty()) return std::nullopt;
-    return parsed.card.title;
+    return HistoricalDisplayMetadata{parsed.card.title, milestone_summary(parsed.milestones)};
   } catch (const std::exception&) {
     // Project History remains useful when one historical card cannot be decoded.
     return std::nullopt;
@@ -69,7 +95,11 @@ void resolve_display_metadata(
   for (auto& object : activity.affected_objects) {
     for (auto& item : object.items) {
       if (object.kind == ProjectHistoryObjectKind::Card) {
-        item.title = card_title_at(repo, project, activity.oid, item.path);
+        const auto metadata = card_display_at(repo, project, activity.oid, item.path);
+        if (metadata.has_value()) {
+          item.title = metadata->title;
+          item.detail = metadata->detail;
+        }
         continue;
       }
       if (object.kind != ProjectHistoryObjectKind::Resource) continue;
