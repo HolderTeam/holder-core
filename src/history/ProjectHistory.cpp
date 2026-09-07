@@ -1,6 +1,8 @@
 #include "history/ProjectHistory.h"
 
+#include "card/CardFrontMatter.h"
 #include "git/GitRepo.h"
+#include "privacy/ProjectPrivacy.h"
 
 #include <algorithm>
 #include <stdexcept>
@@ -10,6 +12,47 @@ namespace {
 
 bool starts_with(std::string_view value, std::string_view prefix) {
   return value.rfind(prefix, 0) == 0;
+}
+
+std::optional<std::string> card_title_at(
+    holder::git::GitRepo& repo,
+    const holder::model::Project& project,
+    const std::string& commit_oid,
+    const std::string& path
+) {
+  try {
+    const auto raw = repo.read_blob_at(commit_oid, path);
+    if (!raw.has_value()) return std::nullopt;
+    auto decoded = *raw;
+    if (project.privacy_mode == "encrypted_git") {
+      if (!project.project_key_id.has_value() || project.project_key_id->empty()) {
+        return std::nullopt;
+      }
+      decoded = holder::privacy::decrypt_project_blob(
+          project.project_id, *project.project_key_id, decoded
+      );
+    }
+    if (decoded.find('\0') != std::string::npos) return std::nullopt;
+    const auto parsed = holder::core::parse_card_file(decoded);
+    if (!parsed.has_front_matter || parsed.card.title.empty()) return std::nullopt;
+    return parsed.card.title;
+  } catch (const std::exception&) {
+    // Project History remains useful when one historical card cannot be decoded.
+    return std::nullopt;
+  }
+}
+
+void resolve_card_titles(
+    holder::git::GitRepo& repo,
+    const holder::model::Project& project,
+    ProjectHistoryActivity& activity
+) {
+  for (auto& object : activity.affected_objects) {
+    if (object.kind != ProjectHistoryObjectKind::Card) continue;
+    for (auto& item : object.items) {
+      item.title = card_title_at(repo, project, activity.oid, item.path);
+    }
+  }
 }
 
 } // namespace
@@ -71,9 +114,9 @@ ProjectHistoryActivity group_project_history_activity(
         [kind](const auto& object) { return object.kind == kind; }
     );
     if (found == activity.affected_objects.end()) {
-      activity.affected_objects.push_back({kind, {path}});
+      activity.affected_objects.push_back({kind, {{path, std::nullopt}}});
     } else {
-      found->paths.push_back(path);
+      found->items.push_back({path, std::nullopt});
     }
   }
   return activity;
@@ -132,8 +175,10 @@ ProjectHistoryPage ProjectHistoryService::list(
           commit.message,
           commit.changed_paths
       );
-      if (!project_history_activity_matches(activity, kind_filter)) continue;
-      page.activities.push_back(activity);
+      auto titled_activity = activity;
+      resolve_card_titles(repo, project, titled_activity);
+      if (!project_history_activity_matches(titled_activity, kind_filter)) continue;
+      page.activities.push_back(std::move(titled_activity));
       if (page.activities.size() == limit) {
         if (index + 1 < batch.commits.size() || batch.has_more || batch.scan_limited) {
           page.next_cursor = commit.oid;

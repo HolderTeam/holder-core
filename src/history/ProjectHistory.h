@@ -24,9 +24,14 @@ enum class ProjectHistoryObjectKind {
 ProjectHistoryObjectKind classify_project_history_path(std::string_view relative_path);
 const char* project_history_object_kind_name(ProjectHistoryObjectKind kind);
 
+struct ProjectHistoryAffectedPath {
+  std::string path;
+  std::optional<std::string> title;
+};
+
 struct ProjectHistoryAffectedObject {
   ProjectHistoryObjectKind kind = ProjectHistoryObjectKind::Unknown;
-  std::vector<std::string> paths;
+  std::vector<ProjectHistoryAffectedPath> items;
 };
 
 // One Git commit is one project activity. Its changed paths are grouped by
