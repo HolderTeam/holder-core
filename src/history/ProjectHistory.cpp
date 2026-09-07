@@ -5,10 +5,12 @@
 #include "card/CardFrontMatter.h"
 #include "git/GitRepo.h"
 #include "privacy/ProjectPrivacy.h"
+#include "project/ProjectManifest.h"
 #include "resource/ResourceManifest.h"
 
 #include <algorithm>
 #include <cctype>
+#include <nlohmann/json.hpp>
 #include <stdexcept>
 
 namespace holder::history {
@@ -145,6 +147,50 @@ HistoricalDisplayMetadata ai_display_at(
   return metadata;
 }
 
+HistoricalDisplayMetadata project_settings_display_at(
+    holder::git::GitRepo& repo,
+    const holder::model::Project& project,
+    const std::string& commit_oid,
+    const std::string& path
+) {
+  HistoricalDisplayMetadata metadata;
+  try {
+    const auto raw = repo.read_blob_at(commit_oid, path);
+    if (!raw.has_value()) return metadata;
+    if (path == holder::project::kProjectBootstrapPath) {
+      const auto bootstrap = nlohmann::json::parse(*raw);
+      if (bootstrap.value("version", 0) != 1 ||
+          bootstrap.value("project_id", std::string{}) != project.project_id) {
+        return metadata;
+      }
+      const auto mode = bootstrap.value("mode", std::string{});
+      if (mode != "plain" && mode != "encrypted_git") return metadata;
+      metadata.title = "Privacy settings";
+      metadata.detail = mode == "plain" ? "Mode: plain Git" : "Mode: encrypted Git";
+      return metadata;
+    }
+
+    const auto decoded = decode_project_blob(project, *raw);
+    if (!decoded.has_value() || decoded->find('\0') != std::string::npos) return metadata;
+    const auto manifest = nlohmann::json::parse(*decoded);
+    if (manifest.value("version", 0) != 1 ||
+        manifest.value("project_id", std::string{}) != project.project_id) {
+      return metadata;
+    }
+    const auto name = manifest.value("name", std::string{});
+    if (name.empty()) return metadata;
+    metadata.title = "Project settings";
+    metadata.detail = "Project name: " + name;
+    if (manifest.contains("git_provider") && manifest.at("git_provider").is_string()) {
+      metadata.detail = *metadata.detail + " · Git provider: " +
+          manifest.at("git_provider").get<std::string>();
+    }
+  } catch (const std::exception&) {
+    // Settings metadata is optional enrichment and never blocks project History.
+  }
+  return metadata;
+}
+
 void resolve_display_metadata(
     holder::git::GitRepo& repo,
     const holder::model::Project& project,
@@ -162,6 +208,12 @@ void resolve_display_metadata(
       }
       if (object.kind == ProjectHistoryObjectKind::AiData) {
         const auto metadata = ai_display_at(repo, project, activity.oid, item.path);
+        item.title = metadata.title;
+        item.detail = metadata.detail;
+        continue;
+      }
+      if (object.kind == ProjectHistoryObjectKind::ProjectSettings) {
+        const auto metadata = project_settings_display_at(repo, project, activity.oid, item.path);
         item.title = metadata.title;
         item.detail = metadata.detail;
         continue;

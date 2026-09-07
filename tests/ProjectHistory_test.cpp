@@ -12,6 +12,7 @@
 #include "card/CardPaths.h"
 #include "git/GitRepo.h"
 #include "resource/ResourceManifest.h"
+#include "project/ProjectManifest.h"
 
 #include <chrono>
 #include <filesystem>
@@ -224,6 +225,50 @@ TEST_CASE("Project history describes historical AI threads and messages", "[hist
   REQUIRE(thread_item.title.has_value());
   CHECK(*thread_item.title == "Release review");
   CHECK_FALSE(thread_item.detail.has_value());
+}
+
+TEST_CASE("Project history describes historical project settings without secrets", "[history][git]") {
+  const auto root = project_history_temp_dir();
+  holder::git::GitRepo repo;
+  repo.open_or_init(root);
+
+  holder::model::Project project;
+  project.project_id = "project-history-settings";
+  project.name = "History project";
+  project.root_path = root.string();
+  project.privacy_mode = "plain";
+  project.git_provider = "github";
+  project.git_remote_url = "https://example.test/secret.git";
+  project.created_at = 1;
+  project.updated_at = 2;
+  repo.write_file(holder::project::kProjectBootstrapPath, holder::project::render_project_bootstrap(project));
+  repo.write_file(holder::project::kProjectManifestPath, holder::project::render_project_manifest(project));
+  repo.stage_paths({holder::project::kProjectBootstrapPath, holder::project::kProjectManifestPath});
+  repo.commit("Update project settings");
+
+  const holder::history::ProjectHistoryService service;
+  const auto page = service.list(project);
+  REQUIRE(page.activities.size() == 1);
+  REQUIRE(page.activities[0].affected_objects.size() == 1);
+  const auto& items = page.activities[0].affected_objects[0].items;
+  REQUIRE(items.size() == 2);
+  bool found_privacy = false;
+  bool found_project = false;
+  for (const auto& item : items) {
+    if (item.path == holder::project::kProjectBootstrapPath) {
+      found_privacy = true;
+      CHECK(item.title == "Privacy settings");
+      CHECK(item.detail == "Mode: plain Git");
+    }
+    if (item.path == holder::project::kProjectManifestPath) {
+      found_project = true;
+      CHECK(item.title == "Project settings");
+      CHECK(item.detail == "Project name: History project · Git provider: github");
+      CHECK(item.detail->find("secret") == std::string::npos);
+    }
+  }
+  CHECK(found_privacy);
+  CHECK(found_project);
 }
 
 TEST_CASE("Project history paginates incrementally and exposes bounded scan continuations", "[history][git]") {
