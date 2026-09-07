@@ -8,6 +8,7 @@
 #include "card/CardFrontMatter.h"
 #include "card/CardPaths.h"
 #include "git/GitRepo.h"
+#include "resource/ResourceManifest.h"
 
 #include <chrono>
 #include <filesystem>
@@ -36,6 +37,25 @@ std::string project_history_card_file(const std::string& card_id, const std::str
   card.created_at = 1;
   card.updated_at = 1;
   return holder::core::render_card_front_matter(card, {}, {}) + "Card body\n";
+}
+
+std::string project_history_resource_manifest(const std::string& resource_id, const std::string& label) {
+  holder::model::ResourceBundle bundle;
+  bundle.resource.resource_id = resource_id;
+  bundle.resource.project_id = "project-history";
+  bundle.resource.type = "file";
+  bundle.resource.label = label;
+  bundle.resource.created_at = 1;
+  bundle.resource.updated_at = 1;
+  holder::model::Asset asset;
+  asset.asset_id = "asset-" + resource_id;
+  asset.resource_id = resource_id;
+  asset.original_filename = "project-notes.pdf";
+  asset.media_type = "application/pdf";
+  asset.byte_size = 42;
+  asset.plaintext_sha256 = std::string(64, 'a');
+  bundle.assets.push_back(asset);
+  return holder::resource::render_resource_manifest(bundle);
 }
 
 } // namespace
@@ -77,7 +97,10 @@ TEST_CASE("Project history groups a commit's affected objects and filters activi
   repo.write_file(
       "cards/ab/cd/abcd-card.md", project_history_card_file("abcd-card", "Project card")
   );
-  repo.write_file("resources/ef/gh/efgh-resource.json", "resource");
+  repo.write_file(
+      "resources/ef/gh/efgh-resource.json",
+      project_history_resource_manifest("efgh-resource", "Project notes")
+  );
   repo.stage_paths({"cards/ab/cd/abcd-card.md", "resources/ef/gh/efgh-resource.json"});
   repo.commit("Attach example");
   repo.write_file("notes/from-another-tool.txt", "external");
@@ -102,6 +125,10 @@ TEST_CASE("Project history groups a commit's affected objects and filters activi
   REQUIRE(page.activities[1].affected_objects[0].items[0].title.has_value());
   CHECK(*page.activities[1].affected_objects[0].items[0].title == "Project card");
   CHECK(page.activities[1].affected_objects[1].kind == ProjectHistoryObjectKind::Resource);
+  REQUIRE(page.activities[1].affected_objects[1].items[0].title.has_value());
+  CHECK(*page.activities[1].affected_objects[1].items[0].title == "Project notes");
+  REQUIRE(page.activities[1].affected_objects[1].items[0].detail.has_value());
+  CHECK(*page.activities[1].affected_objects[1].items[0].detail == "Attachment: project-notes.pdf");
 
   const auto resource_page = service.list(project, 50, std::nullopt, ProjectHistoryObjectKind::Resource);
   REQUIRE(resource_page.activities.size() == 1);

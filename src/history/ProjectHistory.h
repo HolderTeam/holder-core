@@ -27,6 +27,7 @@ const char* project_history_object_kind_name(ProjectHistoryObjectKind kind);
 struct ProjectHistoryAffectedPath {
   std::string path;
   std::optional<std::string> title;
+  std::optional<std::string> detail;
 };
 
 struct ProjectHistoryAffectedObject {

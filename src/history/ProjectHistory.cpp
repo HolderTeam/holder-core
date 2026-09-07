@@ -3,6 +3,7 @@
 #include "card/CardFrontMatter.h"
 #include "git/GitRepo.h"
 #include "privacy/ProjectPrivacy.h"
+#include "resource/ResourceManifest.h"
 
 #include <algorithm>
 #include <stdexcept>
@@ -14,6 +15,17 @@ bool starts_with(std::string_view value, std::string_view prefix) {
   return value.rfind(prefix, 0) == 0;
 }
 
+std::optional<std::string> decode_project_blob(
+    const holder::model::Project& project,
+    const std::string& raw
+) {
+  if (project.privacy_mode != "encrypted_git") return raw;
+  if (!project.project_key_id.has_value() || project.project_key_id->empty()) {
+    return std::nullopt;
+  }
+  return holder::privacy::decrypt_project_blob(project.project_id, *project.project_key_id, raw);
+}
+
 std::optional<std::string> card_title_at(
     holder::git::GitRepo& repo,
     const holder::model::Project& project,
@@ -23,17 +35,9 @@ std::optional<std::string> card_title_at(
   try {
     const auto raw = repo.read_blob_at(commit_oid, path);
     if (!raw.has_value()) return std::nullopt;
-    auto decoded = *raw;
-    if (project.privacy_mode == "encrypted_git") {
-      if (!project.project_key_id.has_value() || project.project_key_id->empty()) {
-        return std::nullopt;
-      }
-      decoded = holder::privacy::decrypt_project_blob(
-          project.project_id, *project.project_key_id, decoded
-      );
-    }
-    if (decoded.find('\0') != std::string::npos) return std::nullopt;
-    const auto parsed = holder::core::parse_card_file(decoded);
+    const auto decoded = decode_project_blob(project, *raw);
+    if (!decoded.has_value() || decoded->find('\0') != std::string::npos) return std::nullopt;
+    const auto parsed = holder::core::parse_card_file(*decoded);
     if (!parsed.has_front_matter || parsed.card.title.empty()) return std::nullopt;
     return parsed.card.title;
   } catch (const std::exception&) {
@@ -42,15 +46,44 @@ std::optional<std::string> card_title_at(
   }
 }
 
-void resolve_card_titles(
+std::optional<std::string> resource_attachment_summary(const holder::model::ResourceBundle& bundle) {
+  if (bundle.assets.empty()) return std::nullopt;
+  constexpr std::size_t kShownAttachmentNames = 3;
+  std::string summary = bundle.assets.size() == 1 ? "Attachment: " :
+      "Attachments (" + std::to_string(bundle.assets.size()) + "): ";
+  for (std::size_t index = 0; index < bundle.assets.size() && index < kShownAttachmentNames; ++index) {
+    if (index > 0) summary += ", ";
+    summary += bundle.assets[index].original_filename;
+  }
+  if (bundle.assets.size() > kShownAttachmentNames) {
+    summary += " +" + std::to_string(bundle.assets.size() - kShownAttachmentNames) + " more";
+  }
+  return summary;
+}
+
+void resolve_display_metadata(
     holder::git::GitRepo& repo,
     const holder::model::Project& project,
     ProjectHistoryActivity& activity
 ) {
   for (auto& object : activity.affected_objects) {
-    if (object.kind != ProjectHistoryObjectKind::Card) continue;
     for (auto& item : object.items) {
-      item.title = card_title_at(repo, project, activity.oid, item.path);
+      if (object.kind == ProjectHistoryObjectKind::Card) {
+        item.title = card_title_at(repo, project, activity.oid, item.path);
+        continue;
+      }
+      if (object.kind != ProjectHistoryObjectKind::Resource) continue;
+      try {
+        const auto raw = repo.read_blob_at(activity.oid, item.path);
+        if (!raw.has_value()) continue;
+        const auto decoded = decode_project_blob(project, *raw);
+        if (!decoded.has_value() || decoded->find('\0') != std::string::npos) continue;
+        const auto bundle = holder::resource::parse_resource_manifest(*decoded);
+        item.title = bundle.resource.label;
+        item.detail = resource_attachment_summary(bundle);
+      } catch (const std::exception&) {
+        // A malformed Resource manifest must not hide the rest of project History.
+      }
     }
   }
 }
@@ -114,9 +147,9 @@ ProjectHistoryActivity group_project_history_activity(
         [kind](const auto& object) { return object.kind == kind; }
     );
     if (found == activity.affected_objects.end()) {
-      activity.affected_objects.push_back({kind, {{path, std::nullopt}}});
+      activity.affected_objects.push_back({kind, {{path, std::nullopt, std::nullopt}}});
     } else {
-      found->items.push_back({path, std::nullopt});
+      found->items.push_back({path, std::nullopt, std::nullopt});
     }
   }
   return activity;
@@ -176,7 +209,7 @@ ProjectHistoryPage ProjectHistoryService::list(
           commit.changed_paths
       );
       auto titled_activity = activity;
-      resolve_card_titles(repo, project, titled_activity);
+      resolve_display_metadata(repo, project, titled_activity);
       if (!project_history_activity_matches(titled_activity, kind_filter)) continue;
       page.activities.push_back(std::move(titled_activity));
       if (page.activities.size() == limit) {
