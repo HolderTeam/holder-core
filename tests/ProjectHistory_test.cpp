@@ -98,6 +98,17 @@ TEST_CASE("Project history keeps unrecognised paths unknown", "[history]") {
   )) == "unknown");
 }
 
+TEST_CASE("Project history marks multi-parent activities as merges", "[history]") {
+  const auto activity = holder::history::group_project_history_activity(
+      "merge-oid", {"main-parent", "side-parent"}, "Ezra", "ezra@example.test", 1, 2,
+      "Combine project changes", {"cards/ab/cd/abcd-card.md"}
+  );
+  CHECK(activity.is_merge);
+  REQUIRE(activity.parent_oids.size() == 2);
+  CHECK(activity.parent_oids[0] == "main-parent");
+  CHECK(activity.parent_oids[1] == "side-parent");
+}
+
 TEST_CASE("Project history groups a commit's affected objects and filters activities", "[history][git]") {
   const auto root = project_history_temp_dir();
   holder::git::GitRepo repo;
