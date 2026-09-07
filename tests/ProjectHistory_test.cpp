@@ -4,6 +4,9 @@
 #include <catch2/catch.hpp>
 #endif
 
+#include "ai/AiMessageFrontMatter.h"
+#include "ai/AiMessagePaths.h"
+#include "ai/AiThreadManifest.h"
 #include "history/ProjectHistory.h"
 #include "card/CardFrontMatter.h"
 #include "card/CardPaths.h"
@@ -169,6 +172,58 @@ TEST_CASE("Project history retains a card path when its historical title is unav
   const auto& item = page.activities[0].affected_objects[0].items[0];
   CHECK(item.path == "cards/ab/cd/abcd-unreadable-card.md");
   CHECK_FALSE(item.title.has_value());
+}
+
+TEST_CASE("Project history describes historical AI threads and messages", "[history][git]") {
+  const auto root = project_history_temp_dir();
+  holder::git::GitRepo repo;
+  repo.open_or_init(root);
+
+  holder::model::Project project;
+  project.project_id = "project-history";
+  project.root_path = root.string();
+  project.privacy_mode = "plain";
+
+  holder::model::AiThread thread;
+  thread.thread_id = "thread-history";
+  thread.project_id = project.project_id;
+  thread.title = "Release review";
+  thread.created_at = 1;
+  thread.updated_at = 1;
+  const auto thread_path = holder::ai::ai_thread_manifest_rel_path(thread.thread_id);
+  repo.write_file(thread_path, holder::ai::render_ai_thread_manifest(project, thread));
+  repo.stage_path(thread_path);
+  repo.commit("Create AI thread");
+
+  holder::model::AiMessage message;
+  message.message_id = "message-history";
+  message.thread_id = thread.thread_id;
+  message.role = "user";
+  message.source = "holder";
+  message.created_at = 2;
+  const auto message_path = holder::core::ai_message_rel_path(message.message_id);
+  repo.write_file(
+      message_path,
+      holder::core::render_ai_message_front_matter(message, project.project_id, {}) +
+          "Can you review the release notes?\n"
+  );
+  repo.stage_path(message_path);
+  repo.commit("Add AI message");
+
+  const holder::history::ProjectHistoryService service;
+  const auto page = service.list(project);
+  REQUIRE(page.activities.size() == 2);
+  const auto& message_item = page.activities[0].affected_objects[0].items[0];
+  CHECK(message_item.path == message_path);
+  REQUIRE(message_item.title.has_value());
+  CHECK(*message_item.title == "Release review");
+  REQUIRE(message_item.detail.has_value());
+  CHECK(*message_item.detail == "user: Can you review the release notes?");
+  const auto& thread_item = page.activities[1].affected_objects[0].items[0];
+  CHECK(thread_item.path == thread_path);
+  REQUIRE(thread_item.title.has_value());
+  CHECK(*thread_item.title == "Release review");
+  CHECK_FALSE(thread_item.detail.has_value());
 }
 
 TEST_CASE("Project history paginates incrementally and exposes bounded scan continuations", "[history][git]") {

@@ -1,11 +1,14 @@
 #include "history/ProjectHistory.h"
 
+#include "ai/AiMessageFrontMatter.h"
+#include "ai/AiThreadManifest.h"
 #include "card/CardFrontMatter.h"
 #include "git/GitRepo.h"
 #include "privacy/ProjectPrivacy.h"
 #include "resource/ResourceManifest.h"
 
 #include <algorithm>
+#include <cctype>
 #include <stdexcept>
 
 namespace holder::history {
@@ -87,6 +90,61 @@ std::optional<std::string> resource_attachment_summary(const holder::model::Reso
   return summary;
 }
 
+std::string first_meaningful_line(const std::string& text) {
+  std::size_t start = 0;
+  while (start < text.size()) {
+    const auto end = text.find('\n', start);
+    auto line = text.substr(start, end == std::string::npos ? std::string::npos : end - start);
+    line.erase(line.begin(), std::find_if(line.begin(), line.end(), [](unsigned char ch) {
+      return std::isspace(ch) == 0;
+    }));
+    line.erase(std::find_if(line.rbegin(), line.rend(), [](unsigned char ch) {
+      return std::isspace(ch) == 0;
+    }).base(), line.end());
+    if (!line.empty()) {
+      if (line.size() > 80) line = line.substr(0, 77) + "...";
+      return line;
+    }
+    if (end == std::string::npos) break;
+    start = end + 1;
+  }
+  return {};
+}
+
+HistoricalDisplayMetadata ai_display_at(
+    holder::git::GitRepo& repo,
+    const holder::model::Project& project,
+    const std::string& commit_oid,
+    const std::string& path
+) {
+  HistoricalDisplayMetadata metadata;
+  try {
+    const auto raw = repo.read_blob_at(commit_oid, path);
+    if (!raw.has_value()) return metadata;
+    if (starts_with(path, "ai_threads/")) {
+      metadata.title = holder::ai::parse_ai_thread_manifest(project, *raw).title;
+      return metadata;
+    }
+
+    const auto decoded = decode_project_blob(project, *raw);
+    if (!decoded.has_value() || decoded->find('\0') != std::string::npos) return metadata;
+    const auto parsed = holder::core::parse_ai_message_file(*decoded);
+    if (!parsed.has_front_matter || parsed.message.message_id.empty()) return metadata;
+    const auto thread_path = holder::ai::ai_thread_manifest_rel_path(parsed.message.thread_id);
+    const auto thread_raw = repo.read_blob_at(commit_oid, thread_path);
+    if (thread_raw.has_value()) {
+      metadata.title = holder::ai::parse_ai_thread_manifest(project, *thread_raw).title;
+    }
+    const auto excerpt = first_meaningful_line(parsed.body);
+    if (!excerpt.empty()) {
+      metadata.detail = (parsed.message.role.empty() ? "message" : parsed.message.role) + ": " + excerpt;
+    }
+  } catch (const std::exception&) {
+    // AI data is optional enrichment; malformed or unavailable history stays path-only.
+  }
+  return metadata;
+}
+
 void resolve_display_metadata(
     holder::git::GitRepo& repo,
     const holder::model::Project& project,
@@ -100,6 +158,12 @@ void resolve_display_metadata(
           item.title = metadata->title;
           item.detail = metadata->detail;
         }
+        continue;
+      }
+      if (object.kind == ProjectHistoryObjectKind::AiData) {
+        const auto metadata = ai_display_at(repo, project, activity.oid, item.path);
+        item.title = metadata.title;
+        item.detail = metadata.detail;
         continue;
       }
       if (object.kind != ProjectHistoryObjectKind::Resource) continue;
