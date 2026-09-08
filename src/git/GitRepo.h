@@ -16,8 +16,23 @@ struct GitHistoryCommit {
   std::vector<std::string> parent_oids;
   std::string author_name;
   std::string author_email;
+  long long authored_at = 0;
   long long committed_at = 0;
   std::string message;
+  // Paths changed against the first parent (or an empty tree for the initial
+  // commit). A rename contributes both paths so consumers can retain both
+  // affected Holder objects.
+  std::vector<std::string> changed_paths;
+};
+
+struct GitHistoryPage {
+  std::vector<GitHistoryCommit> commits;
+  bool has_more = false;
+  // The walk stopped after its bounded number of examined commits. scan_cursor is
+  // the last examined commit and can be used to continue without pretending the
+  // absence of a matching card commit is a complete history result.
+  bool scan_limited = false;
+  std::optional<std::string> scan_cursor;
 };
 
 // Thrown by pull_remote_ff_only when local and remote have diverged (neither is an ancestor of
@@ -118,13 +133,23 @@ class GitRepo {
   );
 
   // Return commits reachable from HEAD, newest first, whose tree changes at least one of the
-  // supplied paths. cursor_oid is the last commit returned by a previous page; when supplied,
-  // results begin after it. One extra matching commit is read to determine has_more.
-  std::vector<GitHistoryCommit> history_for_paths(
+  // supplied paths. cursor_oid is the last examined commit from a previous page; when supplied,
+  // results begin after it. One extra matching commit is read to determine has_more. The walk
+  // examines at most max_scanned_commits revisions and reports a continuation when it stops.
+  GitHistoryPage history_for_paths(
       const std::vector<std::filesystem::path>& relative_paths,
       std::size_t limit,
       const std::optional<std::string>& cursor_oid,
-      bool& has_more
+      std::size_t max_scanned_commits = 10'000
+  );
+
+  // Return all commits reachable from HEAD, newest first. Each item includes
+  // its changed paths against its first parent. Pagination and scan bounds have
+  // the same semantics as history_for_paths().
+  GitHistoryPage history_all(
+      std::size_t limit,
+      const std::optional<std::string>& cursor_oid,
+      std::size_t max_scanned_commits = 10'000
   );
 
   // Current commit OID, or nullopt for an unborn repository.

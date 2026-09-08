@@ -8,6 +8,7 @@
 #include "card/CardPaths.h"
 #include "card/CardRepo.h"
 #include "card/CardStore.h"
+#include "card/LinkRepo.h"
 #include "card/MilestoneRepo.h"
 #include "card/TagRepo.h"
 #include "git/GitOps.h"
@@ -15,6 +16,7 @@
 #include "core_test_helpers.h"
 #include "index/FtsIndexer.h"
 #include "model/Card.h"
+#include "model/CardLink.h"
 #include "model/Project.h"
 #include "platform/Db.h"
 #include "privacy/ProjectPrivacy.h"
@@ -1423,6 +1425,151 @@ TEST_CASE("CardStore trash/restore/hard_delete and get_content guards", "[cardst
   REQUIRE_THROWS((void)store.get_content(no_project));
 }
 
+TEST_CASE("CardStore restores a historical card snapshot as a new commit", "[cardstore][history]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  const auto project_root = dir / "project_repo";
+  create_project(db, "proj-restore-version", project_root.string());
+
+  holder::index::FtsIndexer fts(db);
+  holder::card::CardStore store(db, &fts);
+  holder::model::Card card;
+  card.card_id = "restore01";
+  card.project_id = "proj-restore-version";
+  card.title = "Original title";
+  card.created_at = 1;
+  card.updated_at = 1;
+  store.create(card, "# Original\n#old\n");
+
+  holder::git::GitRepo repo;
+  repo.open_existing(project_root);
+  const auto historical_oid = repo.head_oid();
+  REQUIRE(historical_oid.has_value());
+  store.update_content(card.card_id, "# Current\n#new\n", std::string("Current title"), 2);
+  const int commits_before_restore = count_commits(project_root);
+
+  store.restore_version(card.card_id, *historical_oid, 50);
+
+  const auto restored = store.get(card.card_id);
+  REQUIRE(restored.has_value());
+  CHECK(restored->title == "Original title");
+  CHECK(restored->created_at == 1);
+  CHECK(restored->updated_at == 50);
+  CHECK_FALSE(restored->deleted_at.has_value());
+  REQUIRE(store.get_content(*restored).value() == "# Original\n#old\n");
+  CHECK(count_commits(project_root) == commits_before_restore + 1);
+  repo.open_existing(project_root);
+  CHECK(repo.head_oid() != historical_oid);
+}
+
+TEST_CASE("CardStore restores an encrypted historical card snapshot", "[cardstore][history]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  holder::project::ProjectRepo project_repo(db);
+  holder::model::Project project;
+  project.project_id = "proj-encrypted-restore";
+  project.name = "Encrypted restore";
+  project.root_path = (dir / "project_repo").string();
+  project.privacy_mode = "encrypted_git";
+  project.created_at = 1;
+  project.updated_at = 1;
+  project_repo.create(project);
+  holder::test::EnvGuard keystore_env("HOLDER_TEST_KEYSTORE_DIR", (dir / "keystore").string());
+  holder::git::RealGitOps bootstrap_git;
+  holder::privacy::ensure_encrypted_project_ready(
+      bootstrap_git, project_repo, project.project_id, project.root_path, std::nullopt, 2,
+      []() { return std::string("key-history-restore"); }
+  );
+
+  holder::index::FtsIndexer fts(db);
+  holder::card::CardStore store(db, &fts);
+  holder::model::Card card;
+  card.card_id = "encrest01";
+  card.project_id = project.project_id;
+  card.title = "Encrypted original";
+  card.created_at = 1;
+  card.updated_at = 1;
+  store.create(card, "original encrypted body");
+  holder::git::GitRepo repo;
+  repo.open_existing(project.root_path);
+  const auto historical_oid = repo.head_oid();
+  REQUIRE(historical_oid.has_value());
+  store.update_content(card.card_id, "changed encrypted body", std::nullopt, 2);
+
+  store.restore_version(card.card_id, *historical_oid, 50);
+
+  const auto restored = store.get(card.card_id);
+  REQUIRE(restored.has_value());
+  CHECK(restored->title == "Encrypted original");
+  CHECK(restored->updated_at == 50);
+  REQUIRE(store.get_content(*restored).value() == "original encrypted body");
+  const auto raw = read_file(
+      std::filesystem::path(project.root_path) / holder::core::card_rel_path(card.card_id)
+  );
+  CHECK(raw.find("original encrypted body") == std::string::npos);
+}
+
+TEST_CASE("CardStore leaves the current version untouched when historical metadata restore fails", "[cardstore][history]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  const auto project_root = dir / "project_repo";
+  create_project(db, "proj-restore-rollback", project_root.string());
+
+  holder::index::FtsIndexer fts(db);
+  holder::card::CardStore store(db, &fts);
+  holder::card::LinkRepo links(db);
+  holder::model::Card card;
+  card.card_id = "rollback01";
+  card.project_id = "proj-restore-rollback";
+  card.title = "Historical title";
+  card.created_at = 1;
+  card.updated_at = 1;
+  store.create(card, "historical body");
+
+  holder::model::CardLink historical_link;
+  historical_link.project_id = card.project_id;
+  historical_link.from_card_id = card.card_id;
+  historical_link.to_card_id = "linked-card";
+  historical_link.to_type = "card";
+  historical_link.kind = "wiki";
+  historical_link.created_at = 1;
+  links.upsert_links(card.project_id, card.card_id, {historical_link});
+  store.update_links(card.card_id, 2);
+
+  holder::git::GitRepo repo;
+  repo.open_existing(project_root);
+  const auto historical_oid = repo.head_oid();
+  REQUIRE(historical_oid.has_value());
+  store.update_content(card.card_id, "current body", std::string("Current title"), 3);
+  repo.open_existing(project_root);
+  const auto head_before = repo.head_oid();
+  REQUIRE(head_before.has_value());
+  const auto current_raw = read_file(project_root / holder::core::card_rel_path(card.card_id));
+
+  db.exec("CREATE TRIGGER block_history_restore_link "
+          "BEFORE INSERT ON card_links "
+          "BEGIN SELECT RAISE(ABORT, 'blocked historical link'); END;");
+
+  REQUIRE_THROWS(store.restore_version(card.card_id, *historical_oid, 50));
+
+  const auto current = store.get(card.card_id);
+  REQUIRE(current.has_value());
+  CHECK(current->title == "Current title");
+  REQUIRE(store.get_content(*current).value() == "current body");
+  CHECK(read_file(project_root / holder::core::card_rel_path(card.card_id)) == current_raw);
+  repo.open_existing(project_root);
+  CHECK(repo.head_oid() == head_before);
+  const auto current_links = links.list_outgoing(card.project_id, card.card_id);
+  REQUIRE(current_links.size() == 1);
+  CHECK(current_links[0].to_card_id == "linked-card");
+}
+
 TEST_CASE("CardStore keeps card_tags in sync across create/update/trash/restore/hard_delete", "[cardstore]") {
   const auto dir = make_temp_dir();
   holder::platform::Db db;
@@ -1559,6 +1706,103 @@ TEST_CASE("CardStore update_milestones exercises error, encrypted, and no-op bra
   const int before_enc = count_commits(enc.root_path);
   store.update_milestones(enc_card.card_id, 2);
   REQUIRE(count_commits(enc.root_path) == before_enc + 1);
+}
+
+TEST_CASE("CardStore restores historical live and Trash lifecycle snapshots", "[cardstore][history]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  const auto project_root = dir / "project_repo";
+  create_project(db, "proj-restore-lifecycle", project_root.string());
+  holder::index::FtsIndexer fts(db);
+  holder::card::CardStore store(db, &fts);
+  holder::card::LinkRepo links(db);
+  holder::card::MilestoneRepo milestones(db);
+
+  holder::model::Card card;
+  card.card_id = "restlife";
+  card.project_id = "proj-restore-lifecycle";
+  card.title = "Original name";
+  card.created_at = 1;
+  card.updated_at = 1;
+  store.create(card, "original body");
+
+  holder::model::CardLink original_link;
+  original_link.project_id = card.project_id;
+  original_link.from_card_id = card.card_id;
+  original_link.to_card_id = "original-target";
+  original_link.to_type = "card";
+  original_link.kind = "wiki";
+  original_link.label = "Original link";
+  original_link.created_at = 1;
+  links.upsert_links(card.project_id, card.card_id, {original_link});
+  store.update_links(card.card_id, 2);
+
+  auto original_milestone = make_milestone_for("original-milestone", card.project_id, card.card_id);
+  original_milestone.end_at = 200;
+  original_milestone.kind = "Review";
+  original_milestone.description = "Original milestone";
+  milestones.replace_for_card(card.project_id, card.card_id, {original_milestone});
+  store.update_milestones(card.card_id, 3);
+
+  holder::git::GitRepo git;
+  git.open_existing(project_root);
+  const auto live_oid = git.head_oid();
+  REQUIRE(live_oid.has_value());
+
+  holder::model::CardLink current_link;
+  current_link.project_id = card.project_id;
+  current_link.from_card_id = card.card_id;
+  current_link.to_card_id = "current-target";
+  current_link.to_type = "resource";
+  current_link.kind = "ref";
+  current_link.label = "Current link";
+  current_link.created_at = 4;
+  links.delete_links_from(card.project_id, card.card_id);
+  links.upsert_links(card.project_id, card.card_id, {current_link});
+  store.update_links(card.card_id, 4);
+
+  auto current_milestone = make_milestone_for("current-milestone", card.project_id, card.card_id);
+  current_milestone.start_at = 300;
+  current_milestone.kind = "Current";
+  milestones.replace_for_card(card.project_id, card.card_id, {current_milestone});
+  store.update_milestones(card.card_id, 5);
+
+  store.update_content(card.card_id, "renamed body", std::string("Renamed card"), 6);
+  store.trash(card.card_id, 7);
+  git.open_existing(project_root);
+  const auto trash_oid = git.head_oid();
+  REQUIRE(trash_oid.has_value());
+
+  store.restore_version(card.card_id, *live_oid, 10);
+  const auto live = store.get(card.card_id);
+  REQUIRE(live.has_value());
+  CHECK(live->title == "Original name");
+  CHECK_FALSE(live->deleted_at.has_value());
+  REQUIRE(store.get_content(*live).value() == "original body");
+  const auto restored_links = links.list_outgoing(card.project_id, card.card_id);
+  REQUIRE(restored_links.size() == 1);
+  CHECK(restored_links[0].to_card_id == "original-target");
+  CHECK(restored_links[0].to_type == "card");
+  CHECK(restored_links[0].kind == "wiki");
+  CHECK(restored_links[0].label == std::optional<std::string>("Original link"));
+  const auto restored_milestones = milestones.list_for_card(card.project_id, card.card_id);
+  REQUIRE(restored_milestones.size() == 1);
+  CHECK(restored_milestones[0].milestone_id == "original-milestone");
+  CHECK(restored_milestones[0].end_at == std::optional<long long>(200));
+  CHECK(restored_milestones[0].kind == std::optional<std::string>("Review"));
+  CHECK(restored_milestones[0].description == std::optional<std::string>("Original milestone"));
+  CHECK(std::filesystem::exists(project_root / holder::core::card_rel_path(card.card_id)));
+  CHECK_FALSE(std::filesystem::exists(project_root / holder::core::card_trash_rel_path(card.card_id)));
+
+  store.restore_version(card.card_id, *trash_oid, 11);
+  const auto trashed = store.get(card.card_id);
+  REQUIRE(trashed.has_value());
+  CHECK(trashed->title == "Renamed card");
+  CHECK(trashed->deleted_at.has_value());
+  CHECK_FALSE(std::filesystem::exists(project_root / holder::core::card_rel_path(card.card_id)));
+  CHECK(std::filesystem::exists(project_root / holder::core::card_trash_rel_path(card.card_id)));
 }
 
 TEST_CASE("CardStore keeps milestones in sync across trash/restore/hard_delete", "[cardstore]") {

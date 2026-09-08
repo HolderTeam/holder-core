@@ -419,6 +419,75 @@ void holder_string_free(char* value);
 const char* holder_error_message(const holder_error* error);
 void holder_error_destroy(holder_error* error);
 
+// -- Card history --
+//
+// Mirrors holder::history::CardHistoryService exactly (see src/history/CardHistory.h) --
+// this is the same read-only, grouped/paginated card history desktop's History tool and
+// holder-daemon's authenticated routes already expose, reached here directly through the C
+// ABI instead of over HTTP. Card identity is card_id's UUID; history follows both its live
+// and Trash paths automatically. No call in this section mutates the repository, index,
+// working tree, or database.
+
+// card_id's editing-session-grouped history, most-recent first, cursor-paginated
+// (cursor_oid NULL/empty for the first page; for a later page, pass back the previous
+// response's next_cursor). limit must be between 1 and 200. Sets *out_json to
+// {"head_oid": <oid>|null, "entries": [{"first_oid", "last_oid", "parent_oids": [...],
+// "visible_parent_oids": [...] (direct parents also present as another entry in this same
+// page -- a missing link may cross filtered history or a page boundary and must not be
+// drawn as a direct connection), "author": {"name", "email"}, "started_at", "ended_at",
+// "kind", "summary", "commit_count", "is_merge",
+// "saves": [{"oid", "parent_oids", "authored_at", "committed_at", "message"}, ...]
+// (chronological, first grouped save to last)}, ...],
+// "next_cursor": <oid>|null, "scan_limited": bool (true if the underlying scan hit its
+// bound before finishing this page -- next_cursor still lets the caller continue)}.
+int holder_card_history_list(
+    holder_context* context,
+    const char* project_id,
+    const char* card_id,
+    const char* cursor_oid,
+    int limit,
+    char** out_json,
+    holder_error** out_error
+);
+
+// Compares card_id's state at from_oid against its state at to_oid, both read directly
+// from their commit trees (decrypted through the project's normal privacy boundary for an
+// encrypted_git project) rather than by checking anything out. from_oid may be NULL/empty
+// for a card's creation event, where no earlier version exists. to_oid must be a real,
+// previously-observed commit OID (e.g. from holder_card_history_list's head_oid or an
+// entry's last_oid) -- callers must never substitute a live/moving "current HEAD" concept
+// of their own, so that an autosave landing between a list call and this call cannot change
+// what a caller believes it is comparing. Sets *out_json to
+// {"from": {"exists", "oid", "title", "body"}, "to": {...same shape...}, "summary",
+// "lines": [{"origin" (one of " ", "+", "-"), "text", "old_line", "new_line"} (old_line/
+// new_line are null where not applicable), ...], "truncated" (true if the diff hit its
+// bounded line count/length and was shortened)}.
+int holder_card_history_compare(
+    holder_context* context,
+    const char* project_id,
+    const char* card_id,
+    const char* from_oid,
+    const char* to_oid,
+    char** out_json,
+    holder_error** out_error
+);
+
+// Restores card_id to the whole card snapshot recorded at historical_oid, through the
+// ordinary CardStore write path: title, body, links, milestones, hierarchy/location, tags,
+// Resource references, and live/Trash state all come from that one historical snapshot
+// together, written as a new "Restore card <title>" commit. Never checks out or rewrites
+// Git history, so the pre-restore state remains an earlier, still-reachable entry in the
+// same history. Fails without writing anything if historical_oid's snapshot cannot be read,
+// decrypted, or parsed for card_id. Sets *out_json to the restored card, same shape as
+// holder_card_restore.
+int holder_card_history_restore(
+    holder_context* context,
+    const char* card_id,
+    const char* historical_oid,
+    char** out_json,
+    holder_error** out_error
+);
+
 // -- Git sync --
 
 // Global, process-wide libgit2 "home" directory override. Needed on

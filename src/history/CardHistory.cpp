@@ -9,6 +9,8 @@
 #include <cctype>
 #include <filesystem>
 #include <stdexcept>
+#include <string_view>
+#include <unordered_set>
 #include <utility>
 
 namespace holder::history {
@@ -18,6 +20,8 @@ constexpr long long kSessionGapSeconds = 10 * 60;
 constexpr long long kSessionMaxSeconds = 30 * 60;
 constexpr std::size_t kHistoryBatchSize = 64;
 constexpr std::size_t kMaxDiffLines = 5'000;
+constexpr std::size_t kMaxDiffLineBytes = 16 * 1024;
+constexpr std::string_view kShortenedLineSuffix = "... [line shortened]";
 
 struct Snapshot {
   bool exists = false;
@@ -45,7 +49,15 @@ Snapshot snapshot_at(
   auto raw = repo.read_blob_at(*oid, holder::core::card_rel_path(card_id));
   if (!raw.has_value()) raw = repo.read_blob_at(*oid, holder::core::card_trash_rel_path(card_id));
   if (!raw.has_value()) return {};
-  return {.exists = true, .card = holder::core::parse_card_file(decode(project, *raw))};
+  const auto decoded = decode(project, *raw);
+  if (decoded.find('\0') != std::string::npos) {
+    throw std::runtime_error("Historical card content is binary");
+  }
+  const auto parsed = holder::core::parse_card_file(decoded);
+  if (!parsed.has_front_matter || parsed.card.card_id != card_id) {
+    throw std::runtime_error("Historical card content is malformed");
+  }
+  return {.exists = true, .card = parsed};
 }
 
 std::string kind_for(const holder::git::GitHistoryCommit& commit) {
@@ -128,6 +140,26 @@ std::vector<std::string> lines_of(const std::string& text) {
   return lines;
 }
 
+std::string bounded_diff_text(const std::string& text, bool& truncated) {
+  if (text.size() <= kMaxDiffLineBytes) return text;
+  const auto prefix_limit = kMaxDiffLineBytes - kShortenedLineSuffix.size();
+  auto end = prefix_limit;
+  while (end > 0 && (static_cast<unsigned char>(text[end]) & 0xc0U) == 0x80U) --end;
+  truncated = true;
+  return text.substr(0, end) + std::string(kShortenedLineSuffix);
+}
+
+void append_diff_line(
+    std::vector<CardDiffLine>& out,
+    char origin,
+    const std::string& text,
+    long long old_line,
+    long long new_line,
+    bool& truncated
+) {
+  out.push_back({origin, bounded_diff_text(text, truncated), old_line, new_line});
+}
+
 std::vector<CardDiffLine> line_diff(
     const std::string& old_text,
     const std::string& new_text,
@@ -146,7 +178,7 @@ std::vector<CardDiffLine> line_diff(
         truncated = true;
         return out;
       }
-      out.push_back({'-', line, old_no++, -1});
+      append_diff_line(out, '-', line, old_no++, -1, truncated);
     }
     long long new_no = 1;
     for (const auto& line : new_lines) {
@@ -154,7 +186,7 @@ std::vector<CardDiffLine> line_diff(
         truncated = true;
         return out;
       }
-      out.push_back({'+', line, -1, new_no++});
+      append_diff_line(out, '+', line, -1, new_no++, truncated);
     }
     return out;
   }
@@ -179,15 +211,17 @@ std::vector<CardDiffLine> line_diff(
       break;
     }
     if (i < old_lines.size() && j < new_lines.size() && old_lines[i] == new_lines[j]) {
-      out.push_back({' ', old_lines[i], static_cast<long long>(i + 1), static_cast<long long>(j + 1)});
+      append_diff_line(
+          out, ' ', old_lines[i], static_cast<long long>(i + 1), static_cast<long long>(j + 1), truncated
+      );
       ++i;
       ++j;
     } else if (j < new_lines.size() &&
                (i == old_lines.size() || lcs[i][j + 1] >= lcs[i + 1][j])) {
-      out.push_back({'+', new_lines[j], -1, static_cast<long long>(j + 1)});
+      append_diff_line(out, '+', new_lines[j], -1, static_cast<long long>(j + 1), truncated);
       ++j;
     } else {
-      out.push_back({'-', old_lines[i], static_cast<long long>(i + 1), -1});
+      append_diff_line(out, '-', old_lines[i], static_cast<long long>(i + 1), -1, truncated);
       ++i;
     }
   }
@@ -234,11 +268,17 @@ CardHistoryPage CardHistoryService::list(
   std::optional<std::string> last_consumed_oid;
   bool source_has_more = true;
   while (source_has_more) {
-    bool batch_has_more = false;
-    const auto commits = repo.history_for_paths(
-        paths, std::max(kHistoryBatchSize, limit), raw_cursor, batch_has_more
+    const auto batch = repo.history_for_paths(
+        paths, std::max(kHistoryBatchSize, limit), raw_cursor, max_scanned_commits_
     );
-    if (commits.empty()) break;
+    const auto& commits = batch.commits;
+    if (commits.empty()) {
+      if (batch.scan_limited) {
+        page.scan_limited = true;
+        page.next_cursor = batch.scan_cursor;
+      }
+      break;
+    }
 
     for (const auto& commit : commits) {
       if (!page.entries.empty() && may_group(page.entries.back(), commit)) {
@@ -246,6 +286,14 @@ CardHistoryPage CardHistoryService::list(
         entry.first_oid = commit.oid;
         entry.started_at = commit.committed_at;
         entry.parent_oids = commit.parent_oids;
+        entry.saves.insert(
+            entry.saves.begin(),
+            {.oid = commit.oid,
+             .parent_oids = commit.parent_oids,
+             .authored_at = commit.authored_at,
+             .committed_at = commit.committed_at,
+             .message = commit.message}
+        );
         ++entry.commit_count;
         last_consumed_oid = commit.oid;
         continue;
@@ -266,14 +314,36 @@ CardHistoryPage CardHistoryService::list(
       entry.kind = kind_for(commit);
       entry.commit_count = 1;
       entry.is_merge = commit.parent_oids.size() > 1;
+      entry.saves.push_back(
+          {.oid = commit.oid,
+           .parent_oids = commit.parent_oids,
+           .authored_at = commit.authored_at,
+           .committed_at = commit.committed_at,
+           .message = commit.message}
+      );
       page.entries.push_back(std::move(entry));
       last_consumed_oid = commit.oid;
     }
-    if (!source_has_more || !batch_has_more) break;
+    if (!source_has_more) break;
+    if (batch.scan_limited) {
+      page.scan_limited = true;
+      page.next_cursor = batch.scan_cursor;
+      break;
+    }
+    if (!batch.has_more) break;
     raw_cursor = last_consumed_oid;
   }
 
+  std::unordered_set<std::string> visible_entry_oids;
+  visible_entry_oids.reserve(page.entries.size());
+  for (const auto& entry : page.entries) visible_entry_oids.insert(entry.last_oid);
+
   for (auto& entry : page.entries) {
+    for (const auto& parent_oid : entry.parent_oids) {
+      if (visible_entry_oids.contains(parent_oid)) {
+        entry.visible_parent_oids.push_back(parent_oid);
+      }
+    }
     const auto before_oid = entry.parent_oids.empty()
         ? std::optional<std::string>{}
         : std::optional<std::string>{entry.parent_oids.front()};

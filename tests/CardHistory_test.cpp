@@ -13,9 +13,13 @@
 #include "privacy/ProjectPrivacy.h"
 #include "core_test_helpers.h"
 
+#include <git2.h>
+
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <fstream>
+#include <stdexcept>
 
 namespace {
 
@@ -26,6 +30,12 @@ std::filesystem::path history_temp_dir() {
   const auto path = std::filesystem::temp_directory_path() / ("holder_history_test_" + suffix);
   std::filesystem::create_directories(path);
   return path;
+}
+
+std::string read_file_bytes(const std::filesystem::path& path) {
+  std::ifstream input(path, std::ios::binary);
+  REQUIRE(input.is_open());
+  return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
 }
 
 std::string card_file(const std::string& card_id, const std::string& title, const std::string& body) {
@@ -39,6 +49,15 @@ std::string card_file(const std::string& card_id, const std::string& title, cons
   return holder::core::render_card_front_matter(card, {}, {}) + body;
 }
 
+std::string card_file_with_metadata(
+    const holder::model::Card& card,
+    const std::vector<holder::model::CardLink>& links,
+    const std::vector<holder::model::Milestone>& milestones,
+    const std::string& body
+) {
+  return holder::core::render_card_front_matter(card, links, milestones) + body;
+}
+
 void write_commit(
     holder::git::GitRepo& repo,
     const std::string& card_id,
@@ -50,6 +69,98 @@ void write_commit(
   repo.write_file(path, card_file(card_id, title, body));
   repo.stage_path(path);
   repo.commit(message);
+}
+
+void write_metadata_commit(
+    holder::git::GitRepo& repo,
+    const holder::model::Card& card,
+    const std::vector<holder::model::CardLink>& links,
+    const std::vector<holder::model::Milestone>& milestones,
+    const std::string& body,
+    const std::string& message
+) {
+  repo.write_file(card.rel_path, card_file_with_metadata(card, links, milestones, body));
+  repo.stage_path(card.rel_path);
+  repo.commit(message);
+}
+
+std::string commit_staged_at(
+    const std::filesystem::path& root,
+    const std::string& message,
+    const std::string& author_name,
+    const std::string& author_email,
+    git_time_t committed_at,
+    const std::vector<std::string>& parent_oids,
+    const char* update_ref
+) {
+  git_repository* raw = nullptr;
+  REQUIRE(git_repository_open(&raw, root.string().c_str()) == 0);
+  git_index* index = nullptr;
+  REQUIRE(git_repository_index(&index, raw) == 0);
+  git_oid tree_oid{};
+  REQUIRE(git_index_write_tree(&tree_oid, index) == 0);
+  REQUIRE(git_index_write(index) == 0);
+  git_index_free(index);
+  git_tree* tree = nullptr;
+  REQUIRE(git_tree_lookup(&tree, raw, &tree_oid) == 0);
+  git_signature* signature = nullptr;
+  REQUIRE(git_signature_new(&signature, author_name.c_str(), author_email.c_str(), committed_at, 0) == 0);
+
+  std::vector<git_commit*> parents;
+  std::vector<const git_commit*> parent_pointers;
+  for (const auto& parent_oid_text : parent_oids) {
+    git_oid parent_oid{};
+    REQUIRE(git_oid_fromstr(&parent_oid, parent_oid_text.c_str()) == 0);
+    git_commit* parent = nullptr;
+    REQUIRE(git_commit_lookup(&parent, raw, &parent_oid) == 0);
+    parents.push_back(parent);
+    parent_pointers.push_back(parent);
+  }
+
+  git_oid commit_oid{};
+  REQUIRE(git_commit_create(
+      &commit_oid,
+      raw,
+      update_ref,
+      signature,
+      signature,
+      nullptr,
+      message.c_str(),
+      tree,
+      parent_pointers.size(),
+      parent_pointers.empty() ? nullptr : parent_pointers.data()
+  ) == 0);
+  for (auto* parent : parents) git_commit_free(parent);
+  git_signature_free(signature);
+  git_tree_free(tree);
+  git_repository_free(raw);
+  return std::string(git_oid_tostr_s(&commit_oid));
+}
+
+std::string write_commit_at(
+    holder::git::GitRepo& repo,
+    const std::filesystem::path& root,
+    const std::string& card_id,
+    const std::string& title,
+    const std::string& body,
+    const std::string& message,
+    const std::string& author_name,
+    const std::string& author_email,
+    git_time_t committed_at
+) {
+  const auto path = holder::core::card_rel_path(card_id);
+  repo.write_file(path, card_file(card_id, title, body));
+  repo.stage_path(path);
+  const auto head_oid = repo.head_oid();
+  return commit_staged_at(
+      root,
+      message,
+      author_name,
+      author_email,
+      committed_at,
+      head_oid.has_value() ? std::vector<std::string>{*head_oid} : std::vector<std::string>{},
+      "HEAD"
+  );
 }
 
 void write_encrypted_commit(
@@ -96,8 +207,356 @@ TEST_CASE("Card history lists card-only commits and groups adjacent edits", "[hi
   CHECK(page.entries[0].kind == "links");
   CHECK(page.entries[1].kind == "updated");
   CHECK(page.entries[1].commit_count == 2);
+  REQUIRE(page.entries[1].saves.size() == 2);
+  CHECK(page.entries[1].saves.front().oid == page.entries[1].first_oid);
+  CHECK(page.entries[1].saves.back().oid == page.entries[1].last_oid);
+  CHECK(page.entries[1].saves.front().parent_oids.size() == 1);
   CHECK(page.entries[2].kind == "created");
   CHECK(page.entries[2].summary == "Card created");
+}
+
+TEST_CASE("Card history splits editing sessions at author and time boundaries", "[history][git]") {
+  const auto root = history_temp_dir();
+  const std::string card_id = "abcd-session-boundaries";
+  holder::git::GitRepo repo;
+  repo.open_or_init(root);
+
+  write_commit_at(repo, root, card_id, "Sessions", "One\n",
+                  "Add card Sessions", "Alice", "alice@example.test", 1'000);
+  write_commit_at(repo, root, card_id, "Sessions", "Two\n", "Update card Sessions",
+                  "Alice", "alice@example.test", 1'100);
+  write_commit_at(repo, root, card_id, "Sessions", "Three\n", "Update card Sessions",
+                  "Bob", "bob@example.test", 1'200);
+  write_commit_at(repo, root, card_id, "Sessions", "Four\n", "Update card Sessions",
+                  "Bob", "bob@example.test", 1'300);
+
+  holder::model::Project project;
+  project.project_id = "project-history";
+  project.root_path = root.string();
+  project.privacy_mode = "plain";
+  const auto author_page = holder::history::CardHistoryService().list(project, card_id);
+  REQUIRE(author_page.entries.size() == 3);
+  CHECK(author_page.entries[0].commit_count == 2);
+  CHECK(author_page.entries[0].author_name == "Bob");
+  CHECK(author_page.entries[1].commit_count == 1);
+  CHECK(author_page.entries[1].author_name == "Alice");
+
+  const auto gap_root = history_temp_dir();
+  const std::string gap_card_id = "abcd-session-gap";
+  holder::git::GitRepo gap_repo;
+  gap_repo.open_or_init(gap_root);
+  write_commit_at(gap_repo, gap_root, gap_card_id, "Gap", "One\n", "Add card Gap",
+                  "Alice", "alice@example.test", 2'000);
+  write_commit_at(gap_repo, gap_root, gap_card_id, "Gap", "Two\n", "Update card Gap",
+                  "Alice", "alice@example.test", 2'100);
+  write_commit_at(gap_repo, gap_root, gap_card_id, "Gap", "Three\n", "Update card Gap",
+                  "Alice", "alice@example.test", 2'701);
+
+  project.root_path = gap_root.string();
+  const auto gap_page = holder::history::CardHistoryService().list(project, gap_card_id);
+  REQUIRE(gap_page.entries.size() == 3);
+  CHECK(gap_page.entries[0].commit_count == 1);
+  CHECK(gap_page.entries[1].commit_count == 1);
+
+  const auto span_root = history_temp_dir();
+  const std::string span_card_id = "abcd-session-span";
+  holder::git::GitRepo span_repo;
+  span_repo.open_or_init(span_root);
+  write_commit_at(span_repo, span_root, span_card_id, "Span", "One\n", "Add card Span",
+                  "Alice", "alice@example.test", 3'000);
+  write_commit_at(span_repo, span_root, span_card_id, "Span", "Two\n", "Update card Span",
+                  "Alice", "alice@example.test", 3'100);
+  write_commit_at(span_repo, span_root, span_card_id, "Span", "Three\n", "Update card Span",
+                  "Alice", "alice@example.test", 3'700);
+  write_commit_at(span_repo, span_root, span_card_id, "Span", "Four\n", "Update card Span",
+                  "Alice", "alice@example.test", 4'300);
+  write_commit_at(span_repo, span_root, span_card_id, "Span", "Five\n", "Update card Span",
+                  "Alice", "alice@example.test", 4'900);
+  write_commit_at(span_repo, span_root, span_card_id, "Span", "Six\n", "Update card Span",
+                  "Alice", "alice@example.test", 5'500);
+
+  project.root_path = span_root.string();
+  const auto span_page = holder::history::CardHistoryService().list(project, span_card_id);
+  REQUIRE(span_page.entries.size() == 3);
+  CHECK(span_page.entries[0].commit_count == 4);
+  CHECK(span_page.entries[1].commit_count == 1);
+}
+
+TEST_CASE("Card history groups direct-parent updates at exact session time limits", "[history][git]") {
+  const auto root = history_temp_dir();
+  const std::string card_id = "abcd-session-exact-limits";
+  holder::git::GitRepo repo;
+  repo.open_or_init(root);
+  write_commit_at(repo, root, card_id, "Limits", "One\n", "Add card Limits",
+                  "Alice", "alice@example.test", 1'000);
+  write_commit_at(repo, root, card_id, "Limits", "Two\n", "Update card Limits",
+                  "Alice", "alice@example.test", 1'100);
+  write_commit_at(repo, root, card_id, "Limits", "Three\n", "Update card Limits",
+                  "Alice", "alice@example.test", 1'700);
+  write_commit_at(repo, root, card_id, "Limits", "Four\n", "Update card Limits",
+                  "Alice", "alice@example.test", 2'300);
+  write_commit_at(repo, root, card_id, "Limits", "Five\n", "Update card Limits",
+                  "Alice", "alice@example.test", 2'900);
+
+  holder::model::Project project;
+  project.project_id = "project-history";
+  project.root_path = root.string();
+  project.privacy_mode = "plain";
+  const auto page = holder::history::CardHistoryService().list(project, card_id);
+
+  REQUIRE(page.entries.size() == 2);
+  CHECK(page.entries[0].kind == "updated");
+  CHECK(page.entries[0].commit_count == 4);
+  CHECK(page.entries[0].started_at == 1'100);
+  CHECK(page.entries[0].ended_at == 2'900);
+  CHECK(page.entries[1].kind == "created");
+}
+
+TEST_CASE("Card history preserves parent order when commit clocks move backwards", "[history][git]") {
+  const auto root = history_temp_dir();
+  const std::string card_id = "abcd-clock-skew";
+  holder::git::GitRepo repo;
+  repo.open_or_init(root);
+  write_commit_at(repo, root, card_id, "Skew", "One\n", "Add card Skew",
+                  "Alice", "alice@example.test", 1'000);
+  write_commit_at(repo, root, card_id, "Skew", "Two\n", "Update card Skew",
+                  "Alice", "alice@example.test", 1'200);
+  write_commit_at(repo, root, card_id, "Skew", "Three\n", "Update card Skew",
+                  "Alice", "alice@example.test", 900);
+  const auto head_oid = repo.head_oid();
+  REQUIRE(head_oid.has_value());
+
+  holder::model::Project project;
+  project.project_id = "project-history";
+  project.root_path = root.string();
+  project.privacy_mode = "plain";
+  const auto page = holder::history::CardHistoryService().list(project, card_id);
+
+  REQUIRE(page.entries.size() == 3);
+  CHECK(page.entries[0].last_oid == *head_oid);
+  CHECK(page.entries[0].ended_at == 900);
+  CHECK(page.entries[0].parent_oids.size() == 1);
+  CHECK(page.entries[0].parent_oids.front() == page.entries[1].last_oid);
+  CHECK(page.entries[0].visible_parent_oids == page.entries[0].parent_oids);
+  CHECK(page.entries[1].ended_at == 1'200);
+  CHECK(page.entries[0].commit_count == 1);
+  CHECK(page.entries[1].commit_count == 1);
+}
+
+TEST_CASE("Card history retains both merge parents and the resulting card state", "[history][git]") {
+  const auto root = history_temp_dir();
+  const std::string card_id = "abcd-merge-history";
+  holder::git::GitRepo repo;
+  repo.open_or_init(root);
+  const auto base_oid = write_commit_at(
+      repo, root, card_id, "Merge", "Base\n", "Add card Merge",
+      "Alice", "alice@example.test", 1'000
+  );
+  const auto first_parent_oid = write_commit_at(
+      repo, root, card_id, "Merge", "Main branch\n", "Update card Merge",
+      "Alice", "alice@example.test", 1'100
+  );
+
+  const auto path = holder::core::card_rel_path(card_id);
+  repo.write_file(path, card_file(card_id, "Merge", "Other branch\n"));
+  repo.stage_path(path);
+  const auto second_parent_oid = commit_staged_at(
+      root,
+      "Update card Merge",
+      "Bob",
+      "bob@example.test",
+      1'150,
+      {base_oid},
+      nullptr
+  );
+
+  repo.write_file(path, card_file(card_id, "Merge", "Combined branches\n"));
+  repo.stage_path(path);
+  const auto merge_oid = commit_staged_at(
+      root,
+      "Merge branches for Merge",
+      "Alice",
+      "alice@example.test",
+      1'200,
+      {first_parent_oid, second_parent_oid},
+      "HEAD"
+  );
+
+  holder::model::Project project;
+  project.project_id = "project-history";
+  project.root_path = root.string();
+  project.privacy_mode = "plain";
+  holder::history::CardHistoryService service;
+  const auto page = service.list(project, card_id);
+
+  REQUIRE(page.head_oid.has_value());
+  CHECK(*page.head_oid == merge_oid);
+  REQUIRE_FALSE(page.entries.empty());
+  const auto& merge = page.entries.front();
+  CHECK(merge.last_oid == merge_oid);
+  CHECK(merge.kind == "merged");
+  CHECK(merge.is_merge);
+  REQUIRE(merge.parent_oids.size() == 2);
+  CHECK(merge.parent_oids[0] == first_parent_oid);
+  CHECK(merge.parent_oids[1] == second_parent_oid);
+  CHECK(merge.visible_parent_oids == merge.parent_oids);
+  CHECK(merge.commit_count == 1);
+
+  const auto comparison = service.compare(project, card_id, first_parent_oid, merge_oid);
+  CHECK(comparison.from.body == "Main branch\n");
+  CHECK(comparison.to.body == "Combined branches\n");
+}
+
+TEST_CASE("Card history classifies direct metadata, move, Trash, and deletion changes", "[history][git]") {
+  const auto root = history_temp_dir();
+  const std::string card_id = "abcd-semantic-history";
+  holder::git::GitRepo repo;
+  repo.open_or_init(root);
+
+  holder::model::Card card;
+  card.card_id = card_id;
+  card.project_id = "project-history";
+  card.title = "Semantics";
+  card.rel_path = holder::core::card_rel_path(card_id);
+  card.created_at = 1;
+  card.updated_at = 1;
+  write_metadata_commit(repo, card, {}, {}, "Original body\n", "Add card Semantics");
+
+  holder::model::CardLink link;
+  link.project_id = card.project_id;
+  link.from_card_id = card.card_id;
+  link.to_card_id = "efgh-related-card";
+  link.to_type = "card";
+  link.kind = "ref";
+  link.label = "Related";
+  link.created_at = 2;
+  card.updated_at = 2;
+  write_metadata_commit(repo, card, {link}, {}, "Original body\n", "Update links for Semantics");
+
+  holder::model::Milestone milestone;
+  milestone.milestone_id = "mile-semantic";
+  milestone.project_id = card.project_id;
+  milestone.card_id = card.card_id;
+  milestone.start_at = 1'000;
+  milestone.kind = "Review";
+  milestone.created_at = 3;
+  milestone.updated_at = 3;
+  card.updated_at = 3;
+  write_metadata_commit(
+      repo, card, {link}, {milestone}, "Original body\n", "Update milestones for Semantics"
+  );
+
+  card.parent_card_id = "parent-semantic";
+  card.sort_key = 1.0;
+  card.updated_at = 4;
+  const auto moved_contents = card_file_with_metadata(card, {link}, {milestone}, "Original body\n");
+  repo.write_file(card.rel_path, moved_contents);
+  repo.stage_path(card.rel_path);
+  repo.commit("Move card Semantics");
+  const auto moved_oid = repo.head_oid();
+  REQUIRE(moved_oid.has_value());
+
+  const auto trash_path = holder::core::card_trash_rel_path(card_id);
+  repo.remove_path(card.rel_path);
+  repo.write_file(trash_path, moved_contents);
+  repo.stage_path(trash_path);
+  repo.commit("Delete card Semantics");
+  const auto trashed_oid = repo.head_oid();
+  REQUIRE(trashed_oid.has_value());
+
+  repo.remove_path(trash_path);
+  repo.commit("Permanently delete card Semantics");
+  const auto deleted_oid = repo.head_oid();
+  REQUIRE(deleted_oid.has_value());
+
+  holder::model::Project project;
+  project.project_id = card.project_id;
+  project.root_path = root.string();
+  project.privacy_mode = "plain";
+  const auto page = holder::history::CardHistoryService().list(project, card_id);
+
+  REQUIRE(page.entries.size() == 6);
+  CHECK(page.entries[0].last_oid == *deleted_oid);
+  CHECK(page.entries[0].kind == "permanently_deleted");
+  CHECK(page.entries[0].summary == "Permanently deleted card");
+  CHECK(page.entries[1].last_oid == *trashed_oid);
+  CHECK(page.entries[1].kind == "deleted");
+  CHECK(page.entries[1].summary == "Moved card to Trash");
+  CHECK(page.entries[2].last_oid == *moved_oid);
+  CHECK(page.entries[2].kind == "moved");
+  CHECK(page.entries[2].summary == "Moved card");
+  CHECK(page.entries[3].kind == "milestones");
+  CHECK(page.entries[3].summary == "Changed milestones");
+  CHECK(page.entries[4].kind == "links");
+  CHECK(page.entries[4].summary == "Changed links or attachments");
+  CHECK(page.entries[5].kind == "created");
+  CHECK(page.entries[5].summary == "Card created");
+}
+
+TEST_CASE("Card history follows the same UUID through live and Trash paths", "[history][git]") {
+  const auto root = history_temp_dir();
+  const std::string card_id = "abcd-live-trash";
+  holder::git::GitRepo repo;
+  repo.open_or_init(root);
+  const auto created_oid = write_commit_at(
+      repo, root, card_id, "Trash", "Live version\n", "Add card Trash",
+      "Alice", "alice@example.test", 1'000
+  );
+
+  const auto live_path = holder::core::card_rel_path(card_id);
+  const auto trash_path = holder::core::card_trash_rel_path(card_id);
+  repo.remove_path(live_path);
+  repo.write_file(trash_path, card_file(card_id, "Trash", "Trashed version\n"));
+  repo.stage_path(trash_path);
+  const auto trashed_parent = repo.head_oid();
+  REQUIRE(trashed_parent.has_value());
+  const auto trashed_oid = commit_staged_at(
+      root,
+      "Delete card Trash",
+      "Alice",
+      "alice@example.test",
+      1'100,
+      {*trashed_parent},
+      "HEAD"
+  );
+
+  repo.remove_path(trash_path);
+  repo.write_file(live_path, card_file(card_id, "Trash", "Restored version\n"));
+  repo.stage_path(live_path);
+  const auto restored_parent = repo.head_oid();
+  REQUIRE(restored_parent.has_value());
+  const auto restored_oid = commit_staged_at(
+      root,
+      "Restore card Trash",
+      "Alice",
+      "alice@example.test",
+      1'200,
+      {*restored_parent},
+      "HEAD"
+  );
+
+  holder::model::Project project;
+  project.project_id = "project-history";
+  project.root_path = root.string();
+  project.privacy_mode = "plain";
+  holder::history::CardHistoryService service;
+  const auto page = service.list(project, card_id);
+
+  REQUIRE(page.head_oid.has_value());
+  CHECK(*page.head_oid == restored_oid);
+  REQUIRE(page.entries.size() == 3);
+  CHECK(page.entries[0].kind == "restored");
+  CHECK(page.entries[0].last_oid == restored_oid);
+  CHECK(page.entries[1].kind == "deleted");
+  CHECK(page.entries[1].last_oid == trashed_oid);
+  CHECK(page.entries[2].kind == "created");
+  CHECK(page.entries[2].last_oid == created_oid);
+
+  const auto trashed_to_restored = service.compare(project, card_id, trashed_oid, restored_oid);
+  CHECK(trashed_to_restored.from.exists);
+  CHECK(trashed_to_restored.from.body == "Trashed version\n");
+  CHECK(trashed_to_restored.to.exists);
+  CHECK(trashed_to_restored.to.body == "Restored version\n");
 }
 
 TEST_CASE("Card history compares a selected version with current HEAD", "[history][git]") {
@@ -175,6 +634,37 @@ TEST_CASE("Card history paginates using the last matching commit", "[history][gi
   CHECK_FALSE(second.next_cursor.has_value());
 }
 
+TEST_CASE("Card history bounds unrelated revision scanning with a continuation", "[history][git]") {
+  const auto root = history_temp_dir();
+  const std::string card_id = "abcd-bounded-scan";
+  holder::git::GitRepo repo;
+  repo.open_or_init(root);
+  write_commit(repo, card_id, "Bounded", "Older card version\n", "Add card Bounded");
+  for (int i = 0; i < 3; ++i) {
+    const auto path = "notes-" + std::to_string(i) + ".txt";
+    repo.write_file(path, "Unrelated revision " + std::to_string(i) + "\n");
+    repo.stage_path(path);
+    repo.commit("Update unrelated project note");
+  }
+
+  holder::model::Project project;
+  project.project_id = "project-history";
+  project.root_path = root.string();
+  project.privacy_mode = "plain";
+  holder::history::CardHistoryService service(3);
+
+  const auto first = service.list(project, card_id);
+  CHECK(first.entries.empty());
+  CHECK(first.scan_limited);
+  REQUIRE(first.next_cursor.has_value());
+
+  const auto second = service.list(project, card_id, 50, first.next_cursor);
+  REQUIRE(second.entries.size() == 1);
+  CHECK(second.entries.front().kind == "created");
+  CHECK_FALSE(second.scan_limited);
+  CHECK_FALSE(second.next_cursor.has_value());
+}
+
 TEST_CASE("Card history pagination does not split an editing session", "[history][git]") {
   const auto root = history_temp_dir();
   const std::string card_id = "abcd-session-page";
@@ -220,6 +710,30 @@ TEST_CASE("Card history bounds very large comparison output", "[history][git]") 
   CHECK(comparison.lines.size() == 5'000);
 }
 
+TEST_CASE("Card history shortens an oversized diff line", "[history][git]") {
+  const auto root = history_temp_dir();
+  const std::string card_id = "abcd-large-diff-line";
+  holder::git::GitRepo repo;
+  repo.open_or_init(root);
+  write_commit(repo, card_id, "Large line", "", "Add card Large line");
+  const auto old_oid = repo.head_oid();
+  REQUIRE(old_oid.has_value());
+  write_commit(repo, card_id, "Large line", std::string(20'000, 'x'), "Update card Large line");
+
+  holder::model::Project project;
+  project.project_id = "project-history";
+  project.root_path = root.string();
+  project.privacy_mode = "plain";
+  const auto comparison = holder::history::CardHistoryService().compare(project, card_id, old_oid);
+
+  CHECK(comparison.truncated);
+  const auto added = std::find_if(comparison.lines.begin(), comparison.lines.end(), [](const auto& line) {
+    return line.origin == '+' && line.text.find("... [line shortened]") != std::string::npos;
+  });
+  REQUIRE(added != comparison.lines.end());
+  CHECK(added->text.size() <= 16 * 1024);
+}
+
 TEST_CASE("Card history decrypts encrypted project versions", "[history][git][privacy]") {
   const auto root = history_temp_dir();
   holder::test::EnvGuard keystore_env("HOLDER_TEST_KEYSTORE_DIR", (root / "keystore").string());
@@ -258,6 +772,79 @@ TEST_CASE("Card history decrypts encrypted project versions", "[history][git][pr
   CHECK(comparison.to.body == "Second secret\n");
 }
 
+TEST_CASE("Card history fails closed for a damaged encrypted envelope", "[history][git][privacy]") {
+  const auto root = history_temp_dir();
+  holder::test::EnvGuard keystore_env("HOLDER_TEST_KEYSTORE_DIR", (root / "keystore").string());
+  const std::string card_id = "abcd-corrupt-encrypted-history";
+  holder::model::Project project;
+  project.project_id = "project-history";
+  project.root_path = (root / "repo").string();
+  project.privacy_mode = "encrypted_git";
+  project.created_at = 1;
+  project.updated_at = 1;
+  auto db = holder::test::open_db_with_schema(root / "holder.db");
+  holder::project::ProjectRepo projects(db);
+  projects.create(project);
+  project.project_key_id = holder::privacy::ensure_project_key_material(
+      projects,
+      project.project_id,
+      std::nullopt,
+      2,
+      []() { return std::string("history-corrupt-key"); }
+  );
+
+  holder::git::GitRepo repo;
+  repo.open_or_init(project.root_path);
+  write_encrypted_commit(repo, project, card_id, "Secret", "Valid secret\n", "Add card Secret");
+  const auto path = holder::core::card_rel_path(card_id);
+  // This would be a valid plaintext Holder card if History ever retried corrupt
+  // encrypted data as plaintext. Encrypted projects must reject it instead.
+  repo.write_file(path, card_file(card_id, "Secret", "Plaintext must not be read\n"));
+  repo.stage_path(path);
+  repo.commit("Update card Secret");
+
+  try {
+    (void)holder::history::CardHistoryService().list(project, card_id);
+    FAIL("Corrupt encrypted history must not be parsed as plaintext");
+  } catch (const holder::privacy::PrivacyError& error) {
+    CHECK(error.code() == holder::privacy::PrivacyErrorCode::EnvelopeInvalid);
+  }
+}
+
+TEST_CASE("Card history rejects malformed and binary historical card data", "[history][git]") {
+  const auto root = history_temp_dir();
+  const std::string card_id = "abcd-malformed-history";
+  holder::git::GitRepo repo;
+  repo.open_or_init(root);
+  write_commit(repo, card_id, "Valid", "First version\n", "Add card Valid");
+
+  holder::model::Project project;
+  project.project_id = "project-history";
+  project.root_path = root.string();
+  project.privacy_mode = "plain";
+
+  const auto path = holder::core::card_rel_path(card_id);
+  repo.write_file(path, "This is not a Holder card file\n");
+  repo.stage_path(path);
+  repo.commit("Update card Valid");
+  try {
+    (void)holder::history::CardHistoryService().list(project, card_id);
+    FAIL("Malformed historical card data must not be treated as a version");
+  } catch (const std::runtime_error& error) {
+    CHECK(std::string(error.what()) == "Historical card content is malformed");
+  }
+
+  repo.write_file(path, std::string("binary\0card", 11));
+  repo.stage_path(path);
+  repo.commit("Update card Valid");
+  try {
+    (void)holder::history::CardHistoryService().compare(project, card_id, std::nullopt);
+    FAIL("Binary historical card data must not be rendered as text");
+  } catch (const std::runtime_error& error) {
+    CHECK(std::string(error.what()) == "Historical card content is binary");
+  }
+}
+
 TEST_CASE("Card history never initializes a missing repository", "[history][git]") {
   const auto root = history_temp_dir() / "missing-project";
   holder::model::Project project;
@@ -267,4 +854,48 @@ TEST_CASE("Card history never initializes a missing repository", "[history][git]
 
   CHECK_THROWS(holder::history::CardHistoryService().list(project, "abcd-missing-card"));
   CHECK_FALSE(std::filesystem::exists(root));
+}
+
+TEST_CASE("Card history reads leave an existing repository unchanged", "[history][git]") {
+  const auto root = history_temp_dir();
+  const std::string card_id = "abcd-read-only-history";
+  holder::git::GitRepo repo;
+  repo.open_or_init(root);
+  write_commit(repo, card_id, "Read only", "First saved version\n", "Add card Read only");
+  const auto first_oid = repo.head_oid();
+  REQUIRE(first_oid.has_value());
+  write_commit(repo, card_id, "Read only", "Second saved version\n", "Update card Read only");
+  const auto head_before = repo.head_oid();
+  REQUIRE(head_before.has_value());
+
+  const auto card_path = root / holder::core::card_rel_path(card_id);
+  const auto index_path = root / ".git" / "index";
+  const auto head_path = root / ".git" / "HEAD";
+  const auto untracked_path = root / "untracked-draft.txt";
+  repo.write_file(holder::core::card_rel_path(card_id), "Unsaved working-tree draft\n");
+  {
+    std::ofstream untracked(untracked_path, std::ios::binary);
+    REQUIRE(untracked.is_open());
+    untracked << "Keep this untracked file exactly as it is.\n";
+  }
+  const auto index_before = read_file_bytes(index_path);
+  const auto head_file_before = read_file_bytes(head_path);
+  const auto card_before = read_file_bytes(card_path);
+  const auto untracked_before = read_file_bytes(untracked_path);
+
+  holder::model::Project project;
+  project.project_id = "project-history";
+  project.root_path = root.string();
+  project.privacy_mode = "plain";
+  holder::history::CardHistoryService service;
+  const auto page = service.list(project, card_id);
+  const auto comparison = service.compare(project, card_id, first_oid, head_before);
+
+  REQUIRE_FALSE(page.entries.empty());
+  CHECK(comparison.to.body == "Second saved version\n");
+  CHECK(repo.head_oid() == head_before);
+  CHECK(read_file_bytes(index_path) == index_before);
+  CHECK(read_file_bytes(head_path) == head_file_before);
+  CHECK(read_file_bytes(card_path) == card_before);
+  CHECK(read_file_bytes(untracked_path) == untracked_before);
 }

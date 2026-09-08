@@ -9,6 +9,7 @@
 #include "git/EcdsaDerSigningCredentialProvider.h"
 #include "git/GitOps.h"
 #include "git/RepoSyncMetrics.h"
+#include "history/CardHistory.h"
 #include "index/FtsIndexer.h"
 #include "index/Reindexer.h"
 #include "model/ProjectSyncState.h"
@@ -681,6 +682,53 @@ nlohmann::json milestone_with_card_title_to_json(
   const auto card = holder::card::CardRepo(db).get(milestone.card_id);
   body["card_title"] = card.has_value() ? nlohmann::json(card->title) : nlohmann::json(nullptr);
   return body;
+}
+
+nlohmann::json card_history_save_to_json(const holder::history::CardHistorySave& save) {
+  return {
+      {"oid", save.oid},
+      {"parent_oids", save.parent_oids},
+      {"authored_at", save.authored_at},
+      {"committed_at", save.committed_at},
+      {"message", save.message},
+  };
+}
+
+nlohmann::json card_history_entry_to_json(const holder::history::CardHistoryEntry& entry) {
+  nlohmann::json saves = nlohmann::json::array();
+  for (const auto& save : entry.saves) saves.push_back(card_history_save_to_json(save));
+  return {
+      {"first_oid", entry.first_oid},
+      {"last_oid", entry.last_oid},
+      {"parent_oids", entry.parent_oids},
+      {"visible_parent_oids", entry.visible_parent_oids},
+      {"author", {{"name", entry.author_name}, {"email", entry.author_email}}},
+      {"started_at", entry.started_at},
+      {"ended_at", entry.ended_at},
+      {"kind", entry.kind},
+      {"summary", entry.summary},
+      {"commit_count", entry.commit_count},
+      {"is_merge", entry.is_merge},
+      {"saves", std::move(saves)},
+  };
+}
+
+nlohmann::json card_history_version_to_json(const holder::history::CardVersion& version) {
+  return {
+      {"exists", version.exists},
+      {"oid", version.oid},
+      {"title", version.title},
+      {"body", version.body},
+  };
+}
+
+nlohmann::json card_history_diff_line_to_json(const holder::history::CardDiffLine& line) {
+  return {
+      {"origin", std::string(1, line.origin)},
+      {"text", line.text},
+      {"old_line", line.old_line < 0 ? nlohmann::json(nullptr) : nlohmann::json(line.old_line)},
+      {"new_line", line.new_line < 0 ? nlohmann::json(nullptr) : nlohmann::json(line.new_line)},
+  };
 }
 
 nlohmann::json project_sync_to_json(const std::optional<holder::model::ProjectSyncState>& sync) {
@@ -2818,6 +2866,187 @@ int holder_ensure_default_project(
     auto* out = duplicate_string(
         created.has_value() ? project_to_json(created.value()).dump() : std::string("null")
     );
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+    }
+
+    *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
+  }  // LCOV_EXCL_LINE
+}
+
+int holder_card_history_list(
+    holder_context* context,
+    const char* project_id,
+    const char* card_id,
+    const char* cursor_oid,
+    int limit,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (project_id == nullptr || project_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "project_id must not be empty");
+  }
+  if (card_id == nullptr || card_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "card_id must not be empty");
+  }
+  if (limit <= 0) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "limit must be positive");
+  }
+
+  try {
+    holder::project::ProjectRepo project_repo(context->db);
+    const auto project = project_repo.get(project_id);
+    if (!project.has_value()) {
+      return set_error(out_error, HOLDER_ERROR_RUNTIME, "project not found: " + std::string(project_id));
+    }
+
+    const std::optional<std::string> cursor = (cursor_oid != nullptr && cursor_oid[0] != '\0')
+        ? std::optional<std::string>{cursor_oid}
+        : std::optional<std::string>{};
+
+    holder::history::CardHistoryService history;
+    const auto page = history.list(*project, card_id, static_cast<std::size_t>(limit), cursor);
+
+    nlohmann::json entries = nlohmann::json::array();
+    for (const auto& entry : page.entries) entries.push_back(card_history_entry_to_json(entry));
+    nlohmann::json body = {
+        {"head_oid", optional_json(page.head_oid)},
+        {"entries", std::move(entries)},
+        {"next_cursor", optional_json(page.next_cursor)},
+        {"scan_limited", page.scan_limited},
+    };
+
+    auto* out = duplicate_string(body.dump());
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+    }
+
+    *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
+  }  // LCOV_EXCL_LINE
+}
+
+int holder_card_history_compare(
+    holder_context* context,
+    const char* project_id,
+    const char* card_id,
+    const char* from_oid,
+    const char* to_oid,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (project_id == nullptr || project_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "project_id must not be empty");
+  }
+  if (card_id == nullptr || card_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "card_id must not be empty");
+  }
+  if (to_oid == nullptr || to_oid[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "to_oid must not be empty");
+  }
+
+  try {
+    holder::project::ProjectRepo project_repo(context->db);
+    const auto project = project_repo.get(project_id);
+    if (!project.has_value()) {
+      return set_error(out_error, HOLDER_ERROR_RUNTIME, "project not found: " + std::string(project_id));
+    }
+
+    const std::optional<std::string> from = (from_oid != nullptr && from_oid[0] != '\0')
+        ? std::optional<std::string>{from_oid}
+        : std::optional<std::string>{};
+
+    holder::history::CardHistoryService history;
+    const auto comparison =
+        history.compare(*project, card_id, from, std::optional<std::string>{to_oid});
+
+    nlohmann::json lines = nlohmann::json::array();
+    for (const auto& line : comparison.lines) lines.push_back(card_history_diff_line_to_json(line));
+    nlohmann::json body = {
+        {"from", card_history_version_to_json(comparison.from)},
+        {"to", card_history_version_to_json(comparison.to)},
+        {"summary", comparison.summary},
+        {"lines", std::move(lines)},
+        {"truncated", comparison.truncated},
+    };
+
+    auto* out = duplicate_string(body.dump());
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+    }
+
+    *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
+  }  // LCOV_EXCL_LINE
+}
+
+int holder_card_history_restore(
+    holder_context* context,
+    const char* card_id,
+    const char* historical_oid,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (card_id == nullptr || card_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "card_id must not be empty");
+  }
+  if (historical_oid == nullptr || historical_oid[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "historical_oid must not be empty");
+  }
+
+  try {
+    holder::card::CardStore store(context->db, &context->fts);
+    store.restore_version(card_id, historical_oid, now_epoch_seconds());
+
+    holder::card::CardRepo repo(context->db);
+    const auto restored = repo.get(card_id);
+    auto* out = duplicate_string(card_to_json(restored.value()).dump());
     if (out == nullptr) {
       return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
     }
