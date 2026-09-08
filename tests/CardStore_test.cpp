@@ -1649,6 +1649,52 @@ TEST_CASE("CardStore update_milestones exercises error, encrypted, and no-op bra
   REQUIRE(count_commits(enc.root_path) == before_enc + 1);
 }
 
+TEST_CASE("CardStore restores historical live and Trash lifecycle snapshots", "[cardstore][history]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  const auto project_root = dir / "project_repo";
+  create_project(db, "proj-restore-lifecycle", project_root.string());
+  holder::index::FtsIndexer fts(db);
+  holder::card::CardStore store(db, &fts);
+
+  holder::model::Card card;
+  card.card_id = "restlife";
+  card.project_id = "proj-restore-lifecycle";
+  card.title = "Original name";
+  card.created_at = 1;
+  card.updated_at = 1;
+  store.create(card, "original body");
+  holder::git::GitRepo git;
+  git.open_existing(project_root);
+  const auto live_oid = git.head_oid();
+  REQUIRE(live_oid.has_value());
+
+  store.update_content(card.card_id, "renamed body", std::string("Renamed card"), 2);
+  store.trash(card.card_id, 3);
+  git.open_existing(project_root);
+  const auto trash_oid = git.head_oid();
+  REQUIRE(trash_oid.has_value());
+
+  store.restore_version(card.card_id, *live_oid, 10);
+  const auto live = store.get(card.card_id);
+  REQUIRE(live.has_value());
+  CHECK(live->title == "Original name");
+  CHECK_FALSE(live->deleted_at.has_value());
+  REQUIRE(store.get_content(*live).value() == "original body");
+  CHECK(std::filesystem::exists(project_root / holder::core::card_rel_path(card.card_id)));
+  CHECK_FALSE(std::filesystem::exists(project_root / holder::core::card_trash_rel_path(card.card_id)));
+
+  store.restore_version(card.card_id, *trash_oid, 11);
+  const auto trashed = store.get(card.card_id);
+  REQUIRE(trashed.has_value());
+  CHECK(trashed->title == "Renamed card");
+  CHECK(trashed->deleted_at.has_value());
+  CHECK_FALSE(std::filesystem::exists(project_root / holder::core::card_rel_path(card.card_id)));
+  CHECK(std::filesystem::exists(project_root / holder::core::card_trash_rel_path(card.card_id)));
+}
+
 TEST_CASE("CardStore keeps milestones in sync across trash/restore/hard_delete", "[cardstore]") {
   const auto dir = make_temp_dir();
   holder::platform::Db db;

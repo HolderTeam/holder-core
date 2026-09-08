@@ -581,9 +581,10 @@ void CardStore::restore_version(
   holder::git::GitRepo history_repo;
   history_repo.open_existing(project.root_path);
   auto raw = history_repo.read_blob_at(historical_oid, expected);
-  if (!raw.has_value()) raw = history_repo.read_blob_at(
-      historical_oid, holder::core::card_trash_rel_path(card_id)
-  );
+  const bool historical_is_trash = !raw.has_value();
+  if (!raw.has_value()) {
+    raw = history_repo.read_blob_at(historical_oid, holder::core::card_trash_rel_path(card_id));
+  }
   if (!raw.has_value()) throw std::runtime_error("historical card content is missing");
 
   const auto plain = decode_card_blob(project, *raw);
@@ -602,7 +603,8 @@ void CardStore::restore_version(
   restored.rel_path = expected;
   restored.created_at = current.created_at;
   restored.updated_at = updated_at;
-  if (restored.deleted_at.has_value()) restored.deleted_at = updated_at;
+  restored.deleted_at = historical_is_trash ? std::optional<long long>{updated_at}
+                                           : std::optional<long long>{};
   for (auto& link : parsed.links) {
     link.project_id = restored.project_id;
     link.from_card_id = restored.card_id;
@@ -629,7 +631,10 @@ void CardStore::restore_version(
       : restored_plain;
   git_->write_file(target_rel, restored_raw);
   git_->stage_path(target_rel);
-  if (fs_->exists(git_->repo_dir() / other_rel)) git_->remove_path(other_rel);
+  if (fs_->exists(git_->repo_dir() / other_rel)) {
+    fs_->remove(git_->repo_dir() / other_rel);
+    git_->remove_path(other_rel);
+  }
   assert_project_staged_blobs_safe(project, {target_rel});
 
   holder::platform::Tx tx(db_);
