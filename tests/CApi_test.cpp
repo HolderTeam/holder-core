@@ -2207,6 +2207,220 @@ TEST_CASE(
   holder_context_destroy(context);
 }
 
+TEST_CASE(
+    "C API card_history_list/compare round-trip a card's grouped commits and comparisons",
+    "[capi]"
+) {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_card_create(context, "project-1", "Original title", "Original body", nullptr, &json, &error) ==
+      HOLDER_OK
+  );
+  const std::string card_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(
+      holder_card_update_content(context, card_id.c_str(), "First revision", nullptr, &json, &error) ==
+      HOLDER_OK
+  );
+  holder_string_free(json);
+  json = nullptr;
+  REQUIRE(
+      holder_card_update_content(context, card_id.c_str(), "Second revision", nullptr, &json, &error) ==
+      HOLDER_OK
+  );
+  holder_string_free(json);
+
+  // Back-to-back same-author updates group into one editing-session entry; card creation
+  // never groups with it, so exactly two entries -- newest first -- come back.
+  json = nullptr;
+  REQUIRE(
+      holder_card_history_list(context, "project-1", card_id.c_str(), nullptr, 50, &json, &error) ==
+      HOLDER_OK
+  );
+  const auto page = nlohmann::json::parse(json);
+  REQUIRE(page["head_oid"].is_string());
+  const std::string head_oid = page["head_oid"].get<std::string>();
+  REQUIRE(page["entries"].size() == 2);
+  REQUIRE(page["entries"][0]["kind"] == "updated");
+  REQUIRE(page["entries"][0]["commit_count"] == 2);
+  REQUIRE(page["entries"][0]["last_oid"] == head_oid);
+  REQUIRE(page["entries"][0]["saves"].size() == 2);
+  REQUIRE(page["entries"][1]["kind"] == "created");
+  REQUIRE(page["entries"][1]["commit_count"] == 1);
+  REQUIRE(page["next_cursor"].is_null());
+  REQUIRE(page["scan_limited"] == false);
+  const std::string created_oid = page["entries"][1]["last_oid"].get<std::string>();
+  holder_string_free(json);
+
+  // "This change" for the grouped update entry: no explicit from, captured to = its own
+  // last save -- the pre-creation state (from) does not exist for card creation, but here
+  // from is simply omitted by the caller (matching the desktop "This change" default).
+  json = nullptr;
+  REQUIRE(
+      holder_card_history_compare(
+          context, "project-1", card_id.c_str(), created_oid.c_str(), head_oid.c_str(), &json, &error
+      ) == HOLDER_OK
+  );
+  auto comparison = nlohmann::json::parse(json);
+  REQUIRE(comparison["from"]["exists"] == true);
+  REQUIRE(comparison["from"]["body"] == "Original body");
+  REQUIRE(comparison["to"]["exists"] == true);
+  REQUIRE(comparison["to"]["body"] == "Second revision");
+  REQUIRE(comparison["truncated"] == false);
+  holder_string_free(json);
+
+  // The card's creation event has no earlier version: from is NULL/empty, and the
+  // returned "from" reports exists=false with an empty oid.
+  json = nullptr;
+  REQUIRE(
+      holder_card_history_compare(
+          context, "project-1", card_id.c_str(), nullptr, created_oid.c_str(), &json, &error
+      ) == HOLDER_OK
+  );
+  comparison = nlohmann::json::parse(json);
+  REQUIRE(comparison["from"]["exists"] == false);
+  REQUIRE(comparison["from"]["oid"] == "");
+  REQUIRE(comparison["to"]["title"] == "Original title");
+  REQUIRE(comparison["to"]["body"] == "Original body");
+  holder_string_free(json);
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API card_history_restore restores a historical snapshot through the ordinary write path", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_card_create(context, "project-1", "Knife care", "Sharpen at 15 degrees", nullptr, &json, &error) ==
+      HOLDER_OK
+  );
+  const std::string card_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(
+      holder_card_history_list(context, "project-1", card_id.c_str(), nullptr, 50, &json, &error) == HOLDER_OK
+  );
+  const std::string original_oid =
+      nlohmann::json::parse(json)["entries"][0]["last_oid"].get<std::string>();
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(
+      holder_card_update_content(
+          context, card_id.c_str(), "Sharpen at 15-20 degrees", "Knife care (updated)", &json, &error
+      ) == HOLDER_OK
+  );
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(holder_card_history_restore(context, card_id.c_str(), original_oid.c_str(), &json, &error) == HOLDER_OK);
+  const auto restored = nlohmann::json::parse(json);
+  REQUIRE(restored["card_id"] == card_id);
+  REQUIRE(restored["title"] == "Knife care");
+  holder_string_free(json);
+
+  char* content = nullptr;
+  REQUIRE(holder_card_get_content(context, card_id.c_str(), &content, &error) == HOLDER_OK);
+  REQUIRE(std::string(content) == "Sharpen at 15 degrees");
+  holder_string_free(content);
+
+  // Restoration is a new forward commit, not history rewriting: the pre-restore edit
+  // remains a reachable entry in the same history, now with one more entry after it.
+  json = nullptr;
+  REQUIRE(
+      holder_card_history_list(context, "project-1", card_id.c_str(), nullptr, 50, &json, &error) == HOLDER_OK
+  );
+  const auto page = nlohmann::json::parse(json);
+  REQUIRE(page["entries"].size() == 3);
+  REQUIRE(page["entries"][0]["kind"] == "restored");
+  holder_string_free(json);
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API reports invalid card history arguments", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  error = nullptr;
+  REQUIRE(
+      holder_card_history_list(context, "", "card-1", nullptr, 50, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+
+  error = nullptr;
+  REQUIRE(
+      holder_card_history_list(context, "project-1", "", nullptr, 50, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+
+  error = nullptr;
+  REQUIRE(
+      holder_card_history_list(context, "project-1", "card-1", nullptr, 0, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+
+  error = nullptr;
+  REQUIRE(
+      holder_card_history_list(context, "missing-project", "card-1", nullptr, 50, &json, &error) ==
+      HOLDER_ERROR_RUNTIME
+  );
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+
+  error = nullptr;
+  REQUIRE(
+      holder_card_history_compare(context, "project-1", "card-1", nullptr, "", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+
+  error = nullptr;
+  REQUIRE(
+      holder_card_history_restore(context, "", "0123456789012345678901234567890123456789", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+
+  error = nullptr;
+  REQUIRE(
+      holder_card_history_restore(context, "card-1", "", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+
+  holder_context_destroy(context);
+}
+
 TEST_CASE("C API indexes cards for search on create, update, and delete", "[capi]") {
   const auto data_dir = holder::test::make_temp_dir();
   const auto schema = read_schema_sql();
