@@ -405,6 +405,29 @@ void CardRepo::restore(const std::string& card_id, long long updated_at) {
   }
 }
 
+void CardRepo::restore_snapshot(const holder::model::Card& card) {
+  static constexpr const char* SQL =
+      "UPDATE cards SET title = ?, parent_card_id = ?, sort_key = ?, updated_at = ?, "
+      "deleted_at = ? WHERE card_id = ?;";
+  sqlite3_stmt* stmt = nullptr;
+  if (sqlite3_prepare_v2(db_.handle(), SQL, -1, &stmt, nullptr) != SQLITE_OK) {
+    throw_sqlite(db_.handle(), "prepare restore card snapshot failed");
+  }
+
+  bind_text(stmt, 1, card.title);
+  bind_text_optional(stmt, 2, card.parent_card_id);
+  bind_double(stmt, 3, card.sort_key);
+  bind_int64(stmt, 4, card.updated_at);
+  bind_int64_optional(stmt, 5, card.deleted_at);
+  bind_text(stmt, 6, card.card_id);
+
+  const int rc = sqlite3_step(stmt);
+  sqlite3_finalize(stmt);
+  if (rc != SQLITE_DONE) {
+    throw_sqlite(db_.handle(), "restore card snapshot failed");
+  }
+}
+
 void CardRepo::remove(const std::string& card_id) {
   static constexpr const char* SQL = "DELETE FROM cards WHERE card_id = ?;";
 

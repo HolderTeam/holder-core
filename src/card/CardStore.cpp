@@ -5,6 +5,7 @@
 #include "card/LinkRepo.h"
 #include "card/TagExtractor.h"
 #include "git/GitOps.h"
+#include "git/GitRepo.h"
 #include "platform/Fs.h"
 #include "platform/Tx.h"
 #include "privacy/ProjectPrivacy.h"
@@ -558,6 +559,98 @@ void CardStore::restore(const std::string& card_id, long long updated_at) {
   milestone_repo_.replace_for_card(card.project_id, card_id, parsed.milestones);
   git_->remove_path(trash_rel);
   git_->commit("Restore card " + card.title);
+}
+
+void CardStore::restore_version(
+    const std::string& card_id,
+    const std::string& historical_oid,
+    long long updated_at
+) {
+  if (historical_oid.empty()) throw std::invalid_argument("historical_oid is required");
+  const auto current_opt = card_repo_.get(card_id);
+  if (!current_opt.has_value()) {
+    throw std::runtime_error("card not found: " + card_id);
+  }
+  const auto& current = current_opt.value();
+  const auto project = require_project(current.project_id);
+  const std::string expected = holder::core::card_rel_path(card_id);
+  if (current.rel_path != expected) {
+    throw std::runtime_error("card rel_path does not match card_id");
+  }
+
+  holder::git::GitRepo history_repo;
+  history_repo.open_existing(project.root_path);
+  auto raw = history_repo.read_blob_at(historical_oid, expected);
+  if (!raw.has_value()) raw = history_repo.read_blob_at(
+      historical_oid, holder::core::card_trash_rel_path(card_id)
+  );
+  if (!raw.has_value()) throw std::runtime_error("historical card content is missing");
+
+  const auto plain = decode_card_blob(project, *raw);
+  if (plain.find('\0') != std::string::npos) {
+    throw std::runtime_error("historical card content is binary");
+  }
+  auto parsed = holder::core::parse_card_file(plain);
+  if (!parsed.has_front_matter || parsed.card.card_id != card_id ||
+      parsed.card.project_id != current.project_id) {
+    throw std::runtime_error("historical card content is malformed");
+  }
+
+  auto restored = parsed.card;
+  restored.card_id = current.card_id;
+  restored.project_id = current.project_id;
+  restored.rel_path = expected;
+  restored.created_at = current.created_at;
+  restored.updated_at = updated_at;
+  if (restored.deleted_at.has_value()) restored.deleted_at = updated_at;
+  for (auto& link : parsed.links) {
+    link.project_id = restored.project_id;
+    link.from_card_id = restored.card_id;
+  }
+  for (auto& milestone : parsed.milestones) {
+    milestone.project_id = restored.project_id;
+    milestone.card_id = restored.card_id;
+    milestone.updated_at = updated_at;
+  }
+
+  const auto target_rel = restored.deleted_at.has_value()
+      ? holder::core::card_trash_rel_path(card_id)
+      : expected;
+  const auto other_rel = restored.deleted_at.has_value()
+      ? expected
+      : holder::core::card_trash_rel_path(card_id);
+  const auto restored_plain = holder::core::render_card_front_matter(
+      restored, parsed.links, parsed.milestones
+  ) + parsed.body;
+  const auto restored_raw = project.privacy_mode == "encrypted_git"
+      ? holder::privacy::encrypt_project_blob(
+            project.project_id, require_project_key_id(project), restored_plain
+        )
+      : restored_plain;
+  git_->write_file(target_rel, restored_raw);
+  git_->stage_path(target_rel);
+  if (fs_->exists(git_->repo_dir() / other_rel)) git_->remove_path(other_rel);
+  assert_project_staged_blobs_safe(project, {target_rel});
+
+  holder::platform::Tx tx(db_);
+  card_repo_.restore_snapshot(restored);
+  link_repo_.delete_links_from(restored.project_id, restored.card_id);
+  if (!parsed.links.empty()) {
+    link_repo_.upsert_links(restored.project_id, restored.card_id, parsed.links);
+  }
+  milestone_repo_.replace_for_card(restored.project_id, restored.card_id, parsed.milestones);
+  tag_repo_.set_tags_for_card(
+      restored.project_id, restored.card_id, holder::core::extract_tags(parsed.body), updated_at
+  );
+  if (fts_) {
+    if (restored.deleted_at.has_value()) {
+      fts_->delete_card(restored.card_id);
+    } else {
+      fts_->upsert_card(restored.card_id, restored.project_id, restored.title, parsed.body);
+    }
+  }
+  tx.commit();
+  git_->commit("Restore card " + restored.title);
 }
 
 void CardStore::hard_delete(const std::string& card_id) {

@@ -1423,6 +1423,94 @@ TEST_CASE("CardStore trash/restore/hard_delete and get_content guards", "[cardst
   REQUIRE_THROWS((void)store.get_content(no_project));
 }
 
+TEST_CASE("CardStore restores a historical card snapshot as a new commit", "[cardstore][history]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  const auto project_root = dir / "project_repo";
+  create_project(db, "proj-restore-version", project_root.string());
+
+  holder::index::FtsIndexer fts(db);
+  holder::card::CardStore store(db, &fts);
+  holder::model::Card card;
+  card.card_id = "restore01";
+  card.project_id = "proj-restore-version";
+  card.title = "Original title";
+  card.created_at = 1;
+  card.updated_at = 1;
+  store.create(card, "# Original\n#old\n");
+
+  holder::git::GitRepo repo;
+  repo.open_existing(project_root);
+  const auto historical_oid = repo.head_oid();
+  REQUIRE(historical_oid.has_value());
+  store.update_content(card.card_id, "# Current\n#new\n", std::string("Current title"), 2);
+  const int commits_before_restore = count_commits(project_root);
+
+  store.restore_version(card.card_id, *historical_oid, 50);
+
+  const auto restored = store.get(card.card_id);
+  REQUIRE(restored.has_value());
+  CHECK(restored->title == "Original title");
+  CHECK(restored->created_at == 1);
+  CHECK(restored->updated_at == 50);
+  CHECK_FALSE(restored->deleted_at.has_value());
+  REQUIRE(store.get_content(*restored).value() == "# Original\n#old\n");
+  CHECK(count_commits(project_root) == commits_before_restore + 1);
+  repo.open_existing(project_root);
+  CHECK(repo.head_oid() != historical_oid);
+}
+
+TEST_CASE("CardStore restores an encrypted historical card snapshot", "[cardstore][history]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  holder::project::ProjectRepo project_repo(db);
+  holder::model::Project project;
+  project.project_id = "proj-encrypted-restore";
+  project.name = "Encrypted restore";
+  project.root_path = (dir / "project_repo").string();
+  project.privacy_mode = "encrypted_git";
+  project.created_at = 1;
+  project.updated_at = 1;
+  project_repo.create(project);
+  holder::test::EnvGuard keystore_env("HOLDER_TEST_KEYSTORE_DIR", (dir / "keystore").string());
+  holder::git::RealGitOps bootstrap_git;
+  holder::privacy::ensure_encrypted_project_ready(
+      bootstrap_git, project_repo, project.project_id, project.root_path, std::nullopt, 2,
+      []() { return std::string("key-history-restore"); }
+  );
+
+  holder::index::FtsIndexer fts(db);
+  holder::card::CardStore store(db, &fts);
+  holder::model::Card card;
+  card.card_id = "encrest01";
+  card.project_id = project.project_id;
+  card.title = "Encrypted original";
+  card.created_at = 1;
+  card.updated_at = 1;
+  store.create(card, "original encrypted body");
+  holder::git::GitRepo repo;
+  repo.open_existing(project.root_path);
+  const auto historical_oid = repo.head_oid();
+  REQUIRE(historical_oid.has_value());
+  store.update_content(card.card_id, "changed encrypted body", std::nullopt, 2);
+
+  store.restore_version(card.card_id, *historical_oid, 50);
+
+  const auto restored = store.get(card.card_id);
+  REQUIRE(restored.has_value());
+  CHECK(restored->title == "Encrypted original");
+  CHECK(restored->updated_at == 50);
+  REQUIRE(store.get_content(*restored).value() == "original encrypted body");
+  const auto raw = read_file(
+      std::filesystem::path(project.root_path) / holder::core::card_rel_path(card.card_id)
+  );
+  CHECK(raw.find("original encrypted body") == std::string::npos);
+}
+
 TEST_CASE("CardStore keeps card_tags in sync across create/update/trash/restore/hard_delete", "[cardstore]") {
   const auto dir = make_temp_dir();
   holder::platform::Db db;

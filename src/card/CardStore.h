@@ -84,6 +84,13 @@ class CardStore {
   void update_milestones(const std::string& card_id, long long updated_at);
   void trash(const std::string& card_id, long long deleted_at);
   void restore(const std::string& card_id, long long updated_at);
+  // Restores the card snapshot at historical_oid through the ordinary CardStore write path.
+  // It never checks out or rewrites Git history; the result is a new Restore card commit.
+  void restore_version(
+      const std::string& card_id,
+      const std::string& historical_oid,
+      long long updated_at
+  );
   void hard_delete(const std::string& card_id);
   std::optional<holder::model::Card> get(const std::string& card_id) const;
   std::optional<std::string> get_content(const holder::model::Card& card);
