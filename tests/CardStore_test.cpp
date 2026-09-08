@@ -8,6 +8,7 @@
 #include "card/CardPaths.h"
 #include "card/CardRepo.h"
 #include "card/CardStore.h"
+#include "card/LinkRepo.h"
 #include "card/MilestoneRepo.h"
 #include "card/TagRepo.h"
 #include "git/GitOps.h"
@@ -15,6 +16,7 @@
 #include "core_test_helpers.h"
 #include "index/FtsIndexer.h"
 #include "model/Card.h"
+#include "model/CardLink.h"
 #include "model/Project.h"
 #include "platform/Db.h"
 #include "privacy/ProjectPrivacy.h"
@@ -1658,6 +1660,8 @@ TEST_CASE("CardStore restores historical live and Trash lifecycle snapshots", "[
   create_project(db, "proj-restore-lifecycle", project_root.string());
   holder::index::FtsIndexer fts(db);
   holder::card::CardStore store(db, &fts);
+  holder::card::LinkRepo links(db);
+  holder::card::MilestoneRepo milestones(db);
 
   holder::model::Card card;
   card.card_id = "restlife";
@@ -1666,13 +1670,50 @@ TEST_CASE("CardStore restores historical live and Trash lifecycle snapshots", "[
   card.created_at = 1;
   card.updated_at = 1;
   store.create(card, "original body");
+
+  holder::model::CardLink original_link;
+  original_link.project_id = card.project_id;
+  original_link.from_card_id = card.card_id;
+  original_link.to_card_id = "original-target";
+  original_link.to_type = "card";
+  original_link.kind = "wiki";
+  original_link.label = "Original link";
+  original_link.created_at = 1;
+  links.upsert_links(card.project_id, card.card_id, {original_link});
+  store.update_links(card.card_id, 2);
+
+  auto original_milestone = make_milestone_for("original-milestone", card.project_id, card.card_id);
+  original_milestone.end_at = 200;
+  original_milestone.kind = "Review";
+  original_milestone.description = "Original milestone";
+  milestones.replace_for_card(card.project_id, card.card_id, {original_milestone});
+  store.update_milestones(card.card_id, 3);
+
   holder::git::GitRepo git;
   git.open_existing(project_root);
   const auto live_oid = git.head_oid();
   REQUIRE(live_oid.has_value());
 
-  store.update_content(card.card_id, "renamed body", std::string("Renamed card"), 2);
-  store.trash(card.card_id, 3);
+  holder::model::CardLink current_link;
+  current_link.project_id = card.project_id;
+  current_link.from_card_id = card.card_id;
+  current_link.to_card_id = "current-target";
+  current_link.to_type = "resource";
+  current_link.kind = "ref";
+  current_link.label = "Current link";
+  current_link.created_at = 4;
+  links.delete_links_from(card.project_id, card.card_id);
+  links.upsert_links(card.project_id, card.card_id, {current_link});
+  store.update_links(card.card_id, 4);
+
+  auto current_milestone = make_milestone_for("current-milestone", card.project_id, card.card_id);
+  current_milestone.start_at = 300;
+  current_milestone.kind = "Current";
+  milestones.replace_for_card(card.project_id, card.card_id, {current_milestone});
+  store.update_milestones(card.card_id, 5);
+
+  store.update_content(card.card_id, "renamed body", std::string("Renamed card"), 6);
+  store.trash(card.card_id, 7);
   git.open_existing(project_root);
   const auto trash_oid = git.head_oid();
   REQUIRE(trash_oid.has_value());
@@ -1683,6 +1724,18 @@ TEST_CASE("CardStore restores historical live and Trash lifecycle snapshots", "[
   CHECK(live->title == "Original name");
   CHECK_FALSE(live->deleted_at.has_value());
   REQUIRE(store.get_content(*live).value() == "original body");
+  const auto restored_links = links.list_outgoing(card.project_id, card.card_id);
+  REQUIRE(restored_links.size() == 1);
+  CHECK(restored_links[0].to_card_id == "original-target");
+  CHECK(restored_links[0].to_type == "card");
+  CHECK(restored_links[0].kind == "wiki");
+  CHECK(restored_links[0].label == std::optional<std::string>("Original link"));
+  const auto restored_milestones = milestones.list_for_card(card.project_id, card.card_id);
+  REQUIRE(restored_milestones.size() == 1);
+  CHECK(restored_milestones[0].milestone_id == "original-milestone");
+  CHECK(restored_milestones[0].end_at == std::optional<long long>(200));
+  CHECK(restored_milestones[0].kind == std::optional<std::string>("Review"));
+  CHECK(restored_milestones[0].description == std::optional<std::string>("Original milestone"));
   CHECK(std::filesystem::exists(project_root / holder::core::card_rel_path(card.card_id)));
   CHECK_FALSE(std::filesystem::exists(project_root / holder::core::card_trash_rel_path(card.card_id)));
 
