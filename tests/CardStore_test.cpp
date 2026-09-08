@@ -1513,6 +1513,63 @@ TEST_CASE("CardStore restores an encrypted historical card snapshot", "[cardstor
   CHECK(raw.find("original encrypted body") == std::string::npos);
 }
 
+TEST_CASE("CardStore leaves the current version untouched when historical metadata restore fails", "[cardstore][history]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  const auto project_root = dir / "project_repo";
+  create_project(db, "proj-restore-rollback", project_root.string());
+
+  holder::index::FtsIndexer fts(db);
+  holder::card::CardStore store(db, &fts);
+  holder::card::LinkRepo links(db);
+  holder::model::Card card;
+  card.card_id = "rollback01";
+  card.project_id = "proj-restore-rollback";
+  card.title = "Historical title";
+  card.created_at = 1;
+  card.updated_at = 1;
+  store.create(card, "historical body");
+
+  holder::model::CardLink historical_link;
+  historical_link.project_id = card.project_id;
+  historical_link.from_card_id = card.card_id;
+  historical_link.to_card_id = "linked-card";
+  historical_link.to_type = "card";
+  historical_link.kind = "wiki";
+  historical_link.created_at = 1;
+  links.upsert_links(card.project_id, card.card_id, {historical_link});
+  store.update_links(card.card_id, 2);
+
+  holder::git::GitRepo repo;
+  repo.open_existing(project_root);
+  const auto historical_oid = repo.head_oid();
+  REQUIRE(historical_oid.has_value());
+  store.update_content(card.card_id, "current body", std::string("Current title"), 3);
+  repo.open_existing(project_root);
+  const auto head_before = repo.head_oid();
+  REQUIRE(head_before.has_value());
+  const auto current_raw = read_file(project_root / holder::core::card_rel_path(card.card_id));
+
+  db.exec("CREATE TRIGGER block_history_restore_link "
+          "BEFORE INSERT ON card_links "
+          "BEGIN SELECT RAISE(ABORT, 'blocked historical link'); END;");
+
+  REQUIRE_THROWS(store.restore_version(card.card_id, *historical_oid, 50));
+
+  const auto current = store.get(card.card_id);
+  REQUIRE(current.has_value());
+  CHECK(current->title == "Current title");
+  REQUIRE(store.get_content(*current).value() == "current body");
+  CHECK(read_file(project_root / holder::core::card_rel_path(card.card_id)) == current_raw);
+  repo.open_existing(project_root);
+  CHECK(repo.head_oid() == head_before);
+  const auto current_links = links.list_outgoing(card.project_id, card.card_id);
+  REQUIRE(current_links.size() == 1);
+  CHECK(current_links[0].to_card_id == "linked-card");
+}
+
 TEST_CASE("CardStore keeps card_tags in sync across create/update/trash/restore/hard_delete", "[cardstore]") {
   const auto dir = make_temp_dir();
   holder::platform::Db db;

@@ -629,14 +629,10 @@ void CardStore::restore_version(
             project.project_id, require_project_key_id(project), restored_plain
         )
       : restored_plain;
-  git_->write_file(target_rel, restored_raw);
-  git_->stage_path(target_rel);
-  if (fs_->exists(git_->repo_dir() / other_rel)) {
-    fs_->remove(git_->repo_dir() / other_rel);
-    git_->remove_path(other_rel);
-  }
-  assert_project_staged_blobs_safe(project, {target_rel});
 
+  // Make every database write fail before the working tree or index changes. If any
+  // repository update rejects the historical metadata, the transaction rolls back
+  // and the card remains at its current version.
   holder::platform::Tx tx(db_);
   card_repo_.restore_snapshot(restored);
   link_repo_.delete_links_from(restored.project_id, restored.card_id);
@@ -654,6 +650,14 @@ void CardStore::restore_version(
       fts_->upsert_card(restored.card_id, restored.project_id, restored.title, parsed.body);
     }
   }
+
+  git_->write_file(target_rel, restored_raw);
+  git_->stage_path(target_rel);
+  if (fs_->exists(git_->repo_dir() / other_rel)) {
+    fs_->remove(git_->repo_dir() / other_rel);
+    git_->remove_path(other_rel);
+  }
+  assert_project_staged_blobs_safe(project, {target_rel});
   tx.commit();
   git_->commit("Restore card " + restored.title);
 }
