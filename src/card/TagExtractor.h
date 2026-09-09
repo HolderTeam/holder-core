@@ -29,4 +29,13 @@ struct TagOccurrence {
 // The same Markdown/code exclusions and token rules as extract_tags() apply.
 std::vector<TagOccurrence> extract_tag_occurrences(const std::string& markdown_body);
 
+// True if `tag` (without a leading '#') would be recognized by extract_tags as a valid tag
+// body -- the same character class and hex-color exclusion, applied to a standalone candidate
+// rather than scanned out of Markdown text. Empty strings are never valid.
+bool is_valid_tag(const std::string& tag);
+
+// Lowercases `tag` the same way extract_tags canonicalizes every tag it finds, so a caller
+// writing a tag into a card's body can match how it will be read back.
+std::string normalize_tag(const std::string& tag);
+
 } // namespace holder::core

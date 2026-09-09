@@ -147,4 +147,21 @@ std::vector<TagOccurrence> extract_tag_occurrences(const std::string& markdown_b
   return parse_tags(markdown_body).occurrences;
 }
 
+bool is_valid_tag(const std::string& tag) {
+  if (tag.empty() || !std::isalpha(static_cast<unsigned char>(tag[0]))) {
+    return false;
+  }
+  for (char c : tag) {
+    const auto uc = static_cast<unsigned char>(c);
+    if (!(std::isalnum(uc) || c == '_' || c == '/' || c == '-')) {
+      return false;
+    }
+  }
+  return !looks_like_hex_color(tag);
+}
+
+std::string normalize_tag(const std::string& tag) {
+  return to_lower(tag);
+}
+
 } // namespace holder::core

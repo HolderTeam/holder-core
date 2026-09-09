@@ -134,6 +134,7 @@ add_library(holder STATIC
   src/card/LinkRepo.cpp
   src/card/MilestoneRepo.cpp
   src/card/TagExtractor.cpp
+  src/card/TagLineEditor.cpp
   src/card/TagRepo.cpp
   src/git/EcdsaDerSigningCredentialProvider.cpp
   src/git/GitOps.cpp

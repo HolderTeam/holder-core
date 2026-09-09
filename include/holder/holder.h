@@ -320,13 +320,53 @@ int holder_card_link_remove(
 );
 
 // Lists card_id's #tags (as extracted from its body by holder_card_create/
-// holder_card_update_content), lowercased: *out_json becomes ["todo", "urgent"].
-// Tags aren't editable through a dedicated function -- edit the #tag text in
-// the card body instead; the index follows automatically.
+// holder_card_update_content, or by holder_card_tag_add/remove below),
+// lowercased: *out_json becomes ["todo", "urgent"].
 int holder_card_list_tags(
     holder_context* context,
     const char* card_id,
     char** out_json,
+    holder_error** out_error
+);
+
+#define HOLDER_TAG_ADD_ADDED 0
+#define HOLDER_TAG_ADD_ALREADY_PRESENT 1
+
+// Holder's semantic tag operation -- callers should use this instead of editing
+// #tag text into a card's body directly, so core stays free to change how tags
+// are represented later without every caller changing too.
+//
+// Adds `tag` to card_id, normalized to lowercase. *out_status becomes
+// HOLDER_TAG_ADD_ADDED if the tag was written (to the card's trailing tag line --
+// its last non-blank line, when that line is nothing but #tags -- creating one if
+// none exists yet), or HOLDER_TAG_ADD_ALREADY_PRESENT if the tag already occurred
+// anywhere in the card, including in ordinary prose (no change made either way).
+// A tag holder_card_list_tags could never produce (see is_valid_tag) fails with
+// HOLDER_ERROR_INVALID_ARGUMENT instead of setting *out_status.
+int holder_card_tag_add(
+    holder_context* context,
+    const char* card_id,
+    const char* tag,
+    int* out_status,
+    holder_error** out_error
+);
+
+#define HOLDER_TAG_REMOVE_REMOVED 0
+#define HOLDER_TAG_REMOVE_NOT_PRESENT 1
+#define HOLDER_TAG_REMOVE_PRESENT_OUTSIDE_EDITABLE_TAG_LINE 2
+
+// Removes `tag` from card_id, normalized to lowercase. Only ever removes text from
+// the card's trailing tag line (see holder_card_tag_add) -- this never rewrites
+// prose. *out_status becomes HOLDER_TAG_REMOVE_REMOVED, HOLDER_TAG_REMOVE_NOT_PRESENT
+// (the tag doesn't occur anywhere in the card), or
+// HOLDER_TAG_REMOVE_PRESENT_OUTSIDE_EDITABLE_TAG_LINE (the tag exists only in prose;
+// the card remains tagged since nothing was removed -- tell the user to edit the
+// text directly). Same invalid-tag behavior as holder_card_tag_add.
+int holder_card_tag_remove(
+    holder_context* context,
+    const char* card_id,
+    const char* tag,
+    int* out_status,
     holder_error** out_error
 );
 
