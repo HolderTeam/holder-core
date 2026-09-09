@@ -370,6 +370,21 @@ int holder_card_tag_remove(
     holder_error** out_error
 );
 
+// Lists the subset of card_id's tags that holder_card_tag_remove can actually
+// remove -- those on the card's trailing tag line, lowercased, in order:
+// *out_json becomes ["todo", "urgent"], the same shape as holder_card_list_tags.
+// A client UI can use this to show a remove control only on tags where it would
+// work, rather than offering one uniformly and having it fail after the fact.
+// A tag can appear here *and* still occur in prose elsewhere -- removing it
+// still succeeds, but the card remains tagged either way, since the prose
+// occurrence is untouched.
+int holder_card_list_editable_tags(
+    holder_context* context,
+    const char* card_id,
+    char** out_json,
+    holder_error** out_error
+);
+
 // Lists project_id's (non-trashed) cards carrying `tag` (case-insensitive):
 // *out_json becomes [{card_id, title}, ...]. Empty, not an error, for an
 // unknown project_id or a tag nothing carries.

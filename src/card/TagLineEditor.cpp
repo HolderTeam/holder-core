@@ -148,4 +148,14 @@ RemoveTagLineResult remove_from_trailing_tag_line(const std::string& body, const
   };
 }
 
+std::vector<std::string> tags_on_trailing_line(const std::string& body) {
+  const auto split = split_trailing_whitespace(body);
+  if (split.content.empty()) {
+    return {};
+  }
+  const auto line_start = last_line_start(split.content);
+  const std::string last_line = split.content.substr(line_start);
+  return parse_pure_tag_line(last_line).value_or(std::vector<std::string>{});
+}
+
 } // namespace holder::core

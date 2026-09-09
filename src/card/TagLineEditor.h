@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 namespace holder::core {
 
@@ -40,5 +41,14 @@ struct RemoveTagLineResult {
 // too, rather than leaving a stray empty line. Never touches anything outside the trailing tag
 // line -- prose containing the same tag elsewhere in the body is left untouched either way.
 RemoveTagLineResult remove_from_trailing_tag_line(const std::string& body, const std::string& tag);
+
+// The tags (already normalized) on body's trailing tag line, in order -- empty if there isn't
+// one. Read-only counterpart to upsert/remove: a tag in this list is exactly the set
+// remove_from_trailing_tag_line can actually remove (see CardStore::list_editable_tags), so a
+// client UI can show a remove control only where it would work, rather than offering one
+// uniformly and having it fail after the fact. A tag can still be in *both* this list and
+// elsewhere in the body's prose -- removing it here succeeds, but the card remains tagged
+// either way, since the prose occurrence is untouched.
+std::vector<std::string> tags_on_trailing_line(const std::string& body);
 
 } // namespace holder::core

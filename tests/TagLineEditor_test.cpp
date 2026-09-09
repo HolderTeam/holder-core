@@ -101,3 +101,37 @@ TEST_CASE("remove_from_trailing_tag_line finding the tag doubled -- prose and tr
   REQUIRE(result.outcome == RemoveTagLineOutcome::Removed);
   REQUIRE(result.new_body == "I mentioned #android earlier.");
 }
+
+using holder::core::tags_on_trailing_line;
+
+TEST_CASE("tags_on_trailing_line returns the line's tags in order", "[tag_line_editor]") {
+  REQUIRE(
+      tags_on_trailing_line("hello\n\n#work #holder #android") ==
+      std::vector<std::string>{"work", "holder", "android"}
+  );
+}
+
+TEST_CASE("tags_on_trailing_line ignores a tag that only occurs in prose", "[tag_line_editor]") {
+  REQUIRE(tags_on_trailing_line("This is about #work today.").empty());
+}
+
+TEST_CASE("tags_on_trailing_line only lists the trailing-line tag when the same tag is doubled in prose", "[tag_line_editor]") {
+  REQUIRE(
+      tags_on_trailing_line("I mentioned #android earlier.\n\n#android") ==
+      std::vector<std::string>{"android"}
+  );
+}
+
+TEST_CASE("tags_on_trailing_line returns empty for a body with no tag line", "[tag_line_editor]") {
+  REQUIRE(tags_on_trailing_line("just a plain card").empty());
+}
+
+TEST_CASE("tags_on_trailing_line returns empty for an empty body", "[tag_line_editor]") {
+  REQUIRE(tags_on_trailing_line("").empty());
+}
+
+TEST_CASE("tags_on_trailing_line survives trailing whitespace after the line", "[tag_line_editor]") {
+  REQUIRE(
+      tags_on_trailing_line("hello\n\n#work #android\n\n\n") == std::vector<std::string>{"work", "android"}
+  );
+}
