@@ -130,6 +130,13 @@ class CardStore {
   // user to edit the text directly. Same InvalidTag case as add_tag.
   RemoveTagResult remove_tag(const std::string& card_id, const std::string& tag, long long updated_at);
 
+  // The subset of the card's tags that remove_tag can actually remove -- those on its trailing
+  // tag line, in order. A client UI can use this to show a remove control only where it would
+  // work, rather than offering one on every tag uniformly (see TagLineEditor.h's
+  // tags_on_trailing_line, which this wraps). A tag can be in this list *and* still occur in
+  // prose elsewhere -- removing it here succeeds, but the card remains tagged either way.
+  std::vector<std::string> list_editable_tags(const std::string& card_id);
+
  private:
   holder::model::Project require_project(const std::string& project_id);
 

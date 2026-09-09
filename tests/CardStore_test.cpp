@@ -2001,3 +2001,75 @@ TEST_CASE("CardStore remove_tag rejects an invalid tag without changing the card
   REQUIRE(store.remove_tag(card.card_id, "123issue", 2) == holder::card::RemoveTagResult::InvalidTag);
   REQUIRE(store.get_content(store.get(card.card_id).value()).value() == "Body\n\n#work");
 }
+
+TEST_CASE("CardStore list_editable_tags returns only the trailing-line tags", "[cardstore][tags]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  const auto project_root = dir / "project_repo";
+  create_project(db, "proj-1", project_root.string());
+
+  holder::index::FtsIndexer fts(db);
+  holder::card::CardStore store(db, &fts);
+
+  holder::model::Card card;
+  card.card_id = "editabletags1";
+  card.project_id = "proj-1";
+  card.title = "Card";
+  card.created_at = 1;
+  card.updated_at = 1;
+  store.create(card, "Mentions #prose here.\n\n#work #android");
+
+  REQUIRE(store.list_editable_tags(card.card_id) == std::vector<std::string>{"work", "android"});
+}
+
+TEST_CASE("CardStore list_editable_tags is empty when there's no trailing tag line", "[cardstore][tags]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  const auto project_root = dir / "project_repo";
+  create_project(db, "proj-1", project_root.string());
+
+  holder::index::FtsIndexer fts(db);
+  holder::card::CardStore store(db, &fts);
+
+  holder::model::Card card;
+  card.card_id = "editabletags2";
+  card.project_id = "proj-1";
+  card.title = "Card";
+  card.created_at = 1;
+  card.updated_at = 1;
+  store.create(card, "Mentions #prose here, nothing else.");
+
+  REQUIRE(store.list_editable_tags(card.card_id).empty());
+}
+
+TEST_CASE("CardStore list_editable_tags reflects add_tag/remove_tag", "[cardstore][tags]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  const auto project_root = dir / "project_repo";
+  create_project(db, "proj-1", project_root.string());
+
+  holder::index::FtsIndexer fts(db);
+  holder::card::CardStore store(db, &fts);
+
+  holder::model::Card card;
+  card.card_id = "editabletags3";
+  card.project_id = "proj-1";
+  card.title = "Card";
+  card.created_at = 1;
+  card.updated_at = 1;
+  store.create(card, "Body");
+
+  REQUIRE(store.list_editable_tags(card.card_id).empty());
+
+  store.add_tag(card.card_id, "android", 2);
+  REQUIRE(store.list_editable_tags(card.card_id) == std::vector<std::string>{"android"});
+
+  store.remove_tag(card.card_id, "android", 3);
+  REQUIRE(store.list_editable_tags(card.card_id).empty());
+}

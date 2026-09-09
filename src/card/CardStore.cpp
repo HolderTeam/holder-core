@@ -762,4 +762,13 @@ RemoveTagResult CardStore::remove_tag(const std::string& card_id, const std::str
   return RemoveTagResult::Removed;
 }
 
+std::vector<std::string> CardStore::list_editable_tags(const std::string& card_id) {
+  const auto card_opt = get(card_id);
+  if (!card_opt.has_value()) {
+    throw std::runtime_error("card not found: " + card_id);
+  }
+  const auto content = get_content(card_opt.value()).value_or("");
+  return holder::core::tags_on_trailing_line(content);
+}
+
 } // namespace holder::card
