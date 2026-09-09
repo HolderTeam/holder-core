@@ -132,3 +132,37 @@ TEST_CASE("extract_tags returns nothing for an empty body", "[tag_extractor]") {
 TEST_CASE("extract_tags returns nothing for a body with no candidate hashes", "[tag_extractor]") {
   REQUIRE(extract_tags("Just some ordinary prose with no hashes at all.").empty());
 }
+
+using holder::core::is_valid_tag;
+using holder::core::normalize_tag;
+
+TEST_CASE("is_valid_tag accepts a plain lowercase tag", "[tag_extractor]") {
+  REQUIRE(is_valid_tag("android"));
+}
+
+TEST_CASE("is_valid_tag accepts hyphens, underscores and digits after the first letter", "[tag_extractor]") {
+  REQUIRE(is_valid_tag("work_in-progress2"));
+}
+
+TEST_CASE("is_valid_tag rejects an empty string", "[tag_extractor]") {
+  REQUIRE_FALSE(is_valid_tag(""));
+}
+
+TEST_CASE("is_valid_tag rejects a candidate starting with a digit", "[tag_extractor]") {
+  REQUIRE_FALSE(is_valid_tag("123issue"));
+}
+
+TEST_CASE("is_valid_tag rejects characters outside the tag alphabet", "[tag_extractor]") {
+  REQUIRE_FALSE(is_valid_tag("has space"));
+  REQUIRE_FALSE(is_valid_tag("has.dot"));
+}
+
+TEST_CASE("is_valid_tag rejects hex-color-length candidates, matching extract_tags", "[tag_extractor]") {
+  REQUIRE_FALSE(is_valid_tag("ff8800"));
+  REQUIRE_FALSE(is_valid_tag("deadbeef"));
+}
+
+TEST_CASE("normalize_tag lowercases the same way extract_tags canonicalizes", "[tag_extractor]") {
+  REQUIRE(normalize_tag("Android") == "android");
+  REQUIRE(extract_tags("#Android") == std::vector<std::string>{normalize_tag("Android")});
+}

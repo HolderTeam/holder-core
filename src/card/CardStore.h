@@ -20,6 +20,19 @@
 
 namespace holder::card {
 
+enum class AddTagResult {
+  Added,
+  AlreadyPresent, // The tag already occurs somewhere in the card -- body left unchanged.
+  InvalidTag,
+};
+
+enum class RemoveTagResult {
+  Removed,
+  NotPresent,               // The tag doesn't occur anywhere in the card.
+  PresentOutsideEditableTagLine, // It exists, but only in prose Tools won't rewrite.
+  InvalidTag,
+};
+
 // One card's worth of input to CardStore::create_batch: card_id/title/content plus outgoing
 // links and milestones, in the same shape holder_backup_snapshot_page emits (see
 // BACKUP_RESTORE_IMPLEMENTATION_PLAN.md step 4). card_id here is the *original* id, used only
@@ -94,6 +107,28 @@ class CardStore {
   void hard_delete(const std::string& card_id);
   std::optional<holder::model::Card> get(const std::string& card_id) const;
   std::optional<std::string> get_content(const holder::model::Card& card);
+
+  // add_tag/remove_tag are Holder's semantic tag operations -- the ones a client (Android's
+  // Tools UI, GTK, holderctl) should call, rather than editing #tag text into a card's body
+  // itself. Underneath, both work by editing a card's *trailing tag line* (see
+  // TagLineEditor.h); callers shouldn't need to know that, since core is free to change how
+  // tags are represented later without every caller changing too.
+  //
+  // add_tag(card, "Android"): normalizes to "android". If that tag already occurs anywhere in
+  // the card (prose or the trailing tag line), this is a no-op (AlreadyPresent) -- a card is
+  // either tagged or it isn't, regardless of where the tag text lives. Otherwise it's appended
+  // to the trailing tag line, creating one if needed, and this returns Added. An input that
+  // extract_tags could never recognize as a tag (see is_valid_tag) returns InvalidTag without
+  // changing the card.
+  AddTagResult add_tag(const std::string& card_id, const std::string& tag, long long updated_at);
+
+  // remove_tag(card, "ANDROID"): normalizes to "android". Only ever removes text from the
+  // trailing tag line -- Tools can't safely rewrite prose. If the tag is there, it's removed
+  // (Removed; the line itself is removed too if that was its only tag). If the tag doesn't
+  // occur anywhere in the card, NotPresent. If it occurs only in prose, PresentOutsideEditableTagLine
+  // -- the card remains tagged, since removal didn't happen, and the caller should tell the
+  // user to edit the text directly. Same InvalidTag case as add_tag.
+  RemoveTagResult remove_tag(const std::string& card_id, const std::string& tag, long long updated_at);
 
  private:
   holder::model::Project require_project(const std::string& project_id);

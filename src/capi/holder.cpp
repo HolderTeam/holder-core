@@ -2464,6 +2464,99 @@ int holder_card_list_tags(
   }  // LCOV_EXCL_LINE
 }
 
+int holder_card_tag_add(
+    holder_context* context,
+    const char* card_id,
+    const char* tag,
+    int* out_status,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_status == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_status must not be null");
+  }
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (card_id == nullptr || card_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "card_id must not be empty");
+  }
+  if (tag == nullptr || tag[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "tag must not be empty");
+  }
+
+  try {
+    holder::card::CardStore store(context->db, &context->fts);
+    const auto result = store.add_tag(card_id, tag, now_epoch_seconds());
+    switch (result) {
+      case holder::card::AddTagResult::Added:
+        *out_status = HOLDER_TAG_ADD_ADDED;
+        break;
+      case holder::card::AddTagResult::AlreadyPresent:
+        *out_status = HOLDER_TAG_ADD_ALREADY_PRESENT;
+        break;
+      case holder::card::AddTagResult::InvalidTag:
+        return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "invalid tag: " + std::string(tag));
+    }
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
+  }  // LCOV_EXCL_LINE
+}
+
+int holder_card_tag_remove(
+    holder_context* context,
+    const char* card_id,
+    const char* tag,
+    int* out_status,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_status == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_status must not be null");
+  }
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (card_id == nullptr || card_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "card_id must not be empty");
+  }
+  if (tag == nullptr || tag[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "tag must not be empty");
+  }
+
+  try {
+    holder::card::CardStore store(context->db, &context->fts);
+    const auto result = store.remove_tag(card_id, tag, now_epoch_seconds());
+    switch (result) {
+      case holder::card::RemoveTagResult::Removed:
+        *out_status = HOLDER_TAG_REMOVE_REMOVED;
+        break;
+      case holder::card::RemoveTagResult::NotPresent:
+        *out_status = HOLDER_TAG_REMOVE_NOT_PRESENT;
+        break;
+      case holder::card::RemoveTagResult::PresentOutsideEditableTagLine:
+        *out_status = HOLDER_TAG_REMOVE_PRESENT_OUTSIDE_EDITABLE_TAG_LINE;
+        break;
+      case holder::card::RemoveTagResult::InvalidTag:
+        return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "invalid tag: " + std::string(tag));
+    }
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
+  }  // LCOV_EXCL_LINE
+}
+
 int holder_cards_with_tag(
     holder_context* context,
     const char* project_id,

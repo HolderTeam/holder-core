@@ -1843,3 +1843,161 @@ TEST_CASE("CardStore keeps milestones in sync across trash/restore/hard_delete",
   store.hard_delete(card.card_id);
   REQUIRE(milestones.list_for_card("proj-1", card.card_id).empty());
 }
+
+TEST_CASE("CardStore add_tag writes to the trailing tag line and reindexes", "[cardstore][tags]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  const auto project_root = dir / "project_repo";
+  create_project(db, "proj-1", project_root.string());
+
+  holder::index::FtsIndexer fts(db);
+  holder::card::CardStore store(db, &fts);
+  holder::card::TagRepo tags(db);
+
+  holder::model::Card card;
+  card.card_id = "addtag1";
+  card.project_id = "proj-1";
+  card.title = "Card";
+  card.created_at = 1;
+  card.updated_at = 1;
+  store.create(card, "Some useful thing");
+
+  REQUIRE(store.add_tag(card.card_id, "Work", 2) == holder::card::AddTagResult::Added);
+  REQUIRE(store.get_content(store.get(card.card_id).value()).value() == "Some useful thing\n\n#work");
+  REQUIRE(tags.list_tags_for_card("proj-1", card.card_id) == std::vector<std::string>{"work"});
+
+  REQUIRE(store.add_tag(card.card_id, "android", 3) == holder::card::AddTagResult::Added);
+  REQUIRE(
+      store.get_content(store.get(card.card_id).value()).value() == "Some useful thing\n\n#work #android"
+  );
+}
+
+TEST_CASE("CardStore add_tag is idempotent for a tag already present anywhere", "[cardstore][tags]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  const auto project_root = dir / "project_repo";
+  create_project(db, "proj-1", project_root.string());
+
+  holder::index::FtsIndexer fts(db);
+  holder::card::CardStore store(db, &fts);
+
+  holder::model::Card card;
+  card.card_id = "addtag2";
+  card.project_id = "proj-1";
+  card.title = "Card";
+  card.created_at = 1;
+  card.updated_at = 1;
+  store.create(card, "Mentions #android in prose.");
+
+  REQUIRE(store.add_tag(card.card_id, "Android", 2) == holder::card::AddTagResult::AlreadyPresent);
+  REQUIRE(store.get_content(store.get(card.card_id).value()).value() == "Mentions #android in prose.");
+}
+
+TEST_CASE("CardStore add_tag rejects an invalid tag without changing the card", "[cardstore][tags]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  const auto project_root = dir / "project_repo";
+  create_project(db, "proj-1", project_root.string());
+
+  holder::index::FtsIndexer fts(db);
+  holder::card::CardStore store(db, &fts);
+
+  holder::model::Card card;
+  card.card_id = "addtag3";
+  card.project_id = "proj-1";
+  card.title = "Card";
+  card.created_at = 1;
+  card.updated_at = 1;
+  store.create(card, "Body");
+
+  REQUIRE(store.add_tag(card.card_id, "123issue", 2) == holder::card::AddTagResult::InvalidTag);
+  REQUIRE(store.get_content(store.get(card.card_id).value()).value() == "Body");
+}
+
+TEST_CASE("CardStore remove_tag removes from the trailing tag line and reindexes", "[cardstore][tags]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  const auto project_root = dir / "project_repo";
+  create_project(db, "proj-1", project_root.string());
+
+  holder::index::FtsIndexer fts(db);
+  holder::card::CardStore store(db, &fts);
+  holder::card::TagRepo tags(db);
+
+  holder::model::Card card;
+  card.card_id = "removetag1";
+  card.project_id = "proj-1";
+  card.title = "Card";
+  card.created_at = 1;
+  card.updated_at = 1;
+  store.create(card, "Some useful thing\n\n#work #android");
+
+  REQUIRE(store.remove_tag(card.card_id, "Work", 2) == holder::card::RemoveTagResult::Removed);
+  REQUIRE(store.get_content(store.get(card.card_id).value()).value() == "Some useful thing\n\n#android");
+  REQUIRE(tags.list_tags_for_card("proj-1", card.card_id) == std::vector<std::string>{"android"});
+
+  REQUIRE(store.remove_tag(card.card_id, "android", 3) == holder::card::RemoveTagResult::Removed);
+  REQUIRE(store.get_content(store.get(card.card_id).value()).value() == "Some useful thing");
+  REQUIRE(tags.list_tags_for_card("proj-1", card.card_id).empty());
+}
+
+TEST_CASE("CardStore remove_tag distinguishes not-present from prose-only", "[cardstore][tags]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  const auto project_root = dir / "project_repo";
+  create_project(db, "proj-1", project_root.string());
+
+  holder::index::FtsIndexer fts(db);
+  holder::card::CardStore store(db, &fts);
+
+  holder::model::Card card;
+  card.card_id = "removetag2";
+  card.project_id = "proj-1";
+  card.title = "Card";
+  card.created_at = 1;
+  card.updated_at = 1;
+  store.create(card, "Mentions #android only in prose.");
+
+  REQUIRE(
+      store.remove_tag(card.card_id, "android", 2) ==
+      holder::card::RemoveTagResult::PresentOutsideEditableTagLine
+  );
+  REQUIRE(
+      store.get_content(store.get(card.card_id).value()).value() == "Mentions #android only in prose."
+  );
+
+  REQUIRE(store.remove_tag(card.card_id, "nonexistent", 3) == holder::card::RemoveTagResult::NotPresent);
+}
+
+TEST_CASE("CardStore remove_tag rejects an invalid tag without changing the card", "[cardstore][tags]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  const auto project_root = dir / "project_repo";
+  create_project(db, "proj-1", project_root.string());
+
+  holder::index::FtsIndexer fts(db);
+  holder::card::CardStore store(db, &fts);
+
+  holder::model::Card card;
+  card.card_id = "removetag3";
+  card.project_id = "proj-1";
+  card.title = "Card";
+  card.created_at = 1;
+  card.updated_at = 1;
+  store.create(card, "Body\n\n#work");
+
+  REQUIRE(store.remove_tag(card.card_id, "123issue", 2) == holder::card::RemoveTagResult::InvalidTag);
+  REQUIRE(store.get_content(store.get(card.card_id).value()).value() == "Body\n\n#work");
+}

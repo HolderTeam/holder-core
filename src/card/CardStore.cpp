@@ -4,6 +4,7 @@
 #include "card/CardPaths.h"
 #include "card/LinkRepo.h"
 #include "card/TagExtractor.h"
+#include "card/TagLineEditor.h"
 #include "git/GitOps.h"
 #include "git/GitRepo.h"
 #include "platform/Fs.h"
@@ -12,9 +13,11 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <map>
 #include <stdexcept>
+
 namespace holder::card {
 namespace {
 
@@ -712,6 +715,51 @@ std::optional<std::string> CardStore::get_content(const holder::model::Card& car
   const auto raw = fs_->read_file(full_path);
   const auto plain = decode_card_blob(project_opt.value(), raw);
   return holder::core::parse_card_file(plain).body;
+}
+
+AddTagResult CardStore::add_tag(const std::string& card_id, const std::string& tag, long long updated_at) {
+  if (!holder::core::is_valid_tag(tag)) {
+    return AddTagResult::InvalidTag;
+  }
+  const auto normalized = holder::core::normalize_tag(tag);
+
+  const auto card_opt = get(card_id);
+  if (!card_opt.has_value()) {
+    throw std::runtime_error("card not found: " + card_id);
+  }
+  const auto content = get_content(card_opt.value()).value_or("");
+
+  const auto existing = holder::core::extract_tags(content);
+  if (std::find(existing.begin(), existing.end(), normalized) != existing.end()) {
+    return AddTagResult::AlreadyPresent;
+  }
+
+  const auto new_content = holder::core::upsert_trailing_tag_line(content, normalized);
+  update_content(card_id, new_content, std::nullopt, updated_at);
+  return AddTagResult::Added;
+}
+
+RemoveTagResult CardStore::remove_tag(const std::string& card_id, const std::string& tag, long long updated_at) {
+  if (!holder::core::is_valid_tag(tag)) {
+    return RemoveTagResult::InvalidTag;
+  }
+  const auto normalized = holder::core::normalize_tag(tag);
+
+  const auto card_opt = get(card_id);
+  if (!card_opt.has_value()) {
+    throw std::runtime_error("card not found: " + card_id);
+  }
+  const auto content = get_content(card_opt.value()).value_or("");
+
+  const auto removal = holder::core::remove_from_trailing_tag_line(content, normalized);
+  if (removal.outcome != holder::core::RemoveTagLineOutcome::Removed) {
+    const auto existing = holder::core::extract_tags(content);
+    const bool present = std::find(existing.begin(), existing.end(), normalized) != existing.end();
+    return present ? RemoveTagResult::PresentOutsideEditableTagLine : RemoveTagResult::NotPresent;
+  }
+
+  update_content(card_id, removal.new_body, std::nullopt, updated_at);
+  return RemoveTagResult::Removed;
 }
 
 } // namespace holder::card

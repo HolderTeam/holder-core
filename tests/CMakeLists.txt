@@ -58,6 +58,7 @@ add_executable(holder_core_tests
   SecretStore_test.cpp
   StartupRecovery_test.cpp
   TagExtractor_test.cpp
+  TagLineEditor_test.cpp
   TagRepo_test.cpp
 )
 
