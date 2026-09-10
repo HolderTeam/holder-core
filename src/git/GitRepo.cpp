@@ -443,8 +443,24 @@ static std::vector<ChangedPath> diff_changed_paths(
   return result;
 }
 
+namespace {
+
+// libgit2's global init is refcounted, and the 0->1 / 1->0 transitions run and
+// tear down real subsystem setup (default homedir, TLS, Windows sockets). With
+// one GitRepo per Git operation, a balanced init/shutdown per instance drives
+// that refcount back to zero between operations -- after which a later
+// git_repository_open fails outright on Windows. Initialize once for the
+// process and never shut down; this matches holder_git_set_homedir's own
+// permanent reference and the requirement noted there.
+void ensure_libgit2_initialized() {
+  static const int once = git_libgit2_init();
+  (void)once;
+}
+
+} // namespace
+
 GitRepo::GitRepo() : credential_provider_(std::make_shared<SshAgentAndFileCredentialProvider>()) {
-  git_libgit2_init();
+  ensure_libgit2_initialized();
 }
 
 GitRepo::~GitRepo() {
@@ -452,7 +468,6 @@ GitRepo::~GitRepo() {
     git_repository_free(reinterpret_cast<git_repository*>(repo_));
     repo_ = nullptr;
   }
-  git_libgit2_shutdown();
 }
 
 void GitRepo::set_credential_provider(std::shared_ptr<GitCredentialProvider> provider) {
