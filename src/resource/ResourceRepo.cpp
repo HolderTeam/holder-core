@@ -12,8 +12,7 @@ namespace {
 
 class Statement {
  public:
-  Statement(sqlite3* db, const char* sql, const std::string& what)
-      : db_(db) {
+  Statement(sqlite3* db, const char* sql, const std::string& what) {
     if (sqlite3_prepare_v2(db, sql, -1, &stmt_, nullptr) != SQLITE_OK) {
       throw std::runtime_error(what + ": " + sqlite3_errmsg(db));
     }
@@ -28,7 +27,6 @@ class Statement {
   }
 
  private:
-  sqlite3* db_;
   sqlite3_stmt* stmt_ = nullptr;
 };
 

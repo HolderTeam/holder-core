@@ -32,7 +32,10 @@
 namespace holder::privacy {
 namespace {
 
-constexpr const char* kProjectKeyService = "org.holder.ProjectKey";
+// Only referenced from the libsecret / macOS Keychain / Windows Credential Manager blocks
+// below; a build with none of those backends (e.g. Android, which uses the JNI hook) would
+// otherwise warn this is unused.
+[[maybe_unused]] constexpr const char* kProjectKeyService = "org.holder.ProjectKey";
 
 PlatformKeyringLookupHook& lookup_hook_storage() {
   static PlatformKeyringLookupHook hook = nullptr;
