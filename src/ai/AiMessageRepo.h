@@ -9,6 +9,7 @@
 #include "platform/Fs.h"
 #include "project/ProjectRepo.h"
 
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -38,6 +39,8 @@ class AiMessageRepo {
  private:
   holder::platform::Db& db_;
   holder::core::Fs* fs_ = nullptr;
+  // Owns the Git handle only when the caller injected none; see the constructor.
+  std::unique_ptr<holder::git::RealGitOps> owned_git_;
   holder::git::GitOps* git_ = nullptr;
   holder::card::LinkRepo link_repo_;
   holder::ai::AiThreadRepo thread_repo_;

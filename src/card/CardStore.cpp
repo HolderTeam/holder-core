@@ -26,11 +26,6 @@ holder::core::Fs& resolve_fs(holder::core::Fs* fs) {
   return fs ? *fs : real_fs;
 }
 
-holder::git::GitOps& resolve_git(holder::git::GitOps* git) {
-  static holder::git::RealGitOps real_git;
-  return git ? *git : real_git;
-}
-
 const std::string& require_project_key_id(const holder::model::Project& project) {
   if (!project.project_key_id.has_value() || project.project_key_id->empty()) {
     throw std::runtime_error("encrypted project missing project_key_id");
@@ -86,7 +81,8 @@ CardStore::CardStore(
 )
     : db_(db),
       fs_(&resolve_fs(fs)),
-      git_(&resolve_git(git)),
+      owned_git_(git ? nullptr : std::make_unique<holder::git::RealGitOps>()),
+      git_(git ? git : owned_git_.get()),
       card_repo_(db),
       link_repo_(db),
       milestone_repo_(db),

@@ -1,4 +1,5 @@
 build
 build-coverage
+build-tsan
 out
 .vcpkg

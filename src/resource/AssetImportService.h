@@ -8,6 +8,7 @@
 
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <string>
 
 namespace holder::resource {
@@ -62,6 +63,8 @@ class AssetImportService {
   std::filesystem::path staging_root_;
   std::function<std::string()> uuid_v4_;
   holder::core::Fs* fs_;
+  // Owns the Git handle only when the caller injected none; see the constructor.
+  std::unique_ptr<holder::git::RealGitOps> owned_git_;
   holder::git::GitOps* git_;
   std::function<void(AssetImportStage)> on_stage_;
 };

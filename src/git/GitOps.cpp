@@ -6,7 +6,21 @@ void RealGitOps::set_credential_provider(std::shared_ptr<GitCredentialProvider> 
   repo_.set_credential_provider(std::move(provider));
 }
 
+void RealGitOps::lock_repo(const std::filesystem::path& repo_dir) {
+  auto key = canonical_repo_key(repo_dir);
+  if (repo_lock_.owns_lock() && key == locked_repo_key_) {
+    return;
+  }
+  // Drop any lock held for a different repository before taking the new one, so
+  // one RealGitOps re-pointed at another project never holds two repo locks.
+  repo_lock_ = std::unique_lock<std::recursive_mutex>();
+  repo_mutex_ = repo_mutex_for(key);
+  repo_lock_ = std::unique_lock<std::recursive_mutex>(*repo_mutex_);
+  locked_repo_key_ = std::move(key);
+}
+
 void RealGitOps::open_or_init(const std::filesystem::path& repo_dir) {
+  lock_repo(repo_dir);
   repo_.open_or_init(repo_dir);
 }
 

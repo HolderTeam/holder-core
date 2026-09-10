@@ -4,9 +4,11 @@
 #include "git/GitRepo.h"
 #include "git/PushResult.h"
 #include "git/RemoteProbe.h"
+#include "git/RepoLocks.h"
 
 #include <filesystem>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
@@ -84,6 +86,17 @@ class RealGitOps final : public GitOps {
   );
 
  private:
+  // Acquires (or, when already held for this repository, keeps) the per-project
+  // lock for repo_dir. Called by open_or_init, which every operation runs first,
+  // so the lock is held for the whole lifetime of this RealGitOps -- i.e. for
+  // the complete Git operation the owning store performs.
+  void lock_repo(const std::filesystem::path& repo_dir);
+
+  // Declared before repo_ so the lock is released only after repo_ (and its
+  // git_repository*) has been torn down.
+  std::filesystem::path locked_repo_key_;
+  std::shared_ptr<std::recursive_mutex> repo_mutex_;
+  std::unique_lock<std::recursive_mutex> repo_lock_;
   GitRepo repo_;
 };
 

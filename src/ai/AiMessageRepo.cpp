@@ -19,11 +19,6 @@ holder::core::Fs& resolve_fs(holder::core::Fs* fs) {
   return fs ? *fs : real_fs;
 }
 
-holder::git::GitOps& resolve_git(holder::git::GitOps* git) {
-  static holder::git::RealGitOps real_git;
-  return git ? *git : real_git;
-}
-
 void throw_sqlite(sqlite3* db, const std::string& what) {
   const char* msg = db ? sqlite3_errmsg(db) : "unknown sqlite error";
   throw std::runtime_error(what + ": " + msg);
@@ -95,7 +90,8 @@ AiMessageRepo::AiMessageRepo(
 )
     : db_(db),
       fs_(&resolve_fs(fs)),
-      git_(&resolve_git(git)),
+      owned_git_(git ? nullptr : std::make_unique<holder::git::RealGitOps>()),
+      git_(git ? git : owned_git_.get()),
       link_repo_(db),
       thread_repo_(db),
       project_repo_(db),

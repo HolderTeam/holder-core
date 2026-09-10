@@ -29,11 +29,6 @@ holder::core::Fs& resolve_fs(holder::core::Fs* fs) {
   return fs ? *fs : real_fs;
 }
 
-holder::git::GitOps& resolve_git(holder::git::GitOps* git) {
-  static holder::git::RealGitOps real_git;
-  return git ? *git : real_git;
-}
-
 std::string lower_extension(const std::filesystem::path& path) {
   auto extension = path.extension().string();
   std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char ch) {
@@ -119,7 +114,8 @@ AssetImportService::AssetImportService(
       staging_root_(std::move(staging_root)),
       uuid_v4_(std::move(uuid_v4)),
       fs_(&resolve_fs(fs)),
-      git_(&resolve_git(git)),
+      owned_git_(git ? nullptr : std::make_unique<holder::git::RealGitOps>()),
+      git_(git ? git : owned_git_.get()),
       on_stage_(std::move(on_stage)) {
   if (!uuid_v4_) throw std::invalid_argument("uuid generator is required");
 }
