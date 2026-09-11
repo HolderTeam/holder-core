@@ -29,6 +29,8 @@
 #include <fstream>
 #include <string>
 
+#include <sqlite3.h>
+
 namespace {
 
 std::filesystem::path find_schema_sql() {
@@ -117,6 +119,10 @@ holder::model::Location sample_location() {
   location.created_at = 10;
   location.updated_at = 11;
   return location;
+}
+
+int always_interrupt(void*) {
+  return 1;
 }
 
 } // namespace
@@ -266,6 +272,66 @@ TEST_CASE("Resource repository validates ownership links", "[resource]") {
   invalid = sample_bundle();
   invalid.assets[0].placements[0].asset_id = "another-asset";
   REQUIRE_THROWS(resources.put_bundle(invalid));
+
+  invalid = sample_bundle();
+  invalid.resource.label.clear();
+  REQUIRE_THROWS(resources.put_bundle(invalid));
+
+  invalid = sample_bundle();
+  invalid.resource.metadata[""] = {"invalid"};
+  REQUIRE_THROWS(resources.put_bundle(invalid));
+
+  holder::resource::LocationRepo(db).put(sample_location());
+  resources.put_bundle(sample_bundle());
+  REQUIRE_THROWS(resources.add(sample_bundle().resource));
+}
+
+TEST_CASE("Resource and Location repositories surface sqlite prepare failures", "[resource]") {
+  holder::platform::Db unopened;
+  holder::resource::ResourceRepo resources(unopened);
+  holder::resource::LocationRepo locations(unopened);
+
+  REQUIRE_THROWS(resources.get("resource-1234"));
+  REQUIRE_THROWS(resources.get_bundle("resource-1234"));
+  REQUIRE_THROWS(resources.find_by_asset_hash("project-1234", "hash"));
+  REQUIRE_THROWS(resources.put_bundle(sample_bundle()));
+  REQUIRE_THROWS(resources.list("project-1234"));
+  REQUIRE_THROWS(resources.remove("resource-1234"));
+  REQUIRE_THROWS(resources.remove_project("project-1234"));
+
+  REQUIRE_THROWS(locations.put(sample_location()));
+  REQUIRE_THROWS(locations.get("location-1234"));
+  REQUIRE_THROWS(locations.list("project-1234"));
+  REQUIRE_THROWS(locations.is_in_use("location-1234"));
+  REQUIRE_THROWS(locations.remove("location-1234"));
+  REQUIRE_THROWS(locations.remove_project("project-1234"));
+}
+
+TEST_CASE("Resource and Location repositories surface interrupted sqlite steps", "[resource]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  create_project(db, "project-1234");
+  holder::resource::LocationRepo locations(db);
+  holder::resource::ResourceRepo resources(db);
+  locations.put(sample_location());
+  resources.put_bundle(sample_bundle());
+
+  sqlite3_progress_handler(db.handle(), 1, always_interrupt, nullptr);
+  REQUIRE_THROWS(locations.get("location-1234"));
+  REQUIRE_THROWS(locations.list("project-1234"));
+  REQUIRE_THROWS(locations.is_in_use("location-1234"));
+  REQUIRE_THROWS(locations.put(sample_location()));
+  REQUIRE_THROWS(locations.remove("location-1234"));
+  REQUIRE_THROWS(locations.remove_project("project-1234"));
+  REQUIRE_THROWS(resources.get("resource-1234"));
+  REQUIRE_THROWS(resources.get_bundle("resource-1234"));
+  REQUIRE_THROWS(resources.find_by_asset_hash("project-1234", std::string(64, 'a')));
+  REQUIRE_THROWS(resources.list("project-1234"));
+  REQUIRE_THROWS(resources.remove("resource-1234"));
+  REQUIRE_THROWS(resources.remove_project("project-1234"));
+  sqlite3_progress_handler(db.handle(), 0, nullptr, nullptr);
 }
 
 TEST_CASE("Project rebuild reconstructs resources assets placements and locations", "[resource]") {

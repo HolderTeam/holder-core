@@ -304,8 +304,10 @@ TEST_CASE("CardRepo methods throw sqlite errors when DB is closed", "[cardrepo]"
   REQUIRE_THROWS(repo.touch_updated("card-1", 2));
   REQUIRE_THROWS(repo.soft_delete("card-1", 3, 4));
   REQUIRE_THROWS(repo.restore("card-1", 5));
+  REQUIRE_THROWS(repo.restore_snapshot(card));
   REQUIRE_THROWS(repo.remove("card-1"));
   REQUIRE_THROWS(repo.move("card-1", std::nullopt, 1.5, 6));
+  REQUIRE_THROWS(repo.list_recent_page("proj-1", std::nullopt, std::nullopt, 10));
 }
 
 TEST_CASE("CardRepo read/count queries throw on interrupted sqlite step", "[cardrepo]") {
@@ -448,6 +450,7 @@ TEST_CASE("CardRepo update/delete/move throw when sqlite step aborts", "[cardrep
   REQUIRE_THROWS(repo.touch_updated(card.card_id, 3));
   REQUIRE_THROWS(repo.soft_delete(card.card_id, 4, 5));
   REQUIRE_THROWS(repo.restore(card.card_id, 6));
+  REQUIRE_THROWS(repo.restore_snapshot(card));
   REQUIRE_THROWS(repo.move(card.card_id, std::nullopt, 2.0, 7));
   REQUIRE_THROWS(repo.remove(card.card_id));
 }

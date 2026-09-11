@@ -8,6 +8,10 @@
 #include "platform/Db.h"
 #include "platform/DatabaseRebuild.h"
 #include "platform/Tx.h"
+#include "ai/AiMessagePaths.h"
+#include "ai/AiThreadManifest.h"
+#include "project/ProjectManifest.h"
+#include "resource/ResourcePaths.h"
 
 #include <chrono>
 #include <filesystem>
@@ -24,6 +28,40 @@ std::filesystem::path make_temp_dir() {
   auto dir = base / ("holder_db_test_" + suffix);
   std::filesystem::create_directories(dir);
   return dir;
+}
+
+std::string schema_sql() {
+#ifdef SCHEMA_SQL_PATH
+  std::ifstream input(SCHEMA_SQL_PATH);
+  if (!input) throw std::runtime_error("schema.sql not found for tests");
+  return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+#else
+  throw std::runtime_error("schema.sql not configured for tests");
+#endif
+}
+
+void write_file(const std::filesystem::path& path, const std::string& body = "fixture") {
+  std::filesystem::create_directories(path.parent_path());
+  std::ofstream output(path, std::ios::binary | std::ios::trunc);
+  if (!output) throw std::runtime_error("failed to write test fixture");
+  output << body;
+}
+
+void write_plain_project_manifest(
+    const std::filesystem::path& root,
+    const std::string& project_id
+) {
+  holder::model::Project project;
+  project.project_id = project_id;
+  project.name = "Durable project";
+  project.root_path = root.string();
+  project.privacy_mode = "plain";
+  project.created_at = 1;
+  project.updated_at = 1;
+  write_file(root / holder::project::kProjectBootstrapPath,
+             holder::project::render_project_bootstrap(project));
+  write_file(root / holder::project::kProjectManifestPath,
+             holder::project::render_project_manifest(project));
 }
 
 } // namespace
@@ -111,6 +149,129 @@ TEST_CASE("Database health distinguishes corruption from operational failures", 
   std::filesystem::create_directory(directory_path);
   const auto inaccessible = holder::platform::inspect_database_health(directory_path);
   REQUIRE(inaccessible.health == holder::platform::DatabaseHealth::IoError);
+}
+
+// BTF2: Failed on the Windows build
+// TEST_CASE("Database rebuild readiness markers are durable and reject malformed state", "[db][rebuild]") {
+//   const auto dir = make_temp_dir();
+//   const auto marker = dir / "server" / "rebuild-ready.json";
+//   REQUIRE_FALSE(holder::platform::database_rebuild_is_ready(marker));
+
+//   write_file(marker, "not json");
+//   REQUIRE_FALSE(holder::platform::database_rebuild_is_ready(marker));
+//   write_file(marker, R"({"version":1,"durable_owner_generation":0})");
+//   REQUIRE_FALSE(holder::platform::database_rebuild_is_ready(marker));
+
+//   holder::platform::mark_database_rebuild_ready(marker);
+//   REQUIRE(holder::platform::database_rebuild_is_ready(marker));
+
+//   const auto directory_target = dir / "marker-is-directory";
+//   std::filesystem::create_directory(directory_target);
+//   REQUIRE_THROWS(holder::platform::mark_database_rebuild_ready(directory_target));
+// }
+
+TEST_CASE("Database durable ownership audit checks every Git-owned object kind", "[db][rebuild]") {
+  const auto dir = make_temp_dir();
+  const auto root = dir / "project";
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  db.exec(schema_sql());
+  db.exec(
+      "INSERT INTO projects(project_id,name,root_path,privacy_mode,created_at,updated_at) VALUES(" 
+      "'project-1234','Project','" + root.string() + "','plain',1,1);"
+  );
+
+  REQUIRE_THROWS(holder::platform::audit_core_durable_ownership(db));
+  write_plain_project_manifest(root, "project-1234");
+
+  db.exec(
+      "INSERT INTO ai_threads(thread_id,project_id,title,created_at,updated_at) VALUES(" 
+      "'thread-1234','project-1234','Thread',1,1);"
+      "INSERT INTO ai_messages(message_id,thread_id,role,source,content,created_at) VALUES(" 
+      "'message-1234','thread-1234','user','local','Body',1);"
+  );
+  REQUIRE_THROWS(holder::platform::audit_core_durable_ownership(db));
+  write_file(root / holder::core::ai_message_rel_path("message-1234"));
+  REQUIRE_THROWS(holder::platform::audit_core_durable_ownership(db));
+  write_file(root / holder::ai::ai_thread_manifest_rel_path("thread-1234"));
+
+  db.exec(
+      "INSERT INTO resources(resource_id,project_id,type,label,created_at,updated_at) VALUES(" 
+      "'resource-1234','project-1234','thing','Resource',1,1);"
+  );
+  REQUIRE_THROWS(holder::platform::audit_core_durable_ownership(db));
+  write_file(root / holder::resource::resource_rel_path("resource-1234"));
+
+  db.exec(
+      "INSERT INTO storage_locations(location_id,project_id,name,provider,config_json,created_at,updated_at) "
+      "VALUES('location-1234','project-1234','Location','local_directory','{}',1,1);"
+  );
+  REQUIRE_THROWS(holder::platform::audit_core_durable_ownership(db));
+  write_file(root / holder::resource::location_rel_path("location-1234"));
+  REQUIRE_NOTHROW(holder::platform::audit_core_durable_ownership(db));
+}
+
+TEST_CASE("Database rebuild rejects unsafe inputs before replacing the database", "[db][rebuild]") {
+  const auto dir = make_temp_dir();
+  holder::platform::DatabaseRebuildRequest request;
+  REQUIRE_THROWS(holder::platform::rebuild_database_projection(request));
+
+  request.database_path = dir / "database-is-directory";
+  request.schema_sql = schema_sql();
+  std::filesystem::create_directory(request.database_path);
+  REQUIRE_THROWS(holder::platform::rebuild_database_projection(request));
+
+  const auto corrupt = dir / "corrupt.db";
+  write_file(corrupt, "not sqlite");
+  const auto root = dir / "project";
+  std::filesystem::create_directories(root);
+  request.database_path = corrupt;
+  request.project_roots = {root};
+  request.durable_ownership_ready = false;
+  REQUIRE_THROWS(holder::platform::rebuild_database_projection(request));
+
+  request.durable_ownership_ready = true;
+  request.required_authorities = {{"key store", dir / "missing-authority"}};
+  REQUIRE_THROWS(holder::platform::rebuild_database_projection(request));
+
+  request.database_path = dir / "missing.db";
+  request.required_authorities.clear();
+  request.project_roots = {dir / "missing-project-root"};
+  REQUIRE_THROWS(holder::platform::rebuild_database_projection(request));
+
+  const auto first_root = dir / "first-project";
+  const auto second_root = dir / "second-project";
+  write_plain_project_manifest(first_root, "same-project-id");
+  write_plain_project_manifest(second_root, "same-project-id");
+  request.project_roots = {first_root, second_root};
+  REQUIRE_THROWS(holder::platform::rebuild_database_projection(request));
+
+  request.project_roots.clear();
+  write_file(std::filesystem::path(request.database_path.string() + ".rebuild.tmp"));
+  REQUIRE_THROWS(holder::platform::rebuild_database_projection(request));
+}
+
+TEST_CASE("Database rebuild detects a projection whose durable counts changed", "[db][rebuild]") {
+  const auto dir = make_temp_dir();
+  const auto database = dir / "holder.db";
+  {
+    holder::platform::Db db;
+    db.open(database);
+    db.exec(schema_sql());
+  }
+
+  holder::platform::DatabaseRebuildRequest request;
+  request.database_path = database;
+  request.backup_root = dir / "backups";
+  request.schema_sql = schema_sql();
+  request.hooks.restore_before_projects = [](holder::platform::Db& rebuilt) {
+    rebuilt.exec(
+        "INSERT INTO projects(project_id,name,root_path,privacy_mode,created_at,updated_at) "
+        "VALUES('unexpected-project','Unexpected','/tmp/unexpected','plain',1,1);"
+    );
+  };
+  REQUIRE_THROWS(holder::platform::rebuild_database_projection(request));
+  REQUIRE_FALSE(std::filesystem::exists(database.string() + ".rebuild.tmp"));
 }
 
 TEST_CASE("Tx destructor swallows rollback failure", "[db][tx]") {

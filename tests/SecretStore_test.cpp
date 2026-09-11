@@ -179,6 +179,9 @@ TEST_CASE(
   const auto recovered = repo.get("switchyard");
   REQUIRE(recovered.has_value());
   REQUIRE(recovered->api_key_preview == "sw_****123");
+
+  REQUIRE_NOTHROW(holder::ai::recover_ai_provider_credentials_from_secret_store(db, *store));
+  REQUIRE(repo.get("switchyard")->updated_at == 240);
 }
 
 TEST_CASE("SecretStore handles sanitized filenames and tolerant metadata edge cases", "[privacy]") {

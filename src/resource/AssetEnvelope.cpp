@@ -116,7 +116,7 @@ nlohmann::json authenticated_header(
       {"key_id", require_key_id(project)},
       {"project_id", project.project_id},
       {"resource_id", resource_id},
-      {"version", 1},
+      {"version", 1}, // LCOV_EXCL_LINE - GCC assigns no counter to this executed initializer.
   };
 }
 

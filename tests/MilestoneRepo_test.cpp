@@ -64,7 +64,20 @@ holder::model::Milestone make_milestone(
 TEST_CASE("MilestoneRepo reports a prepare failure when the database is not open", "[milestonerepo]") {
   holder::platform::Db db;
   holder::card::MilestoneRepo repo(db);
+  REQUIRE_THROWS(repo.replace_for_card("proj-1", "card-a", {}));
   REQUIRE_THROWS(repo.delete_for_card("proj-1", "card-a"));
+  REQUIRE_THROWS(repo.list_for_card("proj-1", "card-a"));
+  REQUIRE_THROWS(repo.list_in_range("proj-1", 0, 10));
+}
+
+TEST_CASE("MilestoneRepo reports a duplicate insert in one replacement", "[milestonerepo]") {
+  const auto dir = holder::test::make_temp_dir();
+  auto db = holder::test::open_db_with_schema(dir / "holder.db");
+  create_project(db, "proj-1");
+  create_card(db, "card-a", "proj-1");
+  holder::card::MilestoneRepo repo(db);
+  const auto milestone = make_milestone("duplicate", "proj-1", "card-a", 10);
+  REQUIRE_THROWS(repo.replace_for_card("proj-1", "card-a", {milestone, milestone}));
 }
 
 TEST_CASE(

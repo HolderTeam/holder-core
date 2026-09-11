@@ -26,7 +26,7 @@ std::string render_ai_thread_manifest(
     throw std::invalid_argument("invalid AI thread manifest fields");
   }
   nlohmann::json body = {
-      {"version", 1},
+      {"version", 1}, // LCOV_EXCL_LINE - GCC assigns no counter to this executed initializer.
       {"thread_id", thread.thread_id},
       {"project_id", thread.project_id},
       {"title", thread.title},

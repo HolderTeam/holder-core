@@ -130,6 +130,10 @@ TEST_CASE("tags_on_trailing_line returns empty for an empty body", "[tag_line_ed
   REQUIRE(tags_on_trailing_line("").empty());
 }
 
+TEST_CASE("tags_on_trailing_line rejects an invalid hash token on the tag line", "[tag_line_editor]") {
+  REQUIRE(tags_on_trailing_line("Body\n\n#valid #123").empty());
+}
+
 TEST_CASE("tags_on_trailing_line survives trailing whitespace after the line", "[tag_line_editor]") {
   REQUIRE(
       tags_on_trailing_line("hello\n\n#work #android\n\n\n") == std::vector<std::string>{"work", "android"}
