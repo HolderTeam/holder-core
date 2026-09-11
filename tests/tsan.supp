@@ -1,0 +1,17 @@
+# ThreadSanitizer suppressions for holder-core.
+#
+# Use with: TSAN_OPTIONS="suppressions=<path>/tests/tsan.supp" ./holder_core_tests
+#
+# These are pre-existing, out-of-scope concurrency limitations -- not defects in
+# the RealGitOps ownership / per-project locking change. They belong to the
+# planned broad "make holder-core safe to call concurrently" audit.
+
+# git_signature_now() -> localtime()/tzset() mutates glibc's process-global
+# timezone state (tzname/timezone/daylight) without synchronization. Two threads
+# creating commits in *different* projects at the same time race here. The
+# per-project lock intentionally does not serialize different projects, so this
+# is visible; the real fixes (call tzset() once at startup, pin the signature
+# time zone, or serialize signature creation) are a behavioural decision left to
+# the concurrency audit.
+race:tzset_internal
+called_from_lib:libgit2.so

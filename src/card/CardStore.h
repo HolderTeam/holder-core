@@ -14,6 +14,7 @@
 #include "project/ProjectRepo.h"
 
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -142,6 +143,8 @@ class CardStore {
 
   holder::platform::Db& db_;
   holder::core::Fs* fs_ = nullptr;
+  // Owns the Git handle only when the caller injected none; see the constructor.
+  std::unique_ptr<holder::git::RealGitOps> owned_git_;
   holder::git::GitOps* git_ = nullptr;
   CardRepo card_repo_;
   LinkRepo link_repo_;

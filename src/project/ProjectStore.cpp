@@ -10,11 +10,6 @@
 namespace holder::project {
 namespace {
 
-holder::git::GitOps& resolve_git(holder::git::GitOps* git) {
-  static holder::git::RealGitOps real_git;
-  return git ? *git : real_git;
-}
-
 long long now_epoch_seconds() {
   return std::chrono::duration_cast<std::chrono::seconds>(
              std::chrono::system_clock::now().time_since_epoch()
@@ -25,7 +20,9 @@ long long now_epoch_seconds() {
 } // namespace
 
 ProjectStore::ProjectStore(holder::platform::Db& db, holder::git::GitOps* git)
-    : repo_(db), git_(&resolve_git(git)) {}
+    : repo_(db),
+      owned_git_(git ? nullptr : std::make_unique<holder::git::RealGitOps>()),
+      git_(git ? git : owned_git_.get()) {}
 
 holder::model::Project ProjectStore::create(
     holder::model::Project project,

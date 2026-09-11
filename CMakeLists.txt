@@ -9,10 +9,21 @@ include(CTest)
 
 option(HOLDER_CORE_WARNINGS_AS_ERRORS "Treat Holder core warnings as errors" OFF)
 
+# Opt-in sanitizer instrumentation, e.g. -DHOLDER_CORE_SANITIZE=thread or
+# -DHOLDER_CORE_SANITIZE=address,undefined. Applied to every target in this
+# build (library and tests) so the concurrency tests can be run under
+# ThreadSanitizer.
+set(HOLDER_CORE_SANITIZE "" CACHE STRING "Sanitizers to enable (thread; address,undefined; ...)")
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+if(HOLDER_CORE_SANITIZE)
+  add_compile_options(-fsanitize=${HOLDER_CORE_SANITIZE} -fno-omit-frame-pointer -g)
+  add_link_options(-fsanitize=${HOLDER_CORE_SANITIZE})
+endif()
 
 if(WIN32)
   add_compile_definitions(
@@ -139,6 +150,7 @@ add_library(holder STATIC
   src/git/EcdsaDerSigningCredentialProvider.cpp
   src/git/GitOps.cpp
   src/git/GitRepo.cpp
+  src/git/RepoLocks.cpp
   src/git/RepoSyncMetrics.cpp
   src/git/SshAgentAndFileCredentialProvider.cpp
   src/history/CardHistory.cpp

@@ -7,6 +7,7 @@
 
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 
@@ -33,6 +34,8 @@ class ProjectStore {
 
  private:
   ProjectRepo repo_;
+  // Owns the Git handle only when the caller injected none; see the constructor.
+  std::unique_ptr<holder::git::RealGitOps> owned_git_;
   holder::git::GitOps* git_;
 };
 

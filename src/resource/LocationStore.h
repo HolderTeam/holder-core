@@ -7,6 +7,7 @@
 #include "project/ProjectRepo.h"
 #include "resource/LocationRepo.h"
 
+#include <memory>
 #include <optional>
 #include <string>
 
@@ -29,6 +30,8 @@ class LocationStore {
 
   holder::platform::Db& db_;
   holder::core::Fs* fs_;
+  // Owns the Git handle only when the caller injected none; see the constructor.
+  std::unique_ptr<holder::git::RealGitOps> owned_git_;
   holder::git::GitOps* git_;
   holder::project::ProjectRepo project_repo_;
   LocationRepo location_repo_;
