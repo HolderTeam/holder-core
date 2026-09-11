@@ -2073,3 +2073,18 @@ TEST_CASE("CardStore list_editable_tags reflects add_tag/remove_tag", "[cardstor
   store.remove_tag(card.card_id, "android", 3);
   REQUIRE(store.list_editable_tags(card.card_id).empty());
 }
+
+TEST_CASE("CardStore tag and historical restore methods reject missing cards",
+          "[cardstore]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  holder::index::FtsIndexer fts(db);
+  holder::card::CardStore store(db, &fts);
+
+  REQUIRE_THROWS(store.restore_version("missing-card", "historical-oid", 1));
+  REQUIRE_THROWS(store.add_tag("missing-card", "todo", 1));
+  REQUIRE_THROWS(store.remove_tag("missing-card", "todo", 1));
+  REQUIRE_THROWS(store.list_editable_tags("missing-card"));
+}

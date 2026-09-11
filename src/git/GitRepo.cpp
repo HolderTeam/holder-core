@@ -1258,7 +1258,8 @@ GitHistoryPage GitRepo::history_for_paths(
   if (rc != 0) throw git_err("git_revwalk_new failed", rc);
   git_revwalk_sorting(walk, GIT_SORT_TOPOLOGICAL | GIT_SORT_TIME);
   rc = git_revwalk_push_head(walk);
-  if (rc == GIT_EUNBORNBRANCH || rc == GIT_ENOTFOUND) {
+  if (rc == GIT_EUNBORNBRANCH || rc == GIT_ENOTFOUND ||
+      git_repository_is_empty(repo) == 1) {
     git_revwalk_free(walk);
     return page;
   }
@@ -1355,7 +1356,8 @@ GitHistoryPage GitRepo::history_all(
   if (rc != 0) throw git_err("git_revwalk_new failed", rc);
   git_revwalk_sorting(walk, GIT_SORT_TOPOLOGICAL | GIT_SORT_TIME);
   rc = git_revwalk_push_head(walk);
-  if (rc == GIT_EUNBORNBRANCH || rc == GIT_ENOTFOUND) {
+  if (rc == GIT_EUNBORNBRANCH || rc == GIT_ENOTFOUND ||
+      git_repository_is_empty(repo) == 1) {
     git_revwalk_free(walk);
     return page;
   }

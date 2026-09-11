@@ -227,6 +227,16 @@ TEST_CASE("C API reports invalid context open arguments", "[capi]") {
   REQUIRE(error != nullptr);
   REQUIRE(std::string(holder_error_message(error)).find("out_context") != std::string::npos);
   holder_error_destroy(error);
+
+  const auto data_dir = holder::test::make_temp_dir();
+  std::filesystem::create_directories(data_dir / "server" / "holder.db");
+  holder_context *context = nullptr;
+  error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), nullptr, &context,
+                              &error) == HOLDER_ERROR_RUNTIME);
+  REQUIRE(context == nullptr);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
 }
 
 TEST_CASE("C API opens context and lists empty projects", "[capi]") {
@@ -1035,9 +1045,8 @@ TEST_CASE(
     holder::card::MilestoneRepo milestone_repo(db);
     milestone_repo.replace_for_card(
         "project-1", card_ids[2],
-        {{"m1", "project-1", card_ids[2], 999, std::nullopt, true, std::string("Deadline"),
-          std::string("ship it"), 300, 300}}
-    );
+        {{"m1", "project-1", card_ids[2], 999, 1'111, true,
+          std::string("Deadline"), std::string("ship it"), 300, 300}});
   }
 
   // First page: the two most recently updated cards, newest first.
@@ -2571,9 +2580,16 @@ TEST_CASE(
   const std::string created_oid = page["entries"][1]["last_oid"].get<std::string>();
   holder_string_free(json);
 
-  // "This change" for the grouped update entry: no explicit from, captured to = its own
-  // last save -- the pre-creation state (from) does not exist for card creation, but here
-  // from is simply omitted by the caller (matching the desktop "This change" default).
+  json = nullptr;
+  REQUIRE(holder_card_history_list(context, "project-1", card_id.c_str(),
+                                   head_oid.c_str(), 50, &json,
+                                   &error) == HOLDER_OK);
+  holder_string_free(json);
+
+  // "This change" for the grouped update entry: no explicit from, captured to =
+  // its own last save -- the pre-creation state (from) does not exist for card
+  // creation, but here from is simply omitted by the caller (matching the
+  // desktop "This change" default).
   json = nullptr;
   REQUIRE(
       holder_card_history_compare(

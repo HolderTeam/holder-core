@@ -1,5 +1,6 @@
 #if __has_include(<catch2/catch_test_macros.hpp>)
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #else
 #include <catch2/catch.hpp>
 #endif
@@ -64,6 +65,13 @@ void create_project(holder::platform::Db& db, const std::string& project_id) {
   project.created_at = 1;
   project.updated_at = 1;
   holder::project::ProjectRepo(db).create(project);
+}
+
+void write_text(const std::filesystem::path &path, const std::string &text) {
+  std::filesystem::create_directories(path.parent_path());
+  std::ofstream output(path, std::ios::binary | std::ios::trunc);
+  REQUIRE(output.is_open());
+  output << text;
 }
 
 holder::model::ResourceBundle sample_bundle() {
@@ -374,7 +382,120 @@ TEST_CASE("Project rebuild reconstructs resources assets placements and location
   REQUIRE(holder::resource::ResourceRepo(db).get("resource-1234").has_value());
 }
 
-TEST_CASE("Encrypted Resource and Location manifests rebuild after projection deletion", "[resource][privacy]") {
+TEST_CASE(
+    "Project rebuild rejects corrupt resource and location ownership data",
+    "[resource]") {
+  const auto dir = make_temp_dir();
+  const auto project_root = dir / "project";
+  std::filesystem::create_directories(project_root);
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+
+  holder::model::Project project;
+  project.project_id = "project-1234";
+  project.name = "Project";
+  project.root_path = project_root.string();
+  project.created_at = 1;
+  project.updated_at = 1;
+  holder::project::ProjectRepo(db).create(project);
+
+  const auto write_location = [&](const holder::model::Location &location) {
+    write_text(project_root /
+                   holder::resource::location_rel_path(location.location_id),
+               holder::resource::render_location_manifest(location));
+  };
+  const auto write_resource = [&](const holder::model::ResourceBundle &bundle) {
+    write_text(project_root / holder::resource::resource_rel_path(
+                                  bundle.resource.resource_id),
+               holder::resource::render_resource_manifest(bundle));
+  };
+  const auto rebuild = [&] {
+    holder::store::Rebuilder(db, nullptr).rebuild_project(project);
+  };
+
+  SECTION("malformed location manifest") {
+    write_text(project_root /
+                   holder::resource::location_rel_path("location-1234"),
+               "{not-json");
+    REQUIRE_THROWS_WITH(
+        rebuild(), Catch::Matchers::ContainsSubstring("location-1234.json"));
+  }
+
+  SECTION("location belongs to another project") {
+    auto location = sample_location();
+    location.project_id = "another-project";
+    write_location(location);
+    REQUIRE_THROWS_WITH(rebuild(),
+                        Catch::Matchers::ContainsSubstring("another project"));
+  }
+
+  SECTION("malformed resource manifest") {
+    write_text(project_root /
+                   holder::resource::resource_rel_path("resource-1234"),
+               "{not-json");
+    REQUIRE_THROWS_WITH(
+        rebuild(), Catch::Matchers::ContainsSubstring("resource-1234.json"));
+  }
+
+  SECTION("resource belongs to another project") {
+    auto bundle = sample_bundle();
+    bundle.resource.project_id = "another-project";
+    write_resource(bundle);
+    REQUIRE_THROWS_WITH(rebuild(),
+                        Catch::Matchers::ContainsSubstring("another project"));
+  }
+
+  SECTION("duplicate asset id") {
+    auto first = sample_bundle();
+    auto second = sample_bundle();
+    second.resource.resource_id = "resource-5678";
+    second.assets[0].resource_id = second.resource.resource_id;
+    second.assets[0].placements[0].asset_id = second.assets[0].asset_id;
+    write_resource(first);
+    write_resource(second);
+    REQUIRE_THROWS_WITH(
+        rebuild(), Catch::Matchers::ContainsSubstring("duplicate asset_id"));
+  }
+
+  SECTION("invalid plaintext digest") {
+    auto bundle = sample_bundle();
+    bundle.assets[0].plaintext_sha256 = "not-a-sha256";
+    write_resource(bundle);
+    REQUIRE_THROWS_WITH(rebuild(), Catch::Matchers::ContainsSubstring(
+                                       "invalid plaintext_sha256"));
+  }
+
+  SECTION("duplicate placement id") {
+    auto bundle = sample_bundle();
+    auto second_asset = bundle.assets[0];
+    second_asset.asset_id = "asset-5678";
+    second_asset.resource_id = bundle.resource.resource_id;
+    second_asset.placements[0].asset_id = second_asset.asset_id;
+    bundle.assets.push_back(second_asset);
+    write_resource(bundle);
+    REQUIRE_THROWS_WITH(rebuild(), Catch::Matchers::ContainsSubstring(
+                                       "duplicate placement_id"));
+  }
+
+  SECTION("invalid stored digest") {
+    auto bundle = sample_bundle();
+    bundle.assets[0].placements[0].stored_sha256 = "not-a-sha256";
+    write_resource(bundle);
+    REQUIRE_THROWS_WITH(
+        rebuild(), Catch::Matchers::ContainsSubstring("invalid stored_sha256"));
+  }
+
+  SECTION("placement refers to unknown location") {
+    write_resource(sample_bundle());
+    REQUIRE_THROWS_WITH(rebuild(),
+                        Catch::Matchers::ContainsSubstring("unknown location"));
+  }
+}
+
+TEST_CASE("Encrypted Resource and Location manifests rebuild after projection "
+          "deletion",
+          "[resource][privacy]") {
   const auto dir = make_temp_dir();
   const auto project_root = dir / "project";
   holder::test::EnvGuard keystore_env("HOLDER_TEST_KEYSTORE_DIR", (dir / "keystore").string());
@@ -439,4 +560,27 @@ TEST_CASE("Encrypted Resource and Location manifests rebuild after projection de
   REQUIRE(rebuilt.locations == 1);
   REQUIRE(holder::resource::ResourceRepo(db).get_bundle("resource-1234")->resource.label == "Boiler фото");
   REQUIRE(holder::resource::LocationRepo(db).get("location-1234")->name == "Family Assets");
+}
+
+TEST_CASE("Encrypted resource stores reject projects without key identities",
+          "[resource][privacy]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+
+  holder::model::Project project;
+  project.project_id = "project-1234";
+  project.name = "Missing key";
+  project.root_path = (dir / "project").string();
+  project.privacy_mode = "encrypted_git";
+  project.created_at = 1;
+  project.updated_at = 1;
+  holder::project::ProjectRepo(db).create(project);
+
+  holder::git::RealGitOps git;
+  REQUIRE_THROWS(holder::resource::LocationStore(db, nullptr, &git)
+                     .put(sample_location()));
+  REQUIRE_THROWS(
+      holder::resource::ResourceStore(db, nullptr, &git).put(sample_bundle()));
 }

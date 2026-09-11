@@ -1031,3 +1031,34 @@ TEST_CASE(
     }
   }
 }
+
+TEST_CASE("GitRepo history handles unborn repos pagination and invalid cursors",
+          "[git]") {
+  const auto dir = make_temp_dir();
+  holder::git::GitRepo repo;
+  repo.open_or_init(dir);
+
+  CHECK(repo.history_for_paths({"cards/a.md"}, 10, std::nullopt, 100)
+            .commits.empty());
+  CHECK(repo.history_all(10, std::nullopt, 100).commits.empty());
+
+  repo.write_file("cards/a.md", "one");
+  repo.stage_path("cards/a.md");
+  repo.commit("First");
+  repo.write_file("cards/a.md", "two");
+  repo.stage_path("cards/a.md");
+  repo.commit("Second");
+
+  const auto path_page =
+      repo.history_for_paths({"cards/a.md"}, 1, std::nullopt, 100);
+  REQUIRE(path_page.commits.size() == 1);
+  CHECK(path_page.has_more);
+
+  const auto all_page = repo.history_all(1, std::nullopt, 100);
+  REQUIRE(all_page.commits.size() == 1);
+  CHECK(all_page.has_more);
+
+  REQUIRE_THROWS(
+      repo.history_for_paths({"cards/a.md"}, 10, "not-a-reachable-oid", 100));
+  REQUIRE_THROWS(repo.history_all(10, "not-a-reachable-oid", 100));
+}

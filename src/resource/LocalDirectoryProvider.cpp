@@ -46,7 +46,10 @@ std::filesystem::path temporary_sibling(const std::filesystem::path& target) {
 LocalDirectoryProvider::LocalDirectoryProvider(std::filesystem::path root)
     : root_(std::filesystem::absolute(std::move(root)).lexically_normal()) {
   if (root_.empty()) {
-    throw StorageError(StorageErrorCode::InvalidConfiguration, "local storage root is empty");
+    // std::filesystem::absolute() cannot produce an empty path for a
+    // successfully constructed provider, but retain the guard for
+    // implementations with different path semantics.
+    throw StorageError(StorageErrorCode::InvalidConfiguration, "local storage root is empty"); // LCOV_EXCL_LINE
   }
 }
 
@@ -63,7 +66,10 @@ std::filesystem::path LocalDirectoryProvider::resolve(const std::string& object_
   const auto result = (root_ / relative).lexically_normal();
   const auto relative_to_root = result.lexically_relative(root_);
   if (relative_to_root.empty() || *relative_to_root.begin() == "..") {
-    throw StorageError(StorageErrorCode::InvalidConfiguration, "storage object escapes root");
+    // Absolute keys and every dot/dot-dot component were rejected above, so
+    // lexical joining cannot escape root_. This is a final defence if
+    // filesystem path semantics ever change.
+    throw StorageError(StorageErrorCode::InvalidConfiguration, "storage object escapes root"); // LCOV_EXCL_LINE
   }
   return result;
 }

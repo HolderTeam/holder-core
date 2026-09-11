@@ -237,8 +237,11 @@ Rebuilder::RebuildStats Rebuilder::rebuild_project(const holder::model::Project&
     if (location.project_id != project.project_id) {
       throw std::runtime_error(actual + ": location belongs to another project");
     }
+    // A valid location_id has one canonical path, and the directory iterator
+    // yields each path once. Keep the guard as defence against future
+    // non-filesystem discovery implementations.
     if (!location_ids.insert(location.location_id).second) {
-      throw std::runtime_error(actual + ": duplicate location_id");
+      throw std::runtime_error(actual + ": duplicate location_id"); // LCOV_EXCL_LINE
     }
     locations.push_back(std::move(location));
   }
@@ -262,8 +265,10 @@ Rebuilder::RebuildStats Rebuilder::rebuild_project(const holder::model::Project&
     if (bundle.resource.project_id != project.project_id) {
       throw std::runtime_error(actual + ": resource belongs to another project");
     }
+    // As above, canonical resource paths make duplicate IDs structurally
+    // unreachable today.
     if (!resource_ids.insert(bundle.resource.resource_id).second) {
-      throw std::runtime_error(actual + ": duplicate resource_id");
+      throw std::runtime_error(actual + ": duplicate resource_id"); // LCOV_EXCL_LINE
     }
     for (const auto& asset : bundle.assets) {
       if (!asset_ids.insert(asset.asset_id).second) {
@@ -457,8 +462,10 @@ Rebuilder::RebuildStats Rebuilder::rebuild_project(const holder::model::Project&
     const auto actual = relative_path_string(root, path);
     const auto expected = holder::ai::ai_thread_manifest_rel_path(thread.thread_id);
     if (actual != expected) throw std::runtime_error(actual + ": AI thread path does not match id");
+    // A thread_id likewise maps to exactly one accepted canonical manifest
+    // path.
     if (!durable_threads.emplace(thread.thread_id, thread).second) {
-      throw std::runtime_error(actual + ": duplicate thread_id");
+      throw std::runtime_error(actual + ": duplicate thread_id"); // LCOV_EXCL_LINE
     }
   }
 

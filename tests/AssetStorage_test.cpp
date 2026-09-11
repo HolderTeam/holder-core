@@ -9,6 +9,7 @@
 #include "card/CardPaths.h"
 #include "card/CardRepo.h"
 #include "card/LinkRepo.h"
+#include "core_test_helpers.h"
 #include "git/GitOps.h"
 #include "platform/Db.h"
 #include "privacy/ProjectPrivacy.h"
@@ -19,6 +20,7 @@
 #include "resource/LocalDirectoryProvider.h"
 #include "resource/LocationBindingStore.h"
 #include "resource/LocationRepo.h"
+#include "resource/ResourcePaths.h"
 #include "resource/ResourceRepo.h"
 #include "resource/ResourceStore.h"
 
@@ -145,6 +147,22 @@ class FileGit final : public holder::git::GitOps {
   std::filesystem::path root_;
   std::vector<std::string> staged;
   std::vector<std::string> commits;
+};
+
+class InvisibleAfterPutProvider final
+    : public holder::resource::StorageProvider {
+public:
+  void put(const std::string &, const std::filesystem::path &, long long,
+           const std::string &) override {
+    put_called = true;
+  }
+  void get(const std::string &, const std::filesystem::path &) override {
+    throw std::runtime_error("not stored");
+  }
+  bool exists(const std::string &) override { return false; }
+  void remove(const std::string &) override {}
+
+  bool put_called = false;
 };
 
 } // namespace
@@ -354,7 +372,12 @@ TEST_CASE("Local directory provider is atomic and idempotent", "[asset]") {
       )
   );
   provider.get("project/asset.holderasset", dir / "download.bin");
-  REQUIRE(holder::resource::digest_file(dir / "download.bin").sha256 == digest.sha256);
+  REQUIRE(holder::resource::digest_file(dir / "download.bin").sha256 ==
+          digest.sha256);
+  const auto directory_destination = dir / "directory-destination";
+  std::filesystem::create_directory(directory_destination);
+  REQUIRE_THROWS(
+      provider.get("project/asset.holderasset", directory_destination));
   REQUIRE_THROWS(provider.exists("../escape"));
   provider.remove("project/asset.holderasset");
   REQUIRE_FALSE(provider.exists("project/asset.holderasset"));
@@ -375,7 +398,13 @@ TEST_CASE("Location bindings and preferences survive independently of SQLite", "
   REQUIRE_FALSE(bindings.preview("project-1", "missing-location").has_value());
   REQUIRE(bindings.preferred("project-1") == "location-1");
 
-  auto reopened = holder::privacy::make_encrypted_file_secret_store_for_tests(dir / "server");
+  secrets->set("org.holder.StorageLocation", "project-1:unsupported-location",
+               R"({"version":2,"provider":"s3_compatible","values":{}})",
+               "unsupported", 10, 10);
+  REQUIRE_THROWS(bindings.get("project-1", "unsupported-location"));
+
+  auto reopened = holder::privacy::make_encrypted_file_secret_store_for_tests(
+      dir / "server");
   holder::resource::LocationBindingStore recovered(*reopened);
   REQUIRE(recovered.get("project-1", "location-1").has_value());
   REQUIRE(recovered.preferred("project-1") == "location-1");
@@ -483,6 +512,16 @@ TEST_CASE("Asset import stores, links, deduplicates and retrieves", "[asset]") {
       bundle->assets[0].plaintext_sha256
   );
 
+  write_binary(dir / "objects" / placement.object_key,
+               "corrupt provider object");
+  const auto failed_destination = dir / "failed-retrieval.jpg";
+  REQUIRE_THROWS(importer.retrieve(first.resource_id, first.asset_id,
+                                   placement.placement_id, provider,
+                                   failed_destination));
+  REQUIRE_FALSE(std::filesystem::exists(failed_destination));
+  REQUIRE_FALSE(std::filesystem::exists(
+      dir / "staging" / (placement.placement_id + ".download")));
+
   holder::resource::ResourceStore(db, nullptr, &git).remove(first.resource_id);
   REQUIRE_FALSE(holder::resource::ResourceRepo(db).get(first.resource_id).has_value());
   REQUIRE(holder::card::LinkRepo(db).list_outgoing(project.project_id, card.card_id).empty());
@@ -532,8 +571,96 @@ TEST_CASE("Asset import stores, links, deduplicates and retrieves", "[asset]") {
   invalid_request.location_id = "missing-location";
   REQUIRE_THROWS(importer.import_file(invalid_request, provider));
 
-  db.exec(
-      "UPDATE cards SET rel_path = 'cards/wrong.md' WHERE card_id = 'card-1234';"
-  );
+  request.source_file = dir / "invisible-object.bin";
+  write_pattern(request.source_file, 333);
+  InvisibleAfterPutProvider invisible;
+  REQUIRE_THROWS(importer.import_file(request, invisible));
+  REQUIRE(invisible.put_called);
+
+  db.exec("UPDATE cards SET rel_path = 'cards/wrong.md' WHERE card_id = "
+          "'card-1234';");
   REQUIRE_THROWS(importer.import_file(request, provider));
+}
+
+TEST_CASE("Asset import encrypts durable manifests and card updates",
+          "[asset][privacy]") {
+  const auto dir = temp_dir("encrypted-import");
+  const auto project_root = dir / "project";
+  holder::test::EnvGuard keystore_env("HOLDER_TEST_KEYSTORE_DIR",
+                                      (dir / "keystore").string());
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+
+  holder::model::Project project;
+  project.project_id = "project-1234";
+  project.name = "Encrypted project";
+  project.root_path = project_root.string();
+  project.privacy_mode = "plain";
+  project.created_at = 1;
+  project.updated_at = 1;
+  holder::project::ProjectRepo projects(db);
+  projects.create(project);
+  project.project_key_id = holder::privacy::ensure_project_key_material(
+      projects, project.project_id, std::nullopt, 2,
+      [] { return "encrypted-import-key"; });
+  project.privacy_mode = "encrypted_git";
+  projects.update_privacy_mode(project.project_id, project.privacy_mode, 2);
+
+  holder::model::Card card;
+  card.card_id = "card-1234";
+  card.project_id = project.project_id;
+  card.title = "Encrypted card";
+  card.rel_path = holder::core::card_rel_path(card.card_id);
+  card.created_at = 1;
+  card.updated_at = 1;
+  holder::card::CardRepo(db).create(card);
+
+  holder::git::RealGitOps git;
+  git.open_or_init(project_root);
+  git.write_file(card.rel_path,
+                 holder::privacy::encrypt_project_blob(
+                     project.project_id, *project.project_key_id,
+                     holder::core::render_card_front_matter(card, {}, {}) +
+                         "Secret body\n"));
+
+  holder::model::Location location;
+  location.location_id = "location-1234";
+  location.project_id = project.project_id;
+  location.name = "Encrypted assets";
+  location.provider = "local_directory";
+  location.created_at = 1;
+  location.updated_at = 1;
+  holder::resource::LocationRepo(db).put(location);
+
+  const auto source = dir / "secret.pdf";
+  write_pattern(source, 1'024);
+  int sequence = 0;
+  holder::resource::AssetImportService importer(
+      db, dir / "staging",
+      [&] { return "generated-" + std::to_string(++sequence); }, nullptr, &git);
+  holder::resource::LocalDirectoryProvider provider(dir / "objects");
+  holder::resource::AssetImportRequest request;
+  request.project_id = project.project_id;
+  request.card_id = card.card_id;
+  request.location_id = location.location_id;
+  request.source_file = source;
+  request.now = 10;
+
+  const auto imported = importer.import_file(request, provider);
+  const auto resource_path =
+      project_root / holder::resource::resource_rel_path(imported.resource_id);
+  CHECK(read_binary(resource_path).rfind("HolderPriv1\n", 0) == 0);
+  CHECK(read_binary(project_root / card.rel_path).rfind("HolderPriv1\n", 0) ==
+        0);
+
+  const auto bundle =
+      holder::resource::ResourceRepo(db).get_bundle(imported.resource_id);
+  REQUIRE(bundle.has_value());
+  const auto &placement = bundle->assets[0].placements[0];
+  const auto retrieved = dir / "retrieved.pdf";
+  importer.retrieve(imported.resource_id, imported.asset_id,
+                    placement.placement_id, provider, retrieved);
+  CHECK(holder::resource::digest_file(retrieved).sha256 ==
+        bundle->assets[0].plaintext_sha256);
 }
