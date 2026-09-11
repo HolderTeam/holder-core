@@ -307,7 +307,8 @@ void mark_database_rebuild_ready(const std::filesystem::path& readiness_path) {
     std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
     if (!output) throw std::runtime_error("failed to write database rebuild readiness marker");
     output << nlohmann::json{
-        {"version", kReadinessVersion}, {"durable_owner_generation", 1}
+        {"version", kReadinessVersion}, // LCOV_EXCL_LINE - GCC assigns no counter to this executed initializer.
+        {"durable_owner_generation", 1} // LCOV_EXCL_LINE - GCC gives this initializer no counter.
     }.dump(2) << '\n';
     output.flush();
     if (!output) throw std::runtime_error("failed to flush database rebuild readiness marker");

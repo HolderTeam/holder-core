@@ -4,6 +4,9 @@
 #include <catch2/catch.hpp>
 #endif
 
+#include "ai/AiMessageFrontMatter.h"
+#include "ai/AiMessagePaths.h"
+#include "ai/AiThreadManifest.h"
 #include "card/CardRepo.h"
 #include "card/CardStore.h"
 #include "git/GitOps.h"
@@ -12,6 +15,8 @@
 #include "model/Card.h"
 #include "model/Project.h"
 #include "privacy/ProjectPrivacy.h"
+#include "project/ProjectManifest.h"
+#include "project/ProjectRepo.h"
 #include "project/Rebuilder.h"
 #include "project/ProjectRepo.h"
 #include "project/StartupRecovery.h"
@@ -22,7 +27,15 @@
 
 namespace {
 
-std::vector<std::string> split_lines3_sr(const std::string& envelope) {
+void write_startup_file(const std::filesystem::path &path,
+                        const std::string &text) {
+  std::filesystem::create_directories(path.parent_path());
+  std::ofstream output(path, std::ios::binary | std::ios::trunc);
+  REQUIRE(output.is_open());
+  output << text;
+}
+
+std::vector<std::string> split_lines3_sr(const std::string &envelope) {
   std::istringstream in(envelope);
   std::vector<std::string> lines;
   std::string line;
@@ -122,6 +135,137 @@ TEST_CASE("Rebuilder rejects ai message front matter without message id", "[star
   project.updated_at = 1;
 
   REQUIRE_THROWS(rebuilder.rebuild_project(project));
+}
+
+TEST_CASE("Rebuilder validates durable AI thread manifests",
+          "[startup][recovery]") {
+  const auto dir = holder::test::make_temp_dir();
+  const auto root = dir / "project";
+  std::filesystem::create_directories(root);
+  auto db = holder::test::open_db_with_schema(dir / "holder.db");
+
+  holder::model::Project project;
+  project.project_id = "project-1234";
+  project.name = "Project";
+  project.root_path = root.string();
+  project.privacy_mode = "plain";
+  project.created_at = 1;
+  project.updated_at = 1;
+  holder::project::ProjectRepo(db).create(project);
+
+  holder::model::AiThread thread;
+  thread.thread_id = "thread-1234";
+  thread.project_id = project.project_id;
+  thread.title = "Thread";
+  thread.created_at = 1;
+  thread.updated_at = 2;
+
+  const auto rebuild = [&](bool require_manifests = false) {
+    return holder::store::Rebuilder(db, nullptr, nullptr, false,
+                                    require_manifests)
+        .rebuild_project(project);
+  };
+
+  SECTION("malformed manifest") {
+    write_startup_file(
+        root / holder::ai::ai_thread_manifest_rel_path(thread.thread_id),
+        "{bad-json");
+    REQUIRE_THROWS(rebuild());
+  }
+
+  SECTION("manifest in the wrong shard") {
+    write_startup_file(root / "ai_threads" / "xx" / "yy" /
+                           (thread.thread_id + ".json"),
+                       holder::ai::render_ai_thread_manifest(project, thread));
+    REQUIRE_THROWS(rebuild());
+  }
+
+  SECTION("durable manifest is rebuilt without messages") {
+    write_startup_file(
+        root / holder::ai::ai_thread_manifest_rel_path(thread.thread_id),
+        holder::ai::render_ai_thread_manifest(project, thread));
+    REQUIRE(rebuild().ai_threads == 1);
+  }
+
+  holder::model::AiMessage message;
+  message.message_id = "message-1234";
+  message.thread_id = "thread-5678";
+  message.role = "user";
+  message.source = "manual";
+  message.created_at = 3;
+  const auto message_text = holder::core::render_ai_message_front_matter(
+                                message, project.project_id, {}) +
+                            "Hello\n";
+
+  SECTION("message refers to a thread without a matching durable manifest") {
+    write_startup_file(
+        root / holder::ai::ai_thread_manifest_rel_path(thread.thread_id),
+        holder::ai::render_ai_thread_manifest(project, thread));
+    write_startup_file(
+        root / holder::core::ai_message_rel_path(message.message_id),
+        message_text);
+    REQUIRE_THROWS(rebuild());
+  }
+
+  SECTION("strict rebuilding requires thread manifests") {
+    write_startup_file(
+        root / holder::core::ai_message_rel_path(message.message_id),
+        message_text);
+    REQUIRE_THROWS(rebuild(true));
+  }
+}
+
+TEST_CASE("Strict project recovery requires unique durable manifests",
+          "[startup][recovery]") {
+  const auto dir = holder::test::make_temp_dir();
+  auto db = holder::test::open_db_with_schema(dir / "holder.db");
+
+  SECTION("missing manifest") {
+    const auto root = dir / "missing-manifest";
+    std::filesystem::create_directories(root);
+    REQUIRE_THROWS(holder::project::recover_project_roots(
+        db, nullptr, {root}, [] { return std::string("unused"); }, true));
+  }
+
+  const auto write_project = [&](const std::filesystem::path &root) {
+    holder::model::Project project;
+    project.project_id = "project-1234";
+    project.name = "Project";
+    project.root_path = root.string();
+    project.privacy_mode = "plain";
+    project.created_at = 1;
+    project.updated_at = 1;
+    write_startup_file(root / holder::project::kProjectBootstrapPath,
+                       holder::project::render_project_bootstrap(project));
+    write_startup_file(root / holder::project::kProjectManifestPath,
+                       holder::project::render_project_manifest(project));
+  };
+
+  SECTION("an already recovered root is skipped") {
+    const auto root = dir / "existing";
+    write_project(root);
+    holder::model::Project existing;
+    existing.project_id = "project-1234";
+    existing.name = "Project";
+    existing.root_path = root.string();
+    existing.privacy_mode = "plain";
+    existing.created_at = 1;
+    existing.updated_at = 1;
+    holder::project::ProjectRepo(db).create(existing);
+    REQUIRE(holder::project::recover_project_roots(
+                db, nullptr, {root}, [] { return std::string("unused"); }, true)
+                .empty());
+  }
+
+  SECTION("same project id at different roots is rejected") {
+    const auto first = dir / "first";
+    const auto second = dir / "second";
+    write_project(first);
+    write_project(second);
+    REQUIRE_THROWS(holder::project::recover_project_roots(
+        db, nullptr, {first, second}, [] { return std::string("unused"); },
+        true));
+  }
 }
 
 TEST_CASE(

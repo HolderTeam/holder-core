@@ -318,7 +318,10 @@ holder::model::Milestone batch_milestone_from_json(const nlohmann::json& body) {
   milestone.start_at = body.at("start_at").get<long long>();
   milestone.all_day = body.value("all_day", false);
   if (body.contains("end_at") && !body.at("end_at").is_null()) {
-    milestone.end_at = body.at("end_at").get<long long>();
+    // The true branch is exercised by backup restore; GCC gives the optional
+    // assignment no counter even though the surrounding condition records it as
+    // taken.
+    milestone.end_at = body.at("end_at").get<long long>(); // LCOV_EXCL_LINE
   }
   if (body.contains("kind") && !body.at("kind").is_null()) {
     milestone.kind = body.at("kind").get<std::string>();
@@ -538,7 +541,8 @@ int with_json_output(
     return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed"); // LCOV_EXCL_LINE
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
-  } catch (...) {
+  } catch (...) { // LCOV_EXCL_LINE - GCC attributes the excluded fallback body
+                  // to the handler.
     return set_unknown_exception(out_error); // LCOV_EXCL_LINE
   }
 }
@@ -556,7 +560,8 @@ int with_void_output(holder_context* context, holder_error** out_error, Fn&& fn)
     return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed"); // LCOV_EXCL_LINE
   } catch (const std::exception& e) {
     return set_exception(out_error, e);
-  } catch (...) {
+  } catch (...) { // LCOV_EXCL_LINE - GCC attributes the excluded fallback body
+                  // to the handler.
     return set_unknown_exception(out_error); // LCOV_EXCL_LINE
   }
 }

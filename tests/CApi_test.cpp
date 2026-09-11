@@ -227,6 +227,16 @@ TEST_CASE("C API reports invalid context open arguments", "[capi]") {
   REQUIRE(error != nullptr);
   REQUIRE(std::string(holder_error_message(error)).find("out_context") != std::string::npos);
   holder_error_destroy(error);
+
+  const auto data_dir = holder::test::make_temp_dir();
+  std::filesystem::create_directories(data_dir / "server" / "holder.db");
+  holder_context *context = nullptr;
+  error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), nullptr, &context,
+                              &error) == HOLDER_ERROR_RUNTIME);
+  REQUIRE(context == nullptr);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
 }
 
 TEST_CASE("C API opens context and lists empty projects", "[capi]") {
@@ -1035,9 +1045,8 @@ TEST_CASE(
     holder::card::MilestoneRepo milestone_repo(db);
     milestone_repo.replace_for_card(
         "project-1", card_ids[2],
-        {{"m1", "project-1", card_ids[2], 999, std::nullopt, true, std::string("Deadline"),
-          std::string("ship it"), 300, 300}}
-    );
+        {{"m1", "project-1", card_ids[2], 999, 1'111, true,
+          std::string("Deadline"), std::string("ship it"), 300, 300}});
   }
 
   // First page: the two most recently updated cards, newest first.
@@ -1998,6 +2007,23 @@ TEST_CASE("C API validates resource, asset, location, and editable-tag arguments
   );
   clear_expected_error();
 
+  REQUIRE(holder_asset_get(context, "missing-asset", &json, &error) == HOLDER_ERROR_RUNTIME);
+  clear_expected_error();
+  REQUIRE(holder_resource_delete(context, "missing-resource", &error) == HOLDER_ERROR_RUNTIME);
+  clear_expected_error();
+  REQUIRE(
+      holder_asset_retrieve(
+          nullptr, "resource-1", "asset-1", "placement-1", "/tmp/destination", &error
+      ) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  clear_expected_error();
+  REQUIRE(
+      holder_asset_retrieve(
+          context, "missing-resource", "asset-1", "placement-1", "/tmp/destination", &error
+      ) == HOLDER_ERROR_RUNTIME
+  );
+  clear_expected_error();
+
   holder_context_destroy(context);
 }
 
@@ -2413,6 +2439,93 @@ TEST_CASE(
   holder_context_destroy(context);
 }
 
+TEST_CASE("C API translates repository failures for tags milestones backup and history", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto project_root = data_dir / "repo";
+  seed_git_project(data_dir, "project-1", project_root, std::nullopt);
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_card_create(context, "project-1", "Failure paths", "Body", nullptr, &json, &error) ==
+      HOLDER_OK
+  );
+  const auto card_id = nlohmann::json::parse(json).at("card_id").get<std::string>();
+  holder_string_free(json);
+  json = nullptr;
+  const auto clear_expected_error = [&]() {
+    REQUIRE(error != nullptr);
+    holder_error_destroy(error);
+    error = nullptr;
+  };
+
+  {
+    holder::platform::Db raw;
+    raw.open(data_dir / "server" / "holder.db");
+    raw.exec("DROP TABLE milestones;");
+  }
+  REQUIRE(holder_card_list_milestones(context, card_id.c_str(), &json, &error) == HOLDER_ERROR_RUNTIME);
+  clear_expected_error();
+  REQUIRE(
+      holder_card_milestone_add(
+          context, card_id.c_str(), 1, 0, 0, 0, nullptr, nullptr, &json, &error
+      ) == HOLDER_ERROR_RUNTIME
+  );
+  clear_expected_error();
+  REQUIRE(
+      holder_card_milestone_remove(context, card_id.c_str(), "milestone-1", &error) ==
+      HOLDER_ERROR_RUNTIME
+  );
+  clear_expected_error();
+  REQUIRE(
+      holder_project_list_milestones_in_range(context, "project-1", 0, 10, &json, &error) ==
+      HOLDER_ERROR_RUNTIME
+  );
+  clear_expected_error();
+
+  {
+    holder::platform::Db raw;
+    raw.open(data_dir / "server" / "holder.db");
+    raw.exec("PRAGMA foreign_keys=OFF; DROP TABLE cards;");
+  }
+  int status = -1;
+  REQUIRE(holder_card_tag_add(context, card_id.c_str(), "todo", &status, &error) == HOLDER_ERROR_RUNTIME);
+  clear_expected_error();
+  REQUIRE(holder_card_tag_remove(context, card_id.c_str(), "todo", &status, &error) == HOLDER_ERROR_RUNTIME);
+  clear_expected_error();
+  REQUIRE(holder_card_list_editable_tags(context, card_id.c_str(), &json, &error) == HOLDER_ERROR_RUNTIME);
+  clear_expected_error();
+  REQUIRE(
+      holder_backup_snapshot_page(context, "project-1", 0, nullptr, 10, &json, &error) ==
+      HOLDER_ERROR_RUNTIME
+  );
+  clear_expected_error();
+  REQUIRE(
+      holder_card_history_restore(context, card_id.c_str(), "bad-oid", &json, &error) ==
+      HOLDER_ERROR_RUNTIME
+  );
+  clear_expected_error();
+
+  std::filesystem::remove_all(project_root);
+  REQUIRE(
+      holder_card_history_list(
+          context, "project-1", card_id.c_str(), nullptr, 10, &json, &error
+      ) == HOLDER_ERROR_RUNTIME
+  );
+  clear_expected_error();
+  REQUIRE(
+      holder_card_history_compare(
+          context, "project-1", card_id.c_str(), "bad-from", "bad-to", &json, &error
+      ) == HOLDER_ERROR_RUNTIME
+  );
+  clear_expected_error();
+  holder_context_destroy(context);
+}
+
+
 TEST_CASE(
     "C API card_history_list/compare round-trip a card's grouped commits and comparisons",
     "[capi]"
@@ -2467,9 +2580,16 @@ TEST_CASE(
   const std::string created_oid = page["entries"][1]["last_oid"].get<std::string>();
   holder_string_free(json);
 
-  // "This change" for the grouped update entry: no explicit from, captured to = its own
-  // last save -- the pre-creation state (from) does not exist for card creation, but here
-  // from is simply omitted by the caller (matching the desktop "This change" default).
+  json = nullptr;
+  REQUIRE(holder_card_history_list(context, "project-1", card_id.c_str(),
+                                   head_oid.c_str(), 50, &json,
+                                   &error) == HOLDER_OK);
+  holder_string_free(json);
+
+  // "This change" for the grouped update entry: no explicit from, captured to =
+  // its own last save -- the pre-creation state (from) does not exist for card
+  // creation, but here from is simply omitted by the caller (matching the
+  // desktop "This change" default).
   json = nullptr;
   REQUIRE(
       holder_card_history_compare(
@@ -3974,7 +4094,7 @@ int fake_storage_remove(
 }
 
 int failing_storage_put_with_message(
-    void*,
+    void* user_data,
     const char*,
     const char*,
     long long,
@@ -3982,8 +4102,10 @@ int failing_storage_put_with_message(
     int* out_error_code,
     char** out_error
 ) {
-  *out_error_code = HOLDER_STORAGE_ERROR_CAPACITY;
-  *out_error = malloc_copy("quota exceeded");
+  *out_error_code = user_data == nullptr
+      ? HOLDER_STORAGE_ERROR_CAPACITY
+      : *static_cast<int*>(user_data);
+  *out_error = malloc_copy("storage failure");
   return 1;
 }
 
@@ -4248,10 +4370,11 @@ TEST_CASE("C API asset_import_file surfaces a registered provider's put failure"
   holder_error* error = nullptr;
   REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
 
+  int failure_code = HOLDER_STORAGE_ERROR_CAPACITY;
   REQUIRE(
       holder_storage_provider_register(
           "quota-limited", failing_storage_put_with_message, fake_storage_get, fake_storage_exists,
-          fake_storage_remove, nullptr, noop_storage_destroy, &error
+          fake_storage_remove, &failure_code, noop_storage_destroy, &error
       ) == HOLDER_OK
   );
 
@@ -4294,8 +4417,29 @@ TEST_CASE("C API asset_import_file surfaces a registered provider's put failure"
   );
   REQUIRE(rc == HOLDER_ERROR_RUNTIME);
   REQUIRE(error != nullptr);
-  REQUIRE(std::string(holder_error_message(error)).find("quota exceeded") != std::string::npos);
+  REQUIRE(std::string(holder_error_message(error)).find("storage failure") != std::string::npos);
   holder_error_destroy(error);
+
+  for (const int code : std::array{
+           static_cast<int>(HOLDER_STORAGE_ERROR_AUTHENTICATION),
+           static_cast<int>(HOLDER_STORAGE_ERROR_PERMISSION),
+           static_cast<int>(HOLDER_STORAGE_ERROR_INTEGRITY),
+           static_cast<int>(HOLDER_STORAGE_ERROR_CONFLICT),
+           static_cast<int>(HOLDER_STORAGE_ERROR_INVALID_CONFIGURATION),
+           static_cast<int>(HOLDER_STORAGE_ERROR_TRANSIENT),
+           999,
+       }) {
+    failure_code = code;
+    error = nullptr;
+    REQUIRE(
+        holder_asset_import_file(
+            context, project_id.c_str(), card_id.c_str(), "loc-quota-1", source_path.c_str(),
+            &import_json, &error
+        ) == HOLDER_ERROR_RUNTIME
+    );
+    REQUIRE(error != nullptr);
+    holder_error_destroy(error);
+  }
 
   // Nothing should have been left behind for a resource that never actually got stored.
   char* resource_list_json = nullptr;
@@ -6125,6 +6269,21 @@ TEST_CASE("C API resources assets and locations share the Git-backed JSON model"
   REQUIRE(holder_asset_get(context, "asset-1234", &json, &error) == HOLDER_OK);
   REQUIRE(nlohmann::json::parse(json)["original_filename"] == "Homework revised.pdf");
   holder_string_free(json);
+
+  REQUIRE(
+      holder_asset_retrieve(
+          context, "resource-1234", "missing-asset", "placement-1234", "/tmp/not-written", &error
+      ) == HOLDER_ERROR_RUNTIME
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+  REQUIRE(
+      holder_asset_retrieve(
+          context, "resource-1234", "asset-1234", "missing-placement", "/tmp/not-written", &error
+      ) == HOLDER_ERROR_RUNTIME
+  );
+  holder_error_destroy(error);
+  error = nullptr;
 
   json = nullptr;
   REQUIRE(holder_asset_delete(context, "asset-5678", &json, &error) == HOLDER_OK);

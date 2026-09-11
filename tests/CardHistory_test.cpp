@@ -710,6 +710,103 @@ TEST_CASE("Card history bounds very large comparison output", "[history][git]") 
   CHECK(comparison.lines.size() == 5'000);
 }
 
+TEST_CASE(
+    "Card history uses a bounded fallback when diff inputs have a huge product",
+    "[history][git]") {
+  const auto root = history_temp_dir();
+  const std::string card_id = "abcd-product-bounded-diff";
+  holder::git::GitRepo repo;
+  repo.open_or_init(root);
+
+  const auto make_body = [](int count, const std::string &prefix) {
+    std::string body;
+    for (int i = 0; i < count; ++i)
+      body += prefix + std::to_string(i) + "\n";
+    return body;
+  };
+  holder::model::Project project;
+  project.project_id = "project-history";
+  project.root_path = root.string();
+  project.privacy_mode = "plain";
+
+  SECTION("the replacement side reaches the output cap") {
+    write_commit(repo, card_id, "Large", make_body(3'000, "Old "),
+                 "Add card Large");
+    const auto old_oid = repo.head_oid();
+    REQUIRE(old_oid.has_value());
+    write_commit(repo, card_id, "Large", make_body(3'000, "New "),
+                 "Update card Large");
+    const auto comparison = holder::history::CardHistoryService().compare(
+        project, card_id, old_oid);
+    CHECK(comparison.truncated);
+    CHECK(comparison.lines.size() == 5'000);
+    CHECK(comparison.lines.front().origin == '-');
+    CHECK(comparison.lines.back().origin == '+');
+  }
+
+  SECTION("the original side reaches the output cap") {
+    write_commit(repo, card_id, "Large", make_body(6'000, "Old "),
+                 "Add card Large");
+    const auto old_oid = repo.head_oid();
+    REQUIRE(old_oid.has_value());
+    write_commit(repo, card_id, "Large", make_body(200, "New "),
+                 "Update card Large");
+    const auto comparison = holder::history::CardHistoryService().compare(
+        project, card_id, old_oid);
+    CHECK(comparison.truncated);
+    CHECK(comparison.lines.size() == 5'000);
+    CHECK(std::all_of(comparison.lines.begin(), comparison.lines.end(),
+                      [](const auto &line) { return line.origin == '-'; }));
+  }
+
+  SECTION("the bounded fallback can finish below the output cap") {
+    write_commit(repo, card_id, "Large", make_body(1'100, "Old "),
+                 "Add card Large");
+    const auto old_oid = repo.head_oid();
+    REQUIRE(old_oid.has_value());
+    write_commit(repo, card_id, "Large", make_body(1'100, "New "),
+                 "Update card Large");
+    const auto comparison = holder::history::CardHistoryService().compare(
+        project, card_id, old_oid);
+    CHECK_FALSE(comparison.truncated);
+    CHECK(comparison.lines.size() == 2'204);
+  }
+}
+
+TEST_CASE("Card history rejects encrypted snapshots without a project key id",
+          "[history][git]") {
+  const auto root = history_temp_dir();
+  const std::string card_id = "abcd-missing-history-key";
+  holder::git::GitRepo repo;
+  repo.open_or_init(root);
+  write_commit(repo, card_id, "Secret", "Body\n", "Add card Secret");
+
+  holder::model::Project project;
+  project.project_id = "project-history";
+  project.root_path = root.string();
+  project.privacy_mode = "encrypted_git";
+  REQUIRE_THROWS(holder::history::CardHistoryService().list(project, card_id));
+}
+
+TEST_CASE("Card history describes an all-whitespace edit without an excerpt",
+          "[history][git]") {
+  const auto root = history_temp_dir();
+  const std::string card_id = "abcd-blank-summary";
+  holder::git::GitRepo repo;
+  repo.open_or_init(root);
+  write_commit(repo, card_id, "Blank", "Visible\n", "Add card Blank");
+  write_commit(repo, card_id, "Blank", "  \n\t\n", "Update card Blank");
+
+  holder::model::Project project;
+  project.project_id = "project-history";
+  project.root_path = root.string();
+  project.privacy_mode = "plain";
+  const auto page =
+      holder::history::CardHistoryService().list(project, card_id);
+  REQUIRE_FALSE(page.entries.empty());
+  CHECK(page.entries.front().summary == "Edited card");
+}
+
 TEST_CASE("Card history shortens an oversized diff line", "[history][git]") {
   const auto root = history_temp_dir();
   const std::string card_id = "abcd-large-diff-line";
