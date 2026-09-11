@@ -23,11 +23,15 @@
 #include "resource/ResourceStore.h"
 
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <tuple>
 #include <vector>
+
+#include <sodium.h>
 
 namespace {
 
@@ -45,6 +49,32 @@ void write_pattern(const std::filesystem::path& path, std::size_t size) {
   for (std::size_t index = 0; index < size; ++index) {
     out.put(static_cast<char>((index * 37U) & 0xffU));
   }
+}
+
+std::string read_binary(const std::filesystem::path& path) {
+  std::ifstream input(path, std::ios::binary);
+  REQUIRE(input.is_open());
+  return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+}
+
+void write_binary(const std::filesystem::path& path, const std::string& bytes) {
+  std::ofstream output(path, std::ios::binary | std::ios::trunc);
+  REQUIRE(output.is_open());
+  output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+}
+
+std::uint32_t read_be_u32(const std::string& bytes, std::size_t offset) {
+  return (static_cast<std::uint32_t>(static_cast<unsigned char>(bytes.at(offset))) << 24U) |
+         (static_cast<std::uint32_t>(static_cast<unsigned char>(bytes.at(offset + 1))) << 16U) |
+         (static_cast<std::uint32_t>(static_cast<unsigned char>(bytes.at(offset + 2))) << 8U) |
+         static_cast<std::uint32_t>(static_cast<unsigned char>(bytes.at(offset + 3)));
+}
+
+void append_be_u32(std::string& bytes, std::uint32_t value) {
+  bytes.push_back(static_cast<char>((value >> 24U) & 0xffU));
+  bytes.push_back(static_cast<char>((value >> 16U) & 0xffU));
+  bytes.push_back(static_cast<char>((value >> 8U) & 0xffU));
+  bytes.push_back(static_cast<char>(value & 0xffU));
 }
 
 holder::model::Project encrypted_project(const std::filesystem::path& dir) {
@@ -204,6 +234,95 @@ TEST_CASE("Encrypted assets reject changed identity and bytes", "[asset]") {
   ));
 }
 
+TEST_CASE("Asset envelopes reject malformed structure and invalid file targets", "[asset]") {
+  const auto dir = temp_dir("malformed-envelope");
+  const auto source = dir / "source.bin";
+  write_pattern(source, 100);
+
+  holder::model::Project plain;
+  plain.project_id = "project-plain";
+  plain.privacy_mode = "plain";
+  REQUIRE_THROWS(holder::resource::digest_file(dir / "missing.bin"));
+  REQUIRE_THROWS(holder::resource::stage_asset_file(
+      dir / "missing.bin", dir / "missing.staged", plain, "resource-1234", "asset-1234"
+  ));
+  std::filesystem::create_directory(dir / "staging-is-directory");
+  REQUIRE_THROWS(holder::resource::stage_asset_file(
+      source, dir / "staging-is-directory", plain, "resource-1234", "asset-1234"
+  ));
+
+  auto missing_key = plain;
+  missing_key.privacy_mode = "encrypted_git";
+  REQUIRE_THROWS(holder::resource::stage_asset_file(
+      source, dir / "missing-key.staged", missing_key, "resource-1234", "asset-1234"
+  ));
+
+  const auto project = encrypted_project(dir);
+  const auto stored_path = dir / "valid.stored";
+  const auto staged = holder::resource::stage_asset_file(
+      source, stored_path, project, "resource-1234", "asset-1234"
+  );
+  const auto valid = read_binary(stored_path);
+  constexpr std::size_t magic_size = sizeof("HolderAsset1\n") - 1;
+  const auto header_size = read_be_u32(valid, magic_size);
+  const auto stream_header_offset = magic_size + 4 + header_size;
+  const auto first_chunk_size_offset = stream_header_offset +
+                                       crypto_secretstream_xchacha20poly1305_HEADERBYTES;
+
+  auto expect_malformed = [&](const std::string& name, const std::string& bytes) {
+    const auto malformed = dir / name;
+    write_binary(malformed, bytes);
+    const auto digest = holder::resource::digest_file(malformed);
+    REQUIRE_THROWS(holder::resource::recover_asset_file(
+        malformed, dir / (name + ".out"), project, "resource-1234", "asset-1234",
+        "holder_asset_v1", digest, staged.plaintext
+    ));
+  };
+
+  expect_malformed("truncated-length", std::string("HolderAsset1\n\0\0", magic_size + 2));
+  std::string zero_metadata("HolderAsset1\n", magic_size);
+  append_be_u32(zero_metadata, 0);
+  expect_malformed("zero-metadata", zero_metadata);
+  std::string truncated_metadata("HolderAsset1\n", magic_size);
+  append_be_u32(truncated_metadata, 10);
+  truncated_metadata += "short";
+  expect_malformed("truncated-metadata", truncated_metadata);
+  expect_malformed("truncated-stream-header", valid.substr(0, stream_header_offset + 3));
+
+  auto invalid_chunk_size = valid;
+  invalid_chunk_size.replace(first_chunk_size_offset, 4, std::string(4, '\0'));
+  expect_malformed("invalid-chunk-size", invalid_chunk_size);
+
+  auto truncated_chunk = valid.substr(0, first_chunk_size_offset);
+  append_be_u32(truncated_chunk, crypto_secretstream_xchacha20poly1305_ABYTES);
+  truncated_chunk += "short";
+  expect_malformed("truncated-chunk", truncated_chunk);
+
+  auto unauthenticated = valid;
+  unauthenticated.at(first_chunk_size_offset + 4) ^= 1;
+  expect_malformed("authentication", unauthenticated);
+
+  auto trailing = valid;
+  trailing.push_back('x');
+  expect_malformed("trailing-data", trailing);
+
+  REQUIRE_THROWS(holder::resource::recover_asset_file(
+      stored_path, dir / "unsupported.out", project, "resource-1234", "asset-1234",
+      "future-encoding", staged.stored, staged.plaintext
+  ));
+  auto wrong_plaintext = staged.plaintext;
+  ++wrong_plaintext.byte_size;
+  REQUIRE_THROWS(holder::resource::recover_asset_file(
+      stored_path, dir / "wrong-plaintext.out", project, "resource-1234", "asset-1234",
+      staged.encoding, staged.stored, wrong_plaintext
+  ));
+  std::filesystem::create_directory(dir / "recovered-is-directory");
+  REQUIRE_THROWS(holder::resource::recover_asset_file(
+      stored_path, dir / "recovered-is-directory", project, "resource-1234", "asset-1234",
+      staged.encoding, staged.stored, staged.plaintext
+  ));
+}
+
 TEST_CASE("Local directory provider is atomic and idempotent", "[asset]") {
   const auto dir = temp_dir("local");
   const auto source = dir / "source.bin";
@@ -265,6 +384,11 @@ TEST_CASE("Location bindings and preferences survive independently of SQLite", "
   REQUIRE_FALSE(recovered.get("project-1", "location-1").has_value());
   REQUIRE_FALSE(recovered.preview("project-1", "location-1").has_value());
   REQUIRE_FALSE(recovered.preferred("project-1").has_value());
+
+  holder::resource::LocationBinding invalid;
+  REQUIRE_THROWS(bindings.bind("project-1", "location-1", invalid, "", 20));
+  REQUIRE_THROWS(bindings.bind("", "location-1", binding, "", 20));
+  REQUIRE_THROWS(bindings.set_preferred("project-1", "", 20));
 }
 
 TEST_CASE("Asset import stores, links, deduplicates and retrieves", "[asset]") {

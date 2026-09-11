@@ -263,3 +263,14 @@ TEST_CASE("ensure_schema_version throws when sqlite step fails", "[migrations]")
       Catch::Matchers::ContainsSubstring("sqlite step failed")
   );
 }
+
+TEST_CASE("migrate_to_latest rejects a schema version outside its migration graph", "[migrations]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  db.exec("CREATE TABLE schema_version(version INTEGER NOT NULL); INSERT INTO schema_version VALUES(0);");
+  REQUIRE_THROWS_WITH(
+      holder::platform::Migrations::migrate_to_latest(db),
+      Catch::Matchers::ContainsSubstring("Unsupported schema version")
+  );
+}

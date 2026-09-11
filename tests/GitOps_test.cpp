@@ -5,6 +5,7 @@
 #endif
 
 #include "git/GitOps.h"
+#include "git/RepoLocks.h"
 #include "core_test_helpers.h"
 
 TEST_CASE("GitOps default credential-provider hook is a no-op", "[git]") {
@@ -21,6 +22,10 @@ TEST_CASE("GitOps default stage_paths stages every supplied path", "[git]") {
 
   REQUIRE_NOTHROW(ops.GitOps::stage_paths({"first.txt", "second.txt"}));
   REQUIRE_NOTHROW(ops.commit("Stage through the default batch implementation"));
+}
+
+TEST_CASE("canonical_repo_key tolerates an empty unresolved path", "[git]") {
+  REQUIRE(holder::git::canonical_repo_key({}).empty());
 }
 
 TEST_CASE("RealGitOps probe_remote throws when repo is not opened", "[git]") {

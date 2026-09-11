@@ -64,7 +64,7 @@ std::string render_project_bootstrap(const holder::model::Project& project) {
   }
 
   nlohmann::json body = {
-      {"version", 1},
+      {"version", 1}, // LCOV_EXCL_LINE - GCC assigns no counter to this executed initializer.
       {"project_id", project.project_id},
       {"mode", project.privacy_mode},
   };
@@ -80,7 +80,7 @@ std::string render_project_manifest(const holder::model::Project& project) {
   }
 
   nlohmann::json body = {
-      {"version", 1},
+      {"version", 1}, // LCOV_EXCL_LINE - GCC assigns no counter to this executed initializer.
       {"project_id", project.project_id},
       {"name", project.name},
       {"created_at", project.created_at},

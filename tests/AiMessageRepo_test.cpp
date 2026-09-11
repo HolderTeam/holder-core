@@ -429,6 +429,30 @@ TEST_CASE("AiMessageRepo trash throws for missing message and missing content", 
   REQUIRE_THROWS(repo.trash(msg.message_id, 2));
 }
 
+TEST_CASE("AiMessageRepo remove falls back to deleting the row when its thread is absent", "[aimessagerepo]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  const auto project_root = dir / "project_repo";
+  create_project(db, "proj-1", project_root.string());
+  create_thread(db, "thread-1", "proj-1");
+
+  holder::ai::AiMessageRepo repo(db, nullptr);
+  holder::model::AiMessage msg;
+  msg.message_id = "msg-orphan";
+  msg.thread_id = "thread-1";
+  msg.role = "user";
+  msg.source = "manual";
+  msg.content = "orphan";
+  msg.created_at = 1;
+  repo.append(msg);
+
+  db.exec("PRAGMA foreign_keys=OFF; DELETE FROM ai_threads WHERE thread_id='thread-1';");
+  REQUIRE_NOTHROW(repo.remove(msg.message_id));
+  REQUIRE_FALSE(repo.get(msg.message_id).has_value());
+}
+
 TEST_CASE("AiMessageRepo update_links guards and missing file path", "[aimessagerepo]") {
   const auto dir = make_temp_dir();
   holder::platform::Db db;

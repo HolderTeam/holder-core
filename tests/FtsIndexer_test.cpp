@@ -327,6 +327,7 @@ TEST_CASE("FtsIndexer search throws on interrupted sqlite step", "[fts]") {
   sqlite3_progress_handler(db.handle(), 1, sqlite_interrupt_cb, &interrupt_on);
   REQUIRE_THROWS(fts.search_cards("proj-1", "alpha", 10, 0));
   REQUIRE_THROWS(fts.search_messages("proj-1", "alpha", 10, 0));
+  REQUIRE_THROWS(fts.get_body("card-1"));
   sqlite3_progress_handler(db.handle(), 0, nullptr, nullptr);
 }
 
