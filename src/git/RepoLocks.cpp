@@ -37,7 +37,7 @@ std::filesystem::path canonical_repo_key(const std::filesystem::path& repo_root)
   }
   return canonical;
 }
-  
+
 std::shared_ptr<std::recursive_mutex> repo_mutex_for(const std::filesystem::path& repo_root) {
   const auto key = canonical_repo_key(repo_root);
 
