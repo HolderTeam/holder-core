@@ -27,6 +27,9 @@ GitOperationGuard::GitOperationGuard(
       git_ops_lock_(git_ops_mutex) {}
 
 std::filesystem::path canonical_repo_key(const std::filesystem::path& repo_root) {
+  if (repo_root.empty()) {
+    return {};
+  }
   std::error_code ec;
   auto canonical = std::filesystem::weakly_canonical(repo_root, ec);
   if (ec || canonical.empty()) {
