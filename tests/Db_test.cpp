@@ -151,24 +151,23 @@ TEST_CASE("Database health distinguishes corruption from operational failures", 
   REQUIRE(inaccessible.health == holder::platform::DatabaseHealth::IoError);
 }
 
-// BTF2: Failed on the Windows build
-// TEST_CASE("Database rebuild readiness markers are durable and reject malformed state", "[db][rebuild]") {
-//   const auto dir = make_temp_dir();
-//   const auto marker = dir / "server" / "rebuild-ready.json";
-//   REQUIRE_FALSE(holder::platform::database_rebuild_is_ready(marker));
+TEST_CASE("Database rebuild readiness markers are durable and reject malformed state", "[db][rebuild]") {
+  const auto dir = make_temp_dir();
+  const auto marker = dir / "server" / "rebuild-ready.json";
+  REQUIRE_FALSE(holder::platform::database_rebuild_is_ready(marker));
 
-//   write_file(marker, "not json");
-//   REQUIRE_FALSE(holder::platform::database_rebuild_is_ready(marker));
-//   write_file(marker, R"({"version":1,"durable_owner_generation":0})");
-//   REQUIRE_FALSE(holder::platform::database_rebuild_is_ready(marker));
+  write_file(marker, "not json");
+  REQUIRE_FALSE(holder::platform::database_rebuild_is_ready(marker));
+  write_file(marker, R"({"version":1,"durable_owner_generation":0})");
+  REQUIRE_FALSE(holder::platform::database_rebuild_is_ready(marker));
 
-//   holder::platform::mark_database_rebuild_ready(marker);
-//   REQUIRE(holder::platform::database_rebuild_is_ready(marker));
+  holder::platform::mark_database_rebuild_ready(marker);
+  REQUIRE(holder::platform::database_rebuild_is_ready(marker));
 
-//   const auto directory_target = dir / "marker-is-directory";
-//   std::filesystem::create_directory(directory_target);
-//   REQUIRE_THROWS(holder::platform::mark_database_rebuild_ready(directory_target));
-// }
+  const auto directory_target = dir / "marker-is-directory";
+  std::filesystem::create_directory(directory_target);
+  REQUIRE_THROWS(holder::platform::mark_database_rebuild_ready(directory_target));
+}
 
 TEST_CASE("Database durable ownership audit checks every Git-owned object kind", "[db][rebuild]") {
   const auto dir = make_temp_dir();
@@ -177,7 +176,7 @@ TEST_CASE("Database durable ownership audit checks every Git-owned object kind",
   db.open(dir / "holder.db");
   db.exec(schema_sql());
   db.exec(
-      "INSERT INTO projects(project_id,name,root_path,privacy_mode,created_at,updated_at) VALUES(" 
+      "INSERT INTO projects(project_id,name,root_path,privacy_mode,created_at,updated_at) VALUES("
       "'project-1234','Project','" + root.string() + "','plain',1,1);"
   );
 
@@ -185,9 +184,9 @@ TEST_CASE("Database durable ownership audit checks every Git-owned object kind",
   write_plain_project_manifest(root, "project-1234");
 
   db.exec(
-      "INSERT INTO ai_threads(thread_id,project_id,title,created_at,updated_at) VALUES(" 
+      "INSERT INTO ai_threads(thread_id,project_id,title,created_at,updated_at) VALUES("
       "'thread-1234','project-1234','Thread',1,1);"
-      "INSERT INTO ai_messages(message_id,thread_id,role,source,content,created_at) VALUES(" 
+      "INSERT INTO ai_messages(message_id,thread_id,role,source,content,created_at) VALUES("
       "'message-1234','thread-1234','user','local','Body',1);"
   );
   REQUIRE_THROWS(holder::platform::audit_core_durable_ownership(db));
@@ -196,7 +195,7 @@ TEST_CASE("Database durable ownership audit checks every Git-owned object kind",
   write_file(root / holder::ai::ai_thread_manifest_rel_path("thread-1234"));
 
   db.exec(
-      "INSERT INTO resources(resource_id,project_id,type,label,created_at,updated_at) VALUES(" 
+      "INSERT INTO resources(resource_id,project_id,type,label,created_at,updated_at) VALUES("
       "'resource-1234','project-1234','thing','Resource',1,1);"
   );
   REQUIRE_THROWS(holder::platform::audit_core_durable_ownership(db));
