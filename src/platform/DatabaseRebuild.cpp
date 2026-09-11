@@ -320,9 +320,17 @@ void mark_database_rebuild_ready(const std::filesystem::path& readiness_path) {
   std::error_code ec;
   std::filesystem::rename(temporary, readiness_path, ec);
 #ifdef _WIN32
-  if (ec && std::filesystem::exists(readiness_path)) {
-    std::filesystem::remove(readiness_path, ec);
-    if (!ec) std::filesystem::rename(temporary, readiness_path, ec);
+  if (ec) {
+    std::error_code status_ec;
+    const bool existing_regular_file =
+      std::filesystem::is_regular_file(readiness_path, status_ec);
+
+    if (!status_ec && existing_regular_file) {
+      std::filesystem::remove(readiness_path, ec);
+      if (!ec) {
+        std::filesystem::rename(temporary, readiness_path, ec);
+      }
+    }
   }
 #endif
   if (ec) {
