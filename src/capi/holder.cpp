@@ -4185,11 +4185,9 @@ int holder_recovery_token_import_global(
     if (remote_hint_present) {
       const auto refreshed = repo.get(metadata.project_id);
       if (refreshed.has_value()) {
-        auto git = make_project_git(context);
-        auto operation = git->lock_operation(refreshed->root_path);
-        git->open_or_init(refreshed->root_path);
+        operation_git->open_or_init(refreshed->root_path);
         try {
-          git->set_remote("origin", metadata.git_remote_url.value());
+          operation_git->set_remote("origin", metadata.git_remote_url.value());
           remote_configured = true;
           // LCOV_EXCL_START -- libgit2 is lenient about remote URL content and "origin" is
           // always a valid remote name here, so this realistically only fails on an internal
@@ -4201,12 +4199,12 @@ int holder_recovery_token_import_global(
 
         if (remote_configured) {
           try {
-            git->pull_remote_ff_only("origin");
+            operation_git->pull_remote_ff_only("origin");
             rebuild_project_index(context, refreshed.value());
             pull_status = "succeeded";
             sync_repo.record_pull_result(metadata.project_id, pull_status, true, std::nullopt, now);
           } catch (const holder::git::NonFastForwardPullError& diverged) {
-            resolve_pull_conflicts(context, refreshed.value(), *git, diverged, now);
+            resolve_pull_conflicts(context, refreshed.value(), *operation_git, diverged, now);
             rebuild_project_index(context, refreshed.value());
             pull_status = "succeeded";
             sync_repo.record_pull_result(metadata.project_id, pull_status, true, std::nullopt, now);
