@@ -191,6 +191,7 @@ coverage_all() {
       --exclude-unreachable-branches \
       --exclude-throw-branches \
       --exclude-function-lines \
+      --exclude-noncode-lines \
       --json-pretty \
       --output "${coverage_json}"
     echo "Coverage JSON:   ${coverage_json}"

@@ -394,7 +394,8 @@ class CApiStorageProviderHandle final : public holder::resource::StorageProvider
         user_data_(user_data),
         destroy_user_data_(destroy_user_data) {}
 
-  ~CApiStorageProviderHandle() override {
+  // The body is exercised; exclude GCC's separate, non-addressable deleting-destructor alias.
+  ~CApiStorageProviderHandle() override { // LCOV_EXCL_LINE
     if (destroy_user_data_ != nullptr) destroy_user_data_(user_data_);
   }
 

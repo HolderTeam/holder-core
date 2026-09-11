@@ -22,6 +22,8 @@
 #include "resource/ResourceStore.h"
 #include "core_test_helpers.h"
 
+#include <nlohmann/json.hpp>
+
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -139,6 +141,48 @@ TEST_CASE("Location manifests round-trip safe configuration", "[resource]") {
   REQUIRE(holder::resource::render_location_manifest(parsed) == rendered);
 }
 
+TEST_CASE("Resource manifests reject malformed durable fields", "[resource]") {
+  const auto valid_bundle = sample_bundle();
+
+  auto invalid_bundle = valid_bundle;
+  invalid_bundle.resource.resource_id.clear();
+  REQUIRE_THROWS(holder::resource::render_resource_manifest(invalid_bundle));
+
+  invalid_bundle = valid_bundle;
+  invalid_bundle.assets[0].resource_id = "other-resource";
+  REQUIRE_THROWS(holder::resource::render_resource_manifest(invalid_bundle));
+
+  invalid_bundle = valid_bundle;
+  invalid_bundle.assets[0].placements[0].asset_id = "other-asset";
+  REQUIRE_THROWS(holder::resource::render_resource_manifest(invalid_bundle));
+
+  auto body = nlohmann::json::parse(holder::resource::render_resource_manifest(valid_bundle));
+  body["format_version"] = 2;
+  REQUIRE_THROWS(holder::resource::parse_resource_manifest(body.dump()));
+
+  body = nlohmann::json::parse(holder::resource::render_resource_manifest(valid_bundle));
+  body["assets"] = "not an array";
+  REQUIRE_THROWS(holder::resource::parse_resource_manifest(body.dump()));
+
+  body = nlohmann::json::parse(holder::resource::render_resource_manifest(valid_bundle));
+  body["assets"][0]["byte_size"] = -1;
+  REQUIRE_THROWS(holder::resource::parse_resource_manifest(body.dump()));
+
+  body = nlohmann::json::parse(holder::resource::render_resource_manifest(valid_bundle));
+  body["assets"][0]["placements"] = "not an array";
+  REQUIRE_THROWS(holder::resource::parse_resource_manifest(body.dump()));
+
+  body = nlohmann::json::parse(holder::resource::render_resource_manifest(valid_bundle));
+  body["assets"][0]["placements"][0]["stored_byte_size"] = -1;
+  REQUIRE_THROWS(holder::resource::parse_resource_manifest(body.dump()));
+
+  auto location_body = nlohmann::json::parse(
+      holder::resource::render_location_manifest(sample_location())
+  );
+  location_body["format_version"] = 2;
+  REQUIRE_THROWS(holder::resource::parse_location_manifest(location_body.dump()));
+}
+
 TEST_CASE("Dublin Core mapping keeps Holder friendly and unknown terms lossless", "[resource]") {
   REQUIRE(
       holder::resource::dublin_core_term_for("description") ==
@@ -180,6 +224,17 @@ TEST_CASE("Resource and Location repositories preserve complete projection", "[r
   REQUIRE(fetched->assets[0].placements[0].location_id == "location-1234");
   REQUIRE(resources.find_by_asset_hash("project-1234", std::string(64, 'a')).has_value());
   REQUIRE_FALSE(resources.find_by_asset_hash("other-project", std::string(64, 'a')).has_value());
+
+  auto updated_resource = fetched->resource;
+  updated_resource.label = "Renamed boiler";
+  updated_resource.metadata["description"] = {"Recently serviced"};
+  updated_resource.updated_at = 20;
+  resources.update(updated_resource);
+  const auto updated_bundle = resources.get_bundle("resource-1234");
+  REQUIRE(updated_bundle->resource.label == "Renamed boiler");
+  REQUIRE(updated_bundle->resource.metadata.at("description") == std::vector<std::string>{"Recently serviced"});
+  REQUIRE(updated_bundle->assets.size() == 1);
+  REQUIRE_THROWS(resources.update(holder::model::Resource{}));
 
   REQUIRE(locations.list("project-1234").size() == 1);
   REQUIRE(locations.is_in_use("location-1234"));
@@ -285,6 +340,10 @@ TEST_CASE("Encrypted Resource and Location manifests rebuild after projection de
 
   holder::resource::LocationStore(db, nullptr, &git).put(sample_location());
   holder::resource::ResourceStore(db, nullptr, &git).put(sample_bundle());
+  REQUIRE(holder::resource::LocationStore(db, nullptr, &git).get("location-1234").has_value());
+  REQUIRE_FALSE(holder::resource::LocationStore(db, nullptr, &git).get("missing-location").has_value());
+  REQUIRE(holder::resource::ResourceStore(db, nullptr, &git).get("resource-1234").has_value());
+  REQUIRE_FALSE(holder::resource::ResourceStore(db, nullptr, &git).get("missing-resource").has_value());
 
   const auto location_path = project_root /
                              holder::resource::location_rel_path("location-1234");

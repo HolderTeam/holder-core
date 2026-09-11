@@ -491,7 +491,11 @@ DatabaseRebuildReport rebuild_database_projection(const DatabaseRebuildRequest& 
     holder::index::FtsIndexer fts(rebuilt);
     holder::project::recover_project_roots(
         rebuilt, &fts, request.project_roots,
-        [] { return std::string("unused-in-strict-recovery"); }, true
+        // Strict recovery rejects encrypted projects whose durable key material is absent,
+        // so this fallback generator is deliberately unreachable. The callback is still
+        // required by recover_project_roots' shared API.
+        [] { return std::string("unused-in-strict-recovery"); }, // LCOV_EXCL_LINE
+        true
     );
     if (request.hooks.restore_after_projects) request.hooks.restore_after_projects(rebuilt);
     validate_database(rebuilt, request.expected_schema_version);

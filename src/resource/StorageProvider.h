@@ -29,7 +29,8 @@ class StorageError : public std::runtime_error {
 
 class StorageProvider {
  public:
-  virtual ~StorageProvider() = default;
+  // Exclude GCC's separate, non-addressable deleting-destructor alias.
+  virtual ~StorageProvider() = default; // LCOV_EXCL_LINE
   virtual void put(
       const std::string& object_key,
       const std::filesystem::path& staged_file,
