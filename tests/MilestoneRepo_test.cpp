@@ -61,6 +61,12 @@ holder::model::Milestone make_milestone(
 
 } // namespace
 
+TEST_CASE("MilestoneRepo reports a prepare failure when the database is not open", "[milestonerepo]") {
+  holder::platform::Db db;
+  holder::card::MilestoneRepo repo(db);
+  REQUIRE_THROWS(repo.delete_for_card("proj-1", "card-a"));
+}
+
 TEST_CASE(
     "MilestoneRepo replace_for_card inserts and list_for_card reads them back ordered by start_at",
     "[milestonerepo]"

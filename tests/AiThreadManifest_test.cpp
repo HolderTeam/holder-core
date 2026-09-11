@@ -90,3 +90,39 @@ TEST_CASE("encrypted AI thread manifest hides title", "[ai][thread][manifest][pr
   REQUIRE(raw.find(thread.title) == std::string::npos);
   REQUIRE(holder::ai::read_ai_thread_manifest(project, path).title == thread.title);
 }
+
+TEST_CASE("AI thread manifests reject invalid identity and durable input", "[ai][thread][manifest]") {
+  const auto dir = holder::test::make_temp_dir();
+  holder::model::Project project;
+  project.project_id = "project-thread";
+  project.root_path = dir.string();
+  project.privacy_mode = "plain";
+
+  holder::model::AiThread thread;
+  thread.thread_id = "thread-1234";
+  thread.project_id = project.project_id;
+  thread.title = "Title";
+  thread.created_at = 1;
+  thread.updated_at = 2;
+
+  REQUIRE_THROWS(holder::ai::ai_thread_manifest_rel_path("abc"));
+  auto invalid_thread = thread;
+  invalid_thread.title.clear();
+  REQUIRE_THROWS(holder::ai::render_ai_thread_manifest(project, invalid_thread));
+  REQUIRE_THROWS(holder::ai::parse_ai_thread_manifest(project, R"({"version":2})"));
+  REQUIRE_THROWS(
+      holder::ai::parse_ai_thread_manifest(
+          project,
+          R"({"version":1,"thread_id":"thread-1234","project_id":"other","title":"Title","created_at":1,"updated_at":2})"
+      )
+  );
+
+  auto encrypted = project;
+  encrypted.privacy_mode = "encrypted_git";
+  REQUIRE_THROWS(holder::ai::render_ai_thread_manifest(encrypted, thread));
+  REQUIRE_THROWS(holder::ai::parse_ai_thread_manifest(encrypted, "not an envelope"));
+
+  const auto manifest_path = dir / "wrong-name.json";
+  std::ofstream(manifest_path) << holder::ai::render_ai_thread_manifest(project, thread);
+  REQUIRE_THROWS(holder::ai::read_ai_thread_manifest(project, manifest_path));
+}

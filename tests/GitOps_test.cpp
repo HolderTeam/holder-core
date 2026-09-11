@@ -12,6 +12,17 @@ TEST_CASE("GitOps default credential-provider hook is a no-op", "[git]") {
   REQUIRE_NOTHROW(ops.GitOps::set_credential_provider(nullptr));
 }
 
+TEST_CASE("GitOps default stage_paths stages every supplied path", "[git]") {
+  const auto dir = holder::test::make_temp_dir() / "repo";
+  holder::git::RealGitOps ops;
+  ops.open_or_init(dir);
+  ops.write_file("first.txt", "first");
+  ops.write_file("second.txt", "second");
+
+  REQUIRE_NOTHROW(ops.GitOps::stage_paths({"first.txt", "second.txt"}));
+  REQUIRE_NOTHROW(ops.commit("Stage through the default batch implementation"));
+}
+
 TEST_CASE("RealGitOps probe_remote throws when repo is not opened", "[git]") {
   holder::git::RealGitOps ops;
   REQUIRE_THROWS(ops.probe_remote("origin"));

@@ -26,6 +26,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace {
@@ -210,10 +211,28 @@ TEST_CASE("Local directory provider is atomic and idempotent", "[asset]") {
   const auto digest = holder::resource::digest_file(source);
   holder::resource::LocalDirectoryProvider provider(dir / "objects");
 
+  REQUIRE_THROWS(provider.exists(""));
+  REQUIRE_THROWS(provider.exists("/absolute/path"));
+  REQUIRE_THROWS(provider.exists("./relative"));
+  REQUIRE_THROWS(provider.put("project/bad-size", source, digest.byte_size + 1, digest.sha256));
+  REQUIRE_THROWS(provider.get("project/missing", dir / "missing.bin"));
+
   provider.put("project/asset.holderasset", source, digest.byte_size, digest.sha256);
   REQUIRE(provider.exists("project/asset.holderasset"));
   REQUIRE_NOTHROW(
       provider.put("project/asset.holderasset", source, digest.byte_size, digest.sha256)
+  );
+
+  const auto conflicting_source = dir / "conflicting.bin";
+  write_pattern(conflicting_source, 8193);
+  const auto conflicting_digest = holder::resource::digest_file(conflicting_source);
+  REQUIRE_THROWS(
+      provider.put(
+          "project/asset.holderasset",
+          conflicting_source,
+          conflicting_digest.byte_size,
+          conflicting_digest.sha256
+      )
   );
   provider.get("project/asset.holderasset", dir / "download.bin");
   REQUIRE(holder::resource::digest_file(dir / "download.bin").sha256 == digest.sha256);
@@ -233,6 +252,8 @@ TEST_CASE("Location bindings and preferences survive independently of SQLite", "
   bindings.set_preferred("project-1", "location-1", 10);
 
   REQUIRE(bindings.get("project-1", "location-1")->values.at("secret_access_key") == "never-log-this");
+  REQUIRE(bindings.preview("project-1", "location-1") == "AKIA…TEST");
+  REQUIRE_FALSE(bindings.preview("project-1", "missing-location").has_value());
   REQUIRE(bindings.preferred("project-1") == "location-1");
 
   auto reopened = holder::privacy::make_encrypted_file_secret_store_for_tests(dir / "server");
@@ -242,6 +263,7 @@ TEST_CASE("Location bindings and preferences survive independently of SQLite", "
   recovered.unbind("project-1", "location-1");
   recovered.clear_preferred("project-1");
   REQUIRE_FALSE(recovered.get("project-1", "location-1").has_value());
+  REQUIRE_FALSE(recovered.preview("project-1", "location-1").has_value());
   REQUIRE_FALSE(recovered.preferred("project-1").has_value());
 }
 
@@ -313,6 +335,8 @@ TEST_CASE("Asset import stores, links, deduplicates and retrieves", "[asset]") {
   const auto bundle = holder::resource::ResourceRepo(db).get_bundle(first.resource_id);
   REQUIRE(bundle.has_value());
   REQUIRE(bundle->assets[0].byte_size == 70000);
+  REQUIRE(holder::resource::ResourceStore(db, nullptr, &git).get(first.resource_id).has_value());
+  REQUIRE_FALSE(holder::resource::ResourceStore(db, nullptr, &git).get("missing-resource").has_value());
   REQUIRE(holder::card::LinkRepo(db).list_outgoing(project.project_id, card.card_id).size() == 1);
 
   const auto second = importer.import_file(request, provider);
@@ -347,4 +371,45 @@ TEST_CASE("Asset import stores, links, deduplicates and retrieves", "[asset]") {
   REQUIRE(rewritten.links.empty());
   REQUIRE(rewritten.body == card_body);
   REQUIRE(git.commits.size() == 2);
+
+  const std::vector<std::tuple<std::string, std::string, std::string>> formats = {
+      {"picture.png", "image", "image/png"},
+      {"animation.gif", "image", "image/gif"},
+      {"picture.webp", "image", "image/webp"},
+      {"drawing.svg", "image", "image/svg+xml"},
+      {"manual.pdf", "document", "application/pdf"},
+      {"notes.TXT", "document", "text/plain"},
+      {"archive.bin", "thing", "application/octet-stream"},
+  };
+  std::size_t format_size = 101;
+  for (const auto& [filename, resource_type, media_type] : formats) {
+    request.source_file = dir / filename;
+    write_pattern(request.source_file, format_size++);
+    const auto imported = importer.import_file(request, provider);
+    const auto imported_bundle = holder::resource::ResourceRepo(db).get_bundle(imported.resource_id);
+    REQUIRE(imported_bundle.has_value());
+    REQUIRE(imported_bundle->resource.type == resource_type);
+    REQUIRE(imported_bundle->assets.front().media_type == media_type);
+  }
+
+  auto invalid_request = request;
+  invalid_request.source_file = dir / "missing.bin";
+  REQUIRE_THROWS(importer.import_file(invalid_request, provider));
+
+  invalid_request = request;
+  invalid_request.project_id = "missing-project";
+  REQUIRE_THROWS(importer.import_file(invalid_request, provider));
+
+  invalid_request = request;
+  invalid_request.card_id = "missing-card";
+  REQUIRE_THROWS(importer.import_file(invalid_request, provider));
+
+  invalid_request = request;
+  invalid_request.location_id = "missing-location";
+  REQUIRE_THROWS(importer.import_file(invalid_request, provider));
+
+  db.exec(
+      "UPDATE cards SET rel_path = 'cards/wrong.md' WHERE card_id = 'card-1234';"
+  );
+  REQUIRE_THROWS(importer.import_file(request, provider));
 }

@@ -112,3 +112,70 @@ TEST_CASE("project manifest rejects bootstrap and payload identity mismatch", "[
 
   REQUIRE_THROWS(holder::project::read_project_manifest(project.root_path));
 }
+
+TEST_CASE("project manifest validates render inputs", "[project][manifest]") {
+  holder::model::Project project;
+  project.name = "Project";
+  project.privacy_mode = "plain";
+  REQUIRE_THROWS(holder::project::render_project_bootstrap(project));
+
+  project.project_id = "project-1";
+  project.privacy_mode = "unknown";
+  REQUIRE_THROWS(holder::project::render_project_bootstrap(project));
+
+  project.privacy_mode = "encrypted_git";
+  REQUIRE_THROWS(holder::project::render_project_bootstrap(project));
+  REQUIRE_THROWS(holder::project::render_project_manifest(project));
+
+  project.privacy_mode = "plain";
+  project.name.clear();
+  REQUIRE_THROWS(holder::project::render_project_manifest(project));
+}
+
+TEST_CASE("project manifest rejects malformed durable metadata", "[project][manifest]") {
+  const auto root = holder::test::make_temp_dir() / "project";
+  const auto holder_dir = root / ".holder";
+  std::filesystem::create_directories(holder_dir);
+  const auto bootstrap_path = root / holder::project::kProjectBootstrapPath;
+  const auto manifest_path = root / holder::project::kProjectManifestPath;
+  const auto write_metadata = [&](const std::string& bootstrap, const std::string& manifest) {
+    std::ofstream(bootstrap_path, std::ios::trunc) << bootstrap;
+    std::ofstream(manifest_path, std::ios::trunc) << manifest;
+  };
+  const std::string valid_bootstrap =
+      R"({"version":1,"project_id":"project-1","mode":"plain"})";
+  const std::string valid_manifest =
+      R"({"version":1,"project_id":"project-1","name":"Project","created_at":1,"updated_at":2})";
+
+  REQUIRE_THROWS(holder::project::read_project_manifest(root / "missing"));
+
+  write_metadata(R"({"version":2})", valid_manifest);
+  REQUIRE_THROWS(holder::project::read_project_manifest(root));
+
+  write_metadata(R"({"version":1,"mode":"plain"})", valid_manifest);
+  REQUIRE_THROWS(holder::project::read_project_manifest(root));
+
+  write_metadata(R"({"version":1,"project_id":"","mode":"plain"})", valid_manifest);
+  REQUIRE_THROWS(holder::project::read_project_manifest(root));
+
+  write_metadata(R"({"version":1,"project_id":"project-1","mode":"unknown"})", valid_manifest);
+  REQUIRE_THROWS(holder::project::read_project_manifest(root));
+
+  write_metadata(R"({"version":1,"project_id":"project-1","mode":"encrypted_git"})", valid_manifest);
+  REQUIRE_THROWS(holder::project::read_project_manifest(root));
+
+  write_metadata(valid_bootstrap, R"({"version":2})");
+  REQUIRE_THROWS(holder::project::read_project_manifest(root));
+
+  write_metadata(
+      valid_bootstrap,
+      R"({"version":1,"project_id":"project-1","created_at":1,"updated_at":2})"
+  );
+  REQUIRE_THROWS(holder::project::read_project_manifest(root));
+
+  write_metadata(
+      valid_bootstrap,
+      R"({"version":1,"project_id":"project-1","name":"","created_at":1,"updated_at":2})"
+  );
+  REQUIRE_THROWS(holder::project::read_project_manifest(root));
+}

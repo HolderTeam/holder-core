@@ -48,8 +48,10 @@ std::optional<std::vector<std::string>> parse_pure_tag_line(const std::string& l
     while (i < line.size() && is_line_whitespace(line[i])) {
       ++i;
     }
+    // split_trailing_whitespace removes whitespace at the end of the final line before this
+    // parser is called, so this guard is defensive but unreachable for every caller.
     if (i >= line.size()) {
-      break;
+      break; // LCOV_EXCL_LINE
     }
     if (line[i] != '#') {
       return std::nullopt;
@@ -65,8 +67,10 @@ std::optional<std::vector<std::string>> parse_pure_tag_line(const std::string& l
     }
     tags.push_back(normalize_tag(candidate));
   }
-  if (tags.empty()) {
-    return std::nullopt;
+  // An empty input is rejected by the loop condition before this parser is called; every
+  // non-empty accepted line contributes a tag or returns from an invalid token above.
+  if (tags.empty()) { // LCOV_EXCL_LINE
+    return std::nullopt; // LCOV_EXCL_LINE
   }
   return tags;
 }
