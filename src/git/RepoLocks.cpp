@@ -26,7 +26,21 @@ GitOperationGuard::GitOperationGuard(
       repo_lock_(*repo_mutex_),
       git_ops_lock_(git_ops_mutex) {}
 
+// std::filesystem::path canonical_repo_key(const std::filesystem::path& repo_root) {
+//   std::error_code ec;
+//   auto canonical = std::filesystem::weakly_canonical(repo_root, ec);
+//   if (ec || canonical.empty()) {
+//     return repo_root.lexically_normal();
+//   }
+//   return canonical;
+// }
+
 std::filesystem::path canonical_repo_key(const std::filesystem::path& repo_root) {
+
+  if (repo_root.empty()) {
+    return {};
+  }
+
   std::error_code ec;
   auto canonical = std::filesystem::weakly_canonical(repo_root, ec);
   if (ec || canonical.empty()) {
@@ -34,7 +48,7 @@ std::filesystem::path canonical_repo_key(const std::filesystem::path& repo_root)
   }
   return canonical;
 }
-
+  
 std::shared_ptr<std::recursive_mutex> repo_mutex_for(const std::filesystem::path& repo_root) {
   const auto key = canonical_repo_key(repo_root);
 
