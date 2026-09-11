@@ -627,15 +627,13 @@ nlohmann::json search_row_to_json(const holder::index::FtsIndexer::SearchRow& ro
   };
 }
 
-std::unique_ptr<holder::git::RealGitOps> open_project_git(
-    holder_context* context,
-    const holder::model::Project& project
+std::unique_ptr<holder::git::RealGitOps> make_project_git(
+    holder_context* context
 ) {
   auto git = std::make_unique<holder::git::RealGitOps>();
   if (context->credential_provider) {
     git->set_credential_provider(context->credential_provider);
   }
-  git->open_or_init(project.root_path);
   return git;
 }  // LCOV_EXCL_LINE
 
@@ -644,7 +642,9 @@ void persist_project_metadata(
     const holder::model::Project& project,
     const std::string& commit_message
 ) {
-  auto git = open_project_git(context, project);
+  auto git = make_project_git(context);
+  auto operation = git->lock_operation(project.root_path);
+  git->open_or_init(project.root_path);
   holder::project::write_project_manifest(*git, project);
   git->commit(commit_message);
 }
@@ -1892,9 +1892,14 @@ int holder_project_rename(
 
   try {
     holder::project::ProjectRepo repo(context->db);
-    if (!repo.get(project_id).has_value()) {
+    const auto current = repo.get(project_id);
+    if (!current.has_value()) {
       return set_error(out_error, HOLDER_ERROR_RUNTIME, "project not found: " + std::string(project_id));
     }
+
+    auto git = make_project_git(context);
+    auto operation = git->lock_operation(current->root_path);
+    git->open_or_init(current->root_path);
 
     repo.update_name(project_id, name, now_epoch_seconds());
     const auto updated = repo.get(project_id).value();
@@ -3317,16 +3322,20 @@ int holder_project_update_git_remote(
 
   try {
     holder::project::ProjectRepo repo(context->db);
-    if (!repo.get(project_id).has_value()) {
+    const auto current = repo.get(project_id);
+    if (!current.has_value()) {
       return set_error(out_error, HOLDER_ERROR_RUNTIME, "project not found: " + std::string(project_id));
     }
+
+    auto git = make_project_git(context);
+    auto operation = git->lock_operation(current->root_path);
+    git->open_or_init(current->root_path);
 
     const std::optional<std::string> url =
         (remote_url != nullptr && remote_url[0] != '\0') ? std::optional<std::string>(remote_url)
                                                           : std::nullopt;
     repo.update_git_remote(project_id, url, now_epoch_seconds());
     const auto updated = repo.get(project_id).value();
-    auto git = open_project_git(context, updated);
     if (url.has_value()) {
       git->set_remote("origin", *url);
     } else {
@@ -3392,7 +3401,9 @@ int holder_git_test_remote(
       body["remote_has_head"] = false;
       body["error_message"] = "Remote URL is not configured.";
     } else {
-      auto git = open_project_git(context, project);
+      auto git = make_project_git(context);
+      auto operation = git->lock_operation(project.root_path);
+      git->open_or_init(project.root_path);
       git->set_remote("origin", project.git_remote_url.value());
       const auto probe = git->probe_remote("origin");
       body["status"] = holder::git::remote_probe_status_name(probe.status);
@@ -3469,7 +3480,9 @@ int holder_git_push(
       body["local_head_commit"] = nullptr;
       body["error_message"] = "Remote URL is not configured.";
     } else {
-      auto git = open_project_git(context, project);
+      auto git = make_project_git(context);
+      auto operation = git->lock_operation(project.root_path);
+      git->open_or_init(project.root_path);
       git->set_remote("origin", project.git_remote_url.value());
       const auto push = git->push_branch("origin", requested_branch, set_upstream != 0);
       const bool push_ok = push.status == holder::git::PushStatus::Pushed ||
@@ -3557,7 +3570,9 @@ int holder_git_pull(
       body["status"] = "failed";
       body["error_message"] = "Remote URL is not configured.";
     } else {
-      auto git = open_project_git(context, project);
+      auto git = make_project_git(context);
+      auto operation = git->lock_operation(project.root_path);
+      git->open_or_init(project.root_path);
       git->set_remote("origin", project.git_remote_url.value());
       try {
         git->pull_remote_ff_only("origin");
@@ -3701,7 +3716,9 @@ int holder_git_sync_if_due(
     }
 
     const auto now = now_epoch_seconds();
-    auto git = open_project_git(context, project);
+    auto git = make_project_git(context);
+    auto operation = git->lock_operation(project.root_path);
+    git->open_or_init(project.root_path);
     git->set_remote("origin", project.git_remote_url.value());
 
     const auto state = sync_repo.get(project_id);
@@ -4032,9 +4049,13 @@ int holder_recovery_token_import(
 
   try {
     holder::project::ProjectRepo repo(context->db);
-    if (!repo.get(project_id).has_value()) {
+    const auto project = repo.get(project_id);
+    if (!project.has_value()) {
       return set_error(out_error, HOLDER_ERROR_RUNTIME, "project not found: " + std::string(project_id));
     }
+
+    auto git = make_project_git(context);
+    auto operation = git->lock_operation(project->root_path);
 
     holder::privacy::import_recovery_token(repo, project_id, pin, recovery_token, now_epoch_seconds());
     persist_project_metadata(
@@ -4145,11 +4166,13 @@ int holder_recovery_token_import_global(
       project.updated_at = now;
       const auto slug = holder::core::slugify(project.name);
       project.root_path = holder::core::unique_project_root(context->data_dir / "projects", slug, repo.list());
-      repo.create(project);
       project_created = true;
-      project_opt = repo.get(metadata.project_id);
+      project_opt = project;
     }
 
+    auto operation_git = make_project_git(context);
+    auto operation = operation_git->lock_operation(project_opt->root_path);
+    if (project_created) repo.create(*project_opt);
     holder::privacy::import_recovery_token(repo, metadata.project_id, pin, recovery_token, now);
 
     const bool remote_hint_present =
@@ -4162,7 +4185,9 @@ int holder_recovery_token_import_global(
     if (remote_hint_present) {
       const auto refreshed = repo.get(metadata.project_id);
       if (refreshed.has_value()) {
-        auto git = open_project_git(context, refreshed.value());
+        auto git = make_project_git(context);
+        auto operation = git->lock_operation(refreshed->root_path);
+        git->open_or_init(refreshed->root_path);
         try {
           git->set_remote("origin", metadata.git_remote_url.value());
           remote_configured = true;

@@ -74,13 +74,14 @@ ResourceStore::ResourceStore(
 holder::model::Project ResourceStore::require_project(const std::string& project_id) {
   const auto project = project_repo_.get(project_id);
   if (!project.has_value()) throw std::runtime_error("project not found: " + project_id);
-  git_->open_or_init(project->root_path);
-  if (project->git_remote_url.has_value()) git_->set_remote("origin", *project->git_remote_url);
   return *project;
 }
 
 void ResourceStore::put(const holder::model::ResourceBundle& bundle) {
   const auto project = require_project(bundle.resource.project_id);
+  auto operation = git_->lock_operation(project.root_path);
+  git_->open_or_init(project.root_path);
+  if (project.git_remote_url.has_value()) git_->set_remote("origin", *project.git_remote_url);
   const auto path = resource_rel_path(bundle.resource.resource_id);
   const auto encoded = encode_manifest(project, render_resource_manifest(bundle));
   git_->write_file(path, encoded);
@@ -111,6 +112,9 @@ void ResourceStore::remove(const std::string& resource_id) {
   const auto bundle = resource_repo_.get_bundle(resource_id);
   if (!bundle.has_value()) throw std::runtime_error("resource not found: " + resource_id);
   const auto project = require_project(bundle->resource.project_id);
+  auto operation = git_->lock_operation(project.root_path);
+  git_->open_or_init(project.root_path);
+  if (project.git_remote_url.has_value()) git_->set_remote("origin", *project.git_remote_url);
   const auto path = resource_rel_path(resource_id);
   holder::card::CardRepo cards(db_);
   holder::card::LinkRepo links(db_);

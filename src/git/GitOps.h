@@ -19,6 +19,15 @@ class GitOps {
  public:
   virtual ~GitOps() = default; // LCOV_EXCL_LINE
 
+  // The returned non-movable guard is deliberately lexical: it must be
+  // destroyed by the same thread that acquired it. Recursive locking supports
+  // same-thread nesting by store operations and their helper operations.
+  [[nodiscard]] GitOperationGuard lock_operation(
+      const std::filesystem::path& repo_dir
+  ) {
+    return GitOperationGuard(operation_mutex_, repo_dir);
+  }
+
   // Default no-op: implementations that don't override this keep whatever
   // default credential behavior their underlying GitRepo already has (see
   // GitRepo::set_credential_provider). Test doubles are not required to
@@ -53,6 +62,9 @@ class GitOps {
       bool set_upstream
   ) = 0;
   virtual std::filesystem::path repo_dir() const = 0;
+
+ private:
+  std::recursive_mutex operation_mutex_;
 };
 
 class RealGitOps final : public GitOps {
@@ -86,17 +98,6 @@ class RealGitOps final : public GitOps {
   );
 
  private:
-  // Acquires (or, when already held for this repository, keeps) the per-project
-  // lock for repo_dir. Called by open_or_init, which every operation runs first,
-  // so the lock is held for the whole lifetime of this RealGitOps -- i.e. for
-  // the complete Git operation the owning store performs.
-  void lock_repo(const std::filesystem::path& repo_dir);
-
-  // Declared before repo_ so the lock is released only after repo_ (and its
-  // git_repository*) has been torn down.
-  std::filesystem::path locked_repo_key_;
-  std::shared_ptr<std::recursive_mutex> repo_mutex_;
-  std::unique_lock<std::recursive_mutex> repo_lock_;
   GitRepo repo_;
 };
 

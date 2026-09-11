@@ -95,10 +95,6 @@ holder::model::Project CardStore::require_project(const std::string& project_id)
   if (!project_opt.has_value()) {
     throw std::runtime_error("project not found: " + project_id);
   }
-  git_->open_or_init(project_opt->root_path);
-  if (project_opt->git_remote_url.has_value()) {
-    git_->set_remote("origin", project_opt->git_remote_url.value());
-  }
   return project_opt.value();
 }
 
@@ -108,6 +104,9 @@ void CardStore::create(
     const std::optional<double>& explicit_sort_key
 ) {
   const auto project = require_project(card.project_id);
+  auto operation = git_->lock_operation(project.root_path);
+  git_->open_or_init(project.root_path);
+  if (project.git_remote_url.has_value()) git_->set_remote("origin", *project.git_remote_url);
   if (explicit_sort_key.has_value()) {
     card.sort_key = explicit_sort_key.value();
   } else {
@@ -160,6 +159,9 @@ void CardStore::create_batch(
     const std::string& commit_message
 ) {
   const auto project = require_project(project_id);
+  auto operation = git_->lock_operation(project.root_path);
+  git_->open_or_init(project.root_path);
+  if (project.git_remote_url.has_value()) git_->set_remote("origin", *project.git_remote_url);
 
   // card_id is a global primary key, not scoped per project -- restored cards always get a
   // fresh id (see BatchCardInput's doc comment), so link targets need remapping from the
@@ -270,6 +272,9 @@ void CardStore::update_content(
 
   const auto& card = card_opt.value();
   const auto project = require_project(card.project_id);
+  auto operation = git_->lock_operation(project.root_path);
+  git_->open_or_init(project.root_path);
+  if (project.git_remote_url.has_value()) git_->set_remote("origin", *project.git_remote_url);
   const std::string expected = holder::core::card_rel_path(card.card_id);
   if (card.rel_path != expected) {
     throw std::runtime_error("card rel_path does not match card_id");
@@ -334,6 +339,9 @@ void CardStore::move(
 
   auto card = card_opt.value();
   const auto project = require_project(card.project_id);
+  auto operation = git_->lock_operation(project.root_path);
+  git_->open_or_init(project.root_path);
+  if (project.git_remote_url.has_value()) git_->set_remote("origin", *project.git_remote_url);
   const std::string expected = holder::core::card_rel_path(card.card_id);
   if (card.rel_path != expected) {
     throw std::runtime_error("card rel_path does not match card_id");
@@ -398,6 +406,9 @@ void CardStore::update_links(const std::string& card_id, long long updated_at) {
 
   auto card = card_opt.value();
   const auto project = require_project(card.project_id);
+  auto operation = git_->lock_operation(project.root_path);
+  git_->open_or_init(project.root_path);
+  if (project.git_remote_url.has_value()) git_->set_remote("origin", *project.git_remote_url);
   const std::string expected = holder::core::card_rel_path(card.card_id);
   if (card.rel_path != expected) {
     throw std::runtime_error("card rel_path does not match card_id");
@@ -443,6 +454,9 @@ void CardStore::update_milestones(const std::string& card_id, long long updated_
 
   auto card = card_opt.value();
   const auto project = require_project(card.project_id);
+  auto operation = git_->lock_operation(project.root_path);
+  git_->open_or_init(project.root_path);
+  if (project.git_remote_url.has_value()) git_->set_remote("origin", *project.git_remote_url);
   const std::string expected = holder::core::card_rel_path(card.card_id);
   if (card.rel_path != expected) {
     throw std::runtime_error("card rel_path does not match card_id");
@@ -491,6 +505,9 @@ void CardStore::trash(const std::string& card_id, long long deleted_at) {
   }
 
   const auto project = require_project(card.project_id);
+  auto operation = git_->lock_operation(project.root_path);
+  git_->open_or_init(project.root_path);
+  if (project.git_remote_url.has_value()) git_->set_remote("origin", *project.git_remote_url);
   const std::string expected = holder::core::card_rel_path(card.card_id);
   if (card.rel_path != expected) {
     throw std::runtime_error("card rel_path does not match card_id");
@@ -528,6 +545,9 @@ void CardStore::restore(const std::string& card_id, long long updated_at) {
   }
 
   const auto project = require_project(card.project_id);
+  auto operation = git_->lock_operation(project.root_path);
+  git_->open_or_init(project.root_path);
+  if (project.git_remote_url.has_value()) git_->set_remote("origin", *project.git_remote_url);
   const std::string expected = holder::core::card_rel_path(card.card_id);
   if (card.rel_path != expected) {
     throw std::runtime_error("card rel_path does not match card_id");
@@ -572,6 +592,9 @@ void CardStore::restore_version(
   }
   const auto& current = current_opt.value();
   const auto project = require_project(current.project_id);
+  auto operation = git_->lock_operation(project.root_path);
+  git_->open_or_init(project.root_path);
+  if (project.git_remote_url.has_value()) git_->set_remote("origin", *project.git_remote_url);
   const std::string expected = holder::core::card_rel_path(card_id);
   if (current.rel_path != expected) {
     throw std::runtime_error("card rel_path does not match card_id");
@@ -671,7 +694,10 @@ void CardStore::hard_delete(const std::string& card_id) {
     throw std::runtime_error("card is not deleted");
   }
 
-  require_project(card.project_id);
+  const auto project = require_project(card.project_id);
+  auto operation = git_->lock_operation(project.root_path);
+  git_->open_or_init(project.root_path);
+  if (project.git_remote_url.has_value()) git_->set_remote("origin", *project.git_remote_url);
   const std::string trash_rel = holder::core::card_trash_rel_path(card.card_id);
   const auto trash_path = git_->repo_dir() / trash_rel;
   if (fs_->exists(trash_path)) {
@@ -696,6 +722,7 @@ std::optional<std::string> CardStore::get_content(const holder::model::Card& car
   if (!project_opt.has_value()) {
     throw std::runtime_error("project not found: " + card.project_id);
   }
+  auto operation = git_->lock_operation(project_opt->root_path);
   git_->open_or_init(project_opt->root_path);
 
   const std::string expected = holder::core::card_rel_path(card.card_id);
@@ -723,6 +750,8 @@ AddTagResult CardStore::add_tag(const std::string& card_id, const std::string& t
   if (!card_opt.has_value()) {
     throw std::runtime_error("card not found: " + card_id);
   }
+  const auto project = require_project(card_opt->project_id);
+  auto operation = git_->lock_operation(project.root_path);
   const auto content = get_content(card_opt.value()).value_or("");
 
   const auto existing = holder::core::extract_tags(content);
@@ -745,6 +774,8 @@ RemoveTagResult CardStore::remove_tag(const std::string& card_id, const std::str
   if (!card_opt.has_value()) {
     throw std::runtime_error("card not found: " + card_id);
   }
+  const auto project = require_project(card_opt->project_id);
+  auto operation = git_->lock_operation(project.root_path);
   const auto content = get_content(card_opt.value()).value_or("");
 
   const auto removal = holder::core::remove_from_trailing_tag_line(content, normalized);

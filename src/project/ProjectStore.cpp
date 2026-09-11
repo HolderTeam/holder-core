@@ -46,6 +46,7 @@ holder::model::Project ProjectStore::create(
     project.root_path = holder::core::unique_project_root(*projects_root, slug, repo_.list());
   }
 
+  auto operation = git_->lock_operation(project.root_path);
   repo_.create(project);
 
   try {

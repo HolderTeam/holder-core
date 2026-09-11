@@ -141,6 +141,7 @@ AssetImportResult AssetImportService::import_file(
     throw std::runtime_error("storage location not found in project");
   }
 
+  auto operation = git_->lock_operation(project->root_path);
   git_->open_or_init(project->root_path);
   if (project->git_remote_url.has_value()) git_->set_remote("origin", *project->git_remote_url);
   std::filesystem::create_directories(staging_root_);

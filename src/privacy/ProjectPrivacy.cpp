@@ -260,6 +260,7 @@ void ensure_encrypted_git_setup(
     const std::string& project_key_id
 ) {
   const auto repo_root = std::filesystem::path(root_path);
+  auto operation = git.lock_operation(repo_root);
   git.open_or_init(repo_root);
   write_privacy_meta(repo_root, project_id, project_key_id);
 }

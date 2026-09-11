@@ -111,6 +111,7 @@ void write_project_manifest(
     holder::git::GitOps& git,
     const holder::model::Project& project
 ) {
+  auto operation = git.lock_operation(project.root_path);
   git.open_or_init(project.root_path);
   git.write_file(kProjectBootstrapPath, render_project_bootstrap(project));
   git.write_file(kProjectManifestPath, render_project_manifest(project));

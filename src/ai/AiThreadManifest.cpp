@@ -79,6 +79,7 @@ void write_ai_thread_manifest(
     const holder::model::AiThread& thread
 ) {
   const auto rel_path = ai_thread_manifest_rel_path(thread.thread_id);
+  auto operation = git.lock_operation(project.root_path);
   git.open_or_init(project.root_path);
   git.write_file(rel_path, render_ai_thread_manifest(project, thread));
   git.stage_path(rel_path);

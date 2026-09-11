@@ -18,6 +18,14 @@ std::map<std::filesystem::path, std::weak_ptr<std::recursive_mutex>>& registry()
 
 } // namespace
 
+GitOperationGuard::GitOperationGuard(
+    std::recursive_mutex& git_ops_mutex,
+    const std::filesystem::path& repo_root
+)
+    : repo_mutex_(repo_mutex_for(repo_root)),
+      repo_lock_(*repo_mutex_),
+      git_ops_lock_(git_ops_mutex) {}
+
 std::filesystem::path canonical_repo_key(const std::filesystem::path& repo_root) {
   std::error_code ec;
   auto canonical = std::filesystem::weakly_canonical(repo_root, ec);
