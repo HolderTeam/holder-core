@@ -24,10 +24,9 @@ TEST_CASE("GitOps default stage_paths stages every supplied path", "[git]") {
   REQUIRE_NOTHROW(ops.commit("Stage through the default batch implementation"));
 }
 
-// #BFT1: fails on MacOS workflow.
-// TEST_CASE("canonical_repo_key tolerates an empty unresolved path", "[git]") {
-//   REQUIRE(holder::git::canonical_repo_key({}).empty());
-// }
+TEST_CASE("canonical_repo_key tolerates an empty unresolved path", "[git]") {
+  REQUIRE(holder::git::canonical_repo_key({}).empty());
+}
 
 TEST_CASE("RealGitOps probe_remote throws when repo is not opened", "[git]") {
   holder::git::RealGitOps ops;
