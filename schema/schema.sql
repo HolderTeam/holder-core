@@ -1,4 +1,4 @@
--- schema.sql (schema version 5)
+-- schema.sql (schema version 6)
 -- Local-first holder schema: projects, cards, links, milestones, resources, AI threads/messages, and FTS5.
 -- The app/server is responsible for keeping FTS tables in sync (no triggers in v0.1).
 
@@ -51,6 +51,9 @@ CREATE INDEX IF NOT EXISTS idx_cards_project_parent_sort
 
 CREATE INDEX IF NOT EXISTS idx_cards_project_title
   ON cards(project_id, title);
+
+CREATE INDEX IF NOT EXISTS idx_cards_project_card_id
+  ON cards(project_id, card_id);
 
 -- Ensure rel_path uniqueness within a project (so file mapping stays sane)
 CREATE UNIQUE INDEX IF NOT EXISTS uq_cards_project_relpath
@@ -454,7 +457,7 @@ CREATE TABLE IF NOT EXISTS schema_version (
   version INTEGER NOT NULL
 );
 
--- Initialize schema version to 5 if empty
+-- Initialize schema version to 6 if empty
 INSERT INTO schema_version(version)
-SELECT 5
+SELECT 6
 WHERE NOT EXISTS (SELECT 1 FROM schema_version);

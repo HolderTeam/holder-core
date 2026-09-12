@@ -225,6 +225,19 @@ void migrate_v4_to_v5(Db& db) {
   tx.commit();
 }
 
+void migrate_v5_to_v6(Db& db) {
+  static constexpr const char* SQL = R"sql(
+CREATE INDEX IF NOT EXISTS idx_cards_project_card_id
+  ON cards(project_id, card_id);
+
+UPDATE schema_version SET version = 6 WHERE version = 5;
+)sql";
+
+  Tx tx(db);
+  db.exec(SQL);
+  tx.commit();
+}
+
 } // namespace
 
 std::string Migrations::read_file(const std::filesystem::path& p) {
@@ -306,6 +319,11 @@ bool Migrations::migrate_to_latest(Db& db) {
     case 4:
       migrate_v4_to_v5(db);
       version = 5;
+      migrated = true;
+      break;
+    case 5:
+      migrate_v5_to_v6(db);
+      version = 6;
       migrated = true;
       break;
     default:

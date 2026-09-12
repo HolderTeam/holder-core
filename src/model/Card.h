@@ -5,6 +5,12 @@
 
 namespace holder::model {
 
+enum class CardScope {
+  Live,
+  Trashed,
+  Either,
+};
+
 struct Card {
   std::string card_id;
   std::string project_id;

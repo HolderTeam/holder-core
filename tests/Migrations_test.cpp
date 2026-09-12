@@ -173,6 +173,10 @@ TEST_CASE("migrate_to_latest adds UUID4 ID scheme to v4 projects", "[migrations]
       "updated_at INTEGER NOT NULL,"
       "CHECK(privacy_mode IN ('encrypted_git', 'plain'))"
       ");"
+      "CREATE TABLE cards ("
+      "card_id TEXT PRIMARY KEY,"
+      "project_id TEXT NOT NULL"
+      ");"
       "CREATE TABLE schema_version(version INTEGER NOT NULL);"
       "INSERT INTO schema_version VALUES(4);"
       "INSERT INTO projects(project_id,name,root_path,privacy_mode,created_at,updated_at) "
@@ -188,6 +192,24 @@ TEST_CASE("migrate_to_latest adds UUID4 ID scheme to v4 projects", "[migrations]
   REQUIRE(project->id_scheme == holder::model::IdScheme::Uuid4);
   REQUIRE_THROWS(db.exec(
       "UPDATE projects SET id_scheme = 'uuid8' WHERE project_id = 'legacy';"
+  ));
+}
+
+TEST_CASE("migrate_to_latest adds the project card ID lookup index to v5", "[migrations]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  holder::platform::Migrations::ensure_schema(db, find_schema_sql());
+  db.exec("DROP INDEX idx_cards_project_card_id;");
+  db.exec("UPDATE schema_version SET version = 5;");
+
+  REQUIRE(holder::platform::Migrations::migrate_to_latest(db));
+  REQUIRE_NOTHROW(holder::platform::Migrations::ensure_schema_version(
+      db, holder::platform::Migrations::latest_schema_version
+  ));
+  REQUIRE_NOTHROW(db.exec(
+      "SELECT card_id FROM cards INDEXED BY idx_cards_project_card_id "
+      "WHERE project_id = 'project' AND card_id >= '';"
   ));
 }
 
