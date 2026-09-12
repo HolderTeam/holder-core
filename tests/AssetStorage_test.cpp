@@ -85,7 +85,8 @@ holder::model::Project encrypted_project(const std::filesystem::path& dir) {
   db.exec(
       "CREATE TABLE projects (project_id TEXT PRIMARY KEY, name TEXT NOT NULL, root_path TEXT NOT "
       "NULL, git_remote_url TEXT NULL, git_provider TEXT NULL, privacy_mode TEXT NOT NULL DEFAULT "
-      "'plain', project_key_id TEXT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);"
+      "'plain', project_key_id TEXT NULL, id_scheme TEXT NOT NULL DEFAULT 'uuid4', created_at "
+      "INTEGER NOT NULL, updated_at INTEGER NOT NULL);"
   );
   holder::model::Project project;
   project.project_id = "project-asset-test";

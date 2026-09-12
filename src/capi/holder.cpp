@@ -156,6 +156,7 @@ nlohmann::json project_to_json(const holder::model::Project& project) {
       {"name", project.name},
       {"root_path", project.root_path},
       {"privacy_mode", project.privacy_mode},
+      {"id_scheme", holder::model::to_string(project.id_scheme)},
       {"created_at", project.created_at},
       {"updated_at", project.updated_at},
   };
@@ -1715,6 +1716,7 @@ int holder_backup_restore(
 
     holder::model::Project project;
     project.name = project_name;
+    project.id_scheme = holder::model::IdScheme::Uuid7;
     project.privacy_mode =
         (privacy_mode != nullptr && privacy_mode[0] != '\0') ? std::string(privacy_mode) : "plain";
 
@@ -1827,6 +1829,7 @@ int holder_project_create(
   try {
     holder::model::Project project;
     project.name = name;
+    project.id_scheme = holder::model::IdScheme::Uuid7;
     if (root_path != nullptr && root_path[0] != '\0') {
       project.root_path = root_path;
     }

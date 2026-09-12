@@ -11,6 +11,8 @@
 #include "project/ProjectManifest.h"
 #include "project/ProjectRepo.h"
 
+#include <nlohmann/json.hpp>
+
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -33,11 +35,17 @@ TEST_CASE("plain project manifest round trips stable identity and metadata", "[p
   project.git_remote_url = "https://example.com/holder/recipes.git";
   project.git_provider = "github";
   project.privacy_mode = "plain";
+  project.id_scheme = holder::model::IdScheme::Uuid7;
   project.created_at = 101;
   project.updated_at = 202;
 
   holder::git::RealGitOps git;
   holder::project::write_project_manifest(git, project);
+
+  const auto manifest = nlohmann::json::parse(read_file(
+      std::filesystem::path(project.root_path) / holder::project::kProjectManifestPath
+  ));
+  REQUIRE(manifest.at("id_scheme") == "uuid7");
 
   const auto recovered = holder::project::read_project_manifest(project.root_path);
   REQUIRE(recovered.project_id == project.project_id);
@@ -46,6 +54,7 @@ TEST_CASE("plain project manifest round trips stable identity and metadata", "[p
   REQUIRE(recovered.git_remote_url == project.git_remote_url);
   REQUIRE(recovered.git_provider == project.git_provider);
   REQUIRE(recovered.privacy_mode == "plain");
+  REQUIRE(recovered.id_scheme == holder::model::IdScheme::Uuid7);
   REQUIRE_FALSE(recovered.project_key_id.has_value());
   REQUIRE(recovered.created_at == project.created_at);
   REQUIRE(recovered.updated_at == project.updated_at);
@@ -64,6 +73,7 @@ TEST_CASE("encrypted project manifest does not expose its name", "[project][mani
   project.name = "Private family records";
   project.root_path = (dir / "private").string();
   project.privacy_mode = "encrypted_git";
+  project.id_scheme = holder::model::IdScheme::Uuid7;
   project.created_at = 303;
   project.updated_at = 404;
   repo.create(project);
@@ -91,6 +101,19 @@ TEST_CASE("encrypted project manifest does not expose its name", "[project][mani
   REQUIRE(recovered.project_id == project.project_id);
   REQUIRE(recovered.name == project.name);
   REQUIRE(recovered.project_key_id == project.project_key_id);
+  REQUIRE(recovered.id_scheme == holder::model::IdScheme::Uuid7);
+}
+
+TEST_CASE("project manifest missing id_scheme defaults to UUID4", "[project][manifest]") {
+  const auto root = holder::test::make_temp_dir() / "legacy-project";
+  std::filesystem::create_directories(root / ".holder");
+  std::ofstream(root / holder::project::kProjectBootstrapPath)
+      << R"({"version":1,"project_id":"project-1","mode":"plain"})";
+  std::ofstream(root / holder::project::kProjectManifestPath)
+      << R"({"version":1,"project_id":"project-1","name":"Legacy","created_at":1,"updated_at":2})";
+
+  const auto recovered = holder::project::read_project_manifest(root);
+  REQUIRE(recovered.id_scheme == holder::model::IdScheme::Uuid4);
 }
 
 TEST_CASE("project manifest rejects bootstrap and payload identity mismatch", "[project][manifest]") {
@@ -176,6 +199,18 @@ TEST_CASE("project manifest rejects malformed durable metadata", "[project][mani
   write_metadata(
       valid_bootstrap,
       R"({"version":1,"project_id":"project-1","name":"","created_at":1,"updated_at":2})"
+  );
+  REQUIRE_THROWS(holder::project::read_project_manifest(root));
+
+  write_metadata(
+      valid_bootstrap,
+      R"({"version":1,"project_id":"project-1","name":"Project","id_scheme":"uuid8","created_at":1,"updated_at":2})"
+  );
+  REQUIRE_THROWS(holder::project::read_project_manifest(root));
+
+  write_metadata(
+      valid_bootstrap,
+      R"({"version":1,"project_id":"project-1","name":"Project","id_scheme":7,"created_at":1,"updated_at":2})"
   );
   REQUIRE_THROWS(holder::project::read_project_manifest(root));
 }

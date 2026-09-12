@@ -38,6 +38,7 @@ std::optional<holder::model::Project> ensure_default_project(
   holder::model::Project project;
   project.name = name;
   project.privacy_mode = privacy_mode;
+  project.id_scheme = holder::model::IdScheme::Uuid7;
 
   ProjectStore store(db, git);
   auto created = store.create(std::move(project), uuid_v4, projects_root);

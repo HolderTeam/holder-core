@@ -40,6 +40,7 @@ TEST_CASE("ensure_default_project creates a project and welcome card when empty"
   REQUIRE(created.has_value());
   REQUIRE(created->name == "Home");
   REQUIRE(created->privacy_mode == "plain");
+  REQUIRE(created->id_scheme == holder::model::IdScheme::Uuid7);
 
   holder::card::CardRepo card_repo(db);
   const auto cards = card_repo.list_all(created->project_id);

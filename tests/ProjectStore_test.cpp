@@ -33,6 +33,7 @@ TEST_CASE("ProjectStore create defaults id, timestamps, and root_path", "[projec
   holder::model::Project input;
   input.name = "Home";
   input.privacy_mode = "plain";
+  input.id_scheme = holder::model::IdScheme::Uuid7;
 
   const auto created = store.create(input, counting_uuid_v4("id"), dir / "projects");
 
@@ -40,9 +41,11 @@ TEST_CASE("ProjectStore create defaults id, timestamps, and root_path", "[projec
   REQUIRE(created.created_at > 0);
   REQUIRE(created.updated_at == created.created_at);
   REQUIRE(created.root_path == (dir / "projects" / "home").string());
+  REQUIRE(created.id_scheme == holder::model::IdScheme::Uuid7);
 
   holder::project::ProjectRepo repo(db);
   REQUIRE(repo.list().size() == 1);
+  REQUIRE(repo.list()[0].id_scheme == holder::model::IdScheme::Uuid7);
   REQUIRE(std::filesystem::exists(
       std::filesystem::path(created.root_path) / ".holder" / "privacy.json"
   ));

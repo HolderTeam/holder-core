@@ -1,5 +1,8 @@
 #pragma once
 
+#include <optional>
+#include <string_view>
+
 namespace holder::model {
 
 enum class IdScheme {
@@ -7,5 +10,7 @@ enum class IdScheme {
   Uuid7,
 };
 
-}  // namespace holder::model
+std::string_view to_string(IdScheme scheme);
+std::optional<IdScheme> id_scheme_from_string(std::string_view value);
 
+}  // namespace holder::model
