@@ -37,8 +37,6 @@
 
 #include <git2.h>
 #include <nlohmann/json.hpp>
-#include <sodium.h>
-
 #include <algorithm>
 #include <cctype>
 #include <chrono>
@@ -946,28 +944,6 @@ long long now_epoch_seconds() {
       .count();
 }
 
-std::string uuid_v4() {
-  if (sodium_init() < 0) {
-    throw std::runtime_error("failed to initialize libsodium"); // LCOV_EXCL_LINE
-  }
-  unsigned char bytes[16];
-  randombytes_buf(bytes, sizeof(bytes));
-  bytes[6] = static_cast<unsigned char>((bytes[6] & 0x0F) | 0x40); // version 4
-  bytes[8] = static_cast<unsigned char>((bytes[8] & 0x3F) | 0x80); // variant 10xx
-
-  static const char* kHex = "0123456789abcdef";
-  std::string out;
-  out.reserve(36);
-  for (int i = 0; i < 16; ++i) {
-    out.push_back(kHex[bytes[i] >> 4]);
-    out.push_back(kHex[bytes[i] & 0x0F]);
-    if (i == 3 || i == 5 || i == 7 || i == 9) {
-      out.push_back('-');
-    }
-  }
-  return out;
-}  // LCOV_EXCL_LINE
-
 // Thin wrappers binding the C ABI's holder_context to the shared (holder::sync) pull
 // reconciliation/conflict-resolution logic -- shared because holder-daemon's own native sync
 // worker needs the exact same behavior and doesn't go through this C ABI at all, so the logic
@@ -983,7 +959,15 @@ int resolve_pull_conflicts(
     const holder::git::NonFastForwardPullError& diverged,
     long long now
 ) {
-  return holder::sync::resolve_pull_conflicts(context->db, &context->fts, project, git, diverged, now, uuid_v4);
+  return holder::sync::resolve_pull_conflicts(
+      context->db,
+      &context->fts,
+      project,
+      git,
+      diverged,
+      now,
+      holder::identity::uuid_v4
+  );
 }
 
 } // namespace
@@ -1419,7 +1403,7 @@ int holder_asset_import_file(
     holder::resource::AssetImportService service(
         context->db,
         context->data_dir / "server" / "asset-staging",
-        uuid_v4
+        holder::identity::uuid_v4
     );
     auto& provider = resolve_storage_provider(context, location->provider);
     const auto result = service.import_file(request, provider);
@@ -1472,7 +1456,7 @@ int holder_asset_retrieve(
     holder::resource::AssetImportService service(
         context->db,
         context->data_dir / "server" / "asset-staging",
-        uuid_v4
+        holder::identity::uuid_v4
     );
     auto& provider = resolve_storage_provider(context, location->provider);
     service.retrieve(
@@ -1736,11 +1720,13 @@ int holder_backup_restore(
 
     holder::project::ProjectStore project_store(context->db);
     const auto created =
-        project_store.create(project, uuid_v4, context->data_dir / "projects");
+        project_store.create(project, holder::identity::uuid_v4, context->data_dir / "projects");
 
     try {
       holder::card::CardStore card_store(context->db, &context->fts);
-      card_store.create_batch(created.project_id, items, uuid_v4, commit_message);
+      card_store.create_batch(
+          created.project_id, items, holder::identity::uuid_v4, commit_message
+      );
     } catch (...) {
       // The project is brand new and this whole restore attempt failed -- don't leave a
       // half-populated project around for the caller to stumble on. Same rollback shape as
@@ -1848,12 +1834,9 @@ int holder_project_create(
         (privacy_mode != nullptr && privacy_mode[0] != '\0') ? std::string(privacy_mode) : "plain";
 
     holder::project::ProjectStore store(context->db);
-    const auto created =
-        store.create(
-		     std::move(project),
-		     holder::identity::uuid_v4,
-		     context->data_dir / "projects"
-	);
+    const auto created = store.create(
+        std::move(project), holder::identity::uuid_v4, context->data_dir / "projects"
+    );
 
     if (root_path != nullptr && root_path[0] != '\0') {
       // This generic C API does not yet persist a registry for caller-selected
@@ -2788,7 +2771,7 @@ int holder_card_milestone_add(
     auto milestones = milestone_repo.list_for_card(card->project_id, card_id);
 
     holder::model::Milestone milestone;
-    milestone.milestone_id = uuid_v4();
+    milestone.milestone_id = holder::identity::uuid_v4();
     milestone.project_id = card->project_id;
     milestone.card_id = card_id;
     milestone.start_at = start_at;
@@ -3005,7 +2988,7 @@ int holder_ensure_default_project(
         "plain",
         welcome_title,
         welcome_content != nullptr ? std::string(welcome_content) : std::string(),
-        uuid_v4,
+        holder::identity::uuid_v4,
         context->data_dir / "projects",
         &context->fts
     );
