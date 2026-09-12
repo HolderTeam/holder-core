@@ -81,4 +81,14 @@ std::string uuid_v7() {
   return format_uuid(bytes);
 }
 
+std::string generate_id(holder::model::IdScheme scheme) {
+  switch (scheme) {
+  case holder::model::IdScheme::Uuid4:
+    return uuid_v4();
+  case holder::model::IdScheme::Uuid7:
+    return uuid_v7();
+  }
+  throw std::invalid_argument("unsupported ID scheme"); // LCOV_EXCL_LINE
+}
+
 }  // namespace holder::identity

@@ -66,3 +66,19 @@ TEST_CASE("UUIDv7 values sort in timestamp order", "[identity][uuid]") {
   REQUIRE(earlier.substr(0, 13) < later.substr(0, 13));
   REQUIRE(earlier < later);
 }
+
+TEST_CASE("generate_id dispatches UUIDv4 schemes", "[identity][uuid]") {
+  const auto uuid = holder::identity::generate_id(holder::model::IdScheme::Uuid4);
+
+  REQUIRE(has_canonical_uuid_format(uuid));
+  REQUIRE(uuid[14] == '4');
+  REQUIRE(has_rfc_variant(uuid));
+}
+
+TEST_CASE("generate_id dispatches UUIDv7 schemes", "[identity][uuid]") {
+  const auto uuid = holder::identity::generate_id(holder::model::IdScheme::Uuid7);
+
+  REQUIRE(has_canonical_uuid_format(uuid));
+  REQUIRE(uuid[14] == '7');
+  REQUIRE(has_rfc_variant(uuid));
+}
