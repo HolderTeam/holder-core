@@ -27,6 +27,8 @@ using holder::test::EnvGuard;
 using holder::test::make_temp_dir;
 using holder::test::open_db_with_schema;
 
+constexpr const char* kSharedCardId = "550e8400-e29b-41d4-a716-446655440000";
+
 void create_plain_project(
     holder::project::ProjectRepo& projects,
     const std::string& project_id,
@@ -80,7 +82,7 @@ TEST_CASE(
   const auto seeded_project = remote_projects.get(project_id).value();
 
   holder::model::Card card;
-  card.card_id = "shared-card";
+  card.card_id = kSharedCardId;
   card.project_id = project_id;
   card.title = "Shared";
   holder::card::CardStore(remote_db, &remote_fts, nullptr, &remote_git).create(card, "base");
@@ -93,7 +95,7 @@ TEST_CASE(
 
   // Diverge: remote edits the card...
   holder::card::CardStore(remote_db, &remote_fts, nullptr, &remote_git)
-      .update_content("shared-card", "remote edit", std::nullopt, 2);
+      .update_content(kSharedCardId, "remote edit", std::nullopt, 2);
 
   // ...and local independently edits the same card via its own DB row -- same project_id/
   // project_key_id, so decryption works identically, exactly the real cross-device scenario.
@@ -106,7 +108,7 @@ TEST_CASE(
   local_projects.create(local_project);
   holder::store::Rebuilder(local_db, &local_fts).rebuild_project(local_project);
   holder::card::CardStore(local_db, &local_fts, nullptr, &local_git)
-      .update_content("shared-card", "local edit", std::nullopt, 2);
+      .update_content(kSharedCardId, "local edit", std::nullopt, 2);
 
   bool diverged_seen = false;
   holder::git::NonFastForwardPullError diverged("", "", "");
@@ -127,7 +129,7 @@ TEST_CASE(
 
   const auto cards = holder::card::CardRepo(local_db).list_all(project_id);
   const auto duplicate = std::find_if(cards.begin(), cards.end(), [](const auto& candidate) {
-    return candidate.card_id != "shared-card";
+    return candidate.card_id != kSharedCardId;
   });
   REQUIRE(duplicate != cards.end());
   REQUIRE(duplicate->card_id.size() == 36);
@@ -178,7 +180,7 @@ TEST_CASE(
   const auto seeded_project = remote_projects.get(project_id).value();
 
   holder::model::Card card;
-  card.card_id = "shared-card";
+  card.card_id = kSharedCardId;
   card.project_id = project_id;
   card.title = "Shared";
   holder::card::CardStore(remote_db, &remote_fts, nullptr, &remote_git).create(card, "base");
@@ -189,16 +191,16 @@ TEST_CASE(
   local_git.pull_remote_ff_only("origin");
 
   remote_git.write_file(
-      holder::core::card_rel_path("shared-card"),
+      holder::core::card_rel_path(kSharedCardId),
       "remote edit -- doesn't matter, never decrypted in this test"
   );
-  remote_git.stage_path(holder::core::card_rel_path("shared-card"));
+  remote_git.stage_path(holder::core::card_rel_path(kSharedCardId));
   remote_git.commit("remote edit");
 
   // Corrupt the local side's copy directly, in the working tree, then commit it -- this is what
   // makes the (still real, git-level) divergence's local content undecryptable.
-  local_git.write_file(holder::core::card_rel_path("shared-card"), "not a real encrypted envelope");
-  local_git.stage_path(holder::core::card_rel_path("shared-card"));
+  local_git.write_file(holder::core::card_rel_path(kSharedCardId), "not a real encrypted envelope");
+  local_git.stage_path(holder::core::card_rel_path(kSharedCardId));
   local_git.commit("local corruption");
 
   auto local_db = open_db_with_schema(dir / "local.db");
@@ -237,7 +239,7 @@ TEST_CASE("resolve_pull_conflicts creates UUIDv4 copies for UUIDv4 projects", "[
   create_plain_project(remote_projects, project_id, remote_dir);
 
   holder::model::Card card;
-  card.card_id = "shared-card";
+  card.card_id = kSharedCardId;
   card.project_id = project_id;
   card.title = "Shared";
   holder::card::CardStore(remote_db, &remote_fts, nullptr, &remote_git).create(card, "base");
@@ -248,7 +250,7 @@ TEST_CASE("resolve_pull_conflicts creates UUIDv4 copies for UUIDv4 projects", "[
   local_git.pull_remote_ff_only("origin");
 
   holder::card::CardStore(remote_db, &remote_fts, nullptr, &remote_git)
-      .update_content("shared-card", "remote edit", std::nullopt, 2);
+      .update_content(kSharedCardId, "remote edit", std::nullopt, 2);
 
   auto local_db = open_db_with_schema(dir / "local.db");
   holder::index::FtsIndexer local_fts(local_db);
@@ -257,7 +259,7 @@ TEST_CASE("resolve_pull_conflicts creates UUIDv4 copies for UUIDv4 projects", "[
   const auto local_project = local_projects.get(project_id).value();
   holder::store::Rebuilder(local_db, &local_fts).rebuild_project(local_project);
   holder::card::CardStore(local_db, &local_fts, nullptr, &local_git)
-      .update_content("shared-card", "local edit", std::nullopt, 2);
+      .update_content(kSharedCardId, "local edit", std::nullopt, 2);
 
   bool diverged_seen = false;
   holder::git::NonFastForwardPullError diverged("", "", "");
@@ -276,7 +278,7 @@ TEST_CASE("resolve_pull_conflicts creates UUIDv4 copies for UUIDv4 projects", "[
 
   const auto cards = holder::card::CardRepo(local_db).list_all(project_id);
   const auto duplicate = std::find_if(cards.begin(), cards.end(), [](const auto& candidate) {
-    return candidate.card_id != "shared-card";
+    return candidate.card_id != kSharedCardId;
   });
   REQUIRE(duplicate != cards.end());
   REQUIRE(duplicate->card_id.size() == 36);

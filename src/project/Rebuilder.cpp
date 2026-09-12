@@ -11,6 +11,7 @@
 #include "card/MilestoneRepo.h"
 #include "card/TagExtractor.h"
 #include "card/TagRepo.h"
+#include "identity/Uuid.h"
 #include "platform/Fs.h"
 #include "platform/Tx.h"
 #include "privacy/ProjectPrivacy.h"
@@ -331,8 +332,8 @@ Rebuilder::RebuildStats Rebuilder::rebuild_project(const holder::model::Project&
     if (card.card_id.empty()) {
       card.card_id = path.stem().string();
     }
-    if (card.card_id.size() < 4) {
-      throw std::runtime_error("invalid card_id in file");
+    if (!holder::identity::is_valid_uuid(card.card_id)) {
+      throw std::runtime_error("invalid card_id in file: expected UUIDv4 or UUIDv7");
     }
 
     const std::string expected_rel = is_trash ? holder::core::card_trash_rel_path(card.card_id)

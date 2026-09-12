@@ -9,6 +9,12 @@
 namespace holder::identity {
 namespace {
 
+bool is_hex_digit(char value) {
+  return (value >= '0' && value <= '9') ||
+         (value >= 'a' && value <= 'f') ||
+         (value >= 'A' && value <= 'F');
+}
+
 void ensure_sodium() {
   if (sodium_init() < 0) {
     throw std::runtime_error("failed to initialize libsodium"); // LCOV_EXCL_LINE
@@ -89,6 +95,24 @@ std::string generate_id(holder::model::IdScheme scheme) {
     return uuid_v7();
   }
   throw std::invalid_argument("unsupported ID scheme"); // LCOV_EXCL_LINE
+}
+
+bool is_valid_uuid(std::string_view value) {
+  if (value.size() != 36) return false;
+
+  for (std::size_t index = 0; index < value.size(); ++index) {
+    if (index == 8 || index == 13 || index == 18 || index == 23) {
+      if (value[index] != '-') return false;
+    } else if (!is_hex_digit(value[index])) {
+      return false;
+    }
+  }
+
+  if (value[14] != '4' && value[14] != '7') return false;
+
+  const char variant = value[19];
+  return variant == '8' || variant == '9' || variant == 'a' || variant == 'A' ||
+         variant == 'b' || variant == 'B';
 }
 
 }  // namespace holder::identity

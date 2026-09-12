@@ -341,24 +341,27 @@ TEST_CASE("Rebuilder rebuilds cards/messages with defaults, links, trash and FTS
   apply_schema(db);
 
   const std::string project_id = "proj-1";
+  const std::string card_a_id = "550e8400-e29b-41d4-a716-446655440000";
+  const std::string card_b_id = "01890f3e-7b5a-7cc8-98c4-dc0c0c07398f";
+  const std::string trash_card_id = "6ba7b810-9dad-41d1-80b4-00c04fd430c8";
   const auto root = dir / "repo";
   std::filesystem::create_directories(root);
   create_project(db, project_id, root.string());
 
   // Active card without front matter -> card_id from stem + title from first markdown heading.
-  const auto card_a_rel = holder::core::card_rel_path("abcd1234");
+  const auto card_a_rel = holder::core::card_rel_path(card_a_id);
   write_file(root / card_a_rel, "# Heading Title\nbody\n");
 
   // Active card with front matter + links.
   holder::model::Card card_b;
-  card_b.card_id = "beef5678";
+  card_b.card_id = card_b_id;
   card_b.project_id = project_id;
   card_b.title = "Linked Card";
   card_b.rel_path = holder::core::card_rel_path(card_b.card_id);
   card_b.created_at = 11;
   card_b.updated_at = 12;
   holder::model::CardLink card_link;
-  card_link.to_card_id = "abcd1234";
+  card_link.to_card_id = card_a_id;
   card_link.to_type = "card";
   card_link.kind = "ref";
   card_link.created_at = 0; // rebuilt default path
@@ -376,7 +379,7 @@ TEST_CASE("Rebuilder rebuilds cards/messages with defaults, links, trash and FTS
 
   // Trash card without front matter -> deleted_at gets mtime. Its #ghost tag must not surface
   // in the rebuilt index -- trashed cards aren't tag-searchable, same as they aren't FTS-searchable.
-  const auto card_t_rel = holder::core::card_trash_rel_path("dead9999");
+  const auto card_t_rel = holder::core::card_trash_rel_path(trash_card_id);
   write_file(root / card_t_rel, "trashed card body #ghost\n");
 
   // Active message without front matter -> message_id/thread_id defaults + role/source defaults.
@@ -392,7 +395,7 @@ TEST_CASE("Rebuilder rebuilds cards/messages with defaults, links, trash and FTS
   msg_b.content = "answer";
   msg_b.created_at = 20;
   holder::model::CardLink msg_link;
-  msg_link.to_card_id = "abcd1234";
+  msg_link.to_card_id = card_a_id;
   msg_link.to_type = "card";
   msg_link.kind = "ref";
   msg_link.created_at = 0; // rebuilt default path
@@ -425,19 +428,19 @@ TEST_CASE("Rebuilder rebuilds cards/messages with defaults, links, trash and FTS
 
   // Derived title + created/updated fallback from mtime.
   const auto title =
-      select_text_optional(db, "SELECT title FROM cards WHERE card_id = ?;", "abcd1234");
+      select_text_optional(db, "SELECT title FROM cards WHERE card_id = ?;", card_a_id);
   REQUIRE(title.has_value());
   REQUIRE(title.value() == "Heading Title");
   const auto created =
-      select_int64(db, "SELECT created_at FROM cards WHERE card_id = ?;", "abcd1234");
+      select_int64(db, "SELECT created_at FROM cards WHERE card_id = ?;", card_a_id);
   const auto updated =
-      select_int64(db, "SELECT updated_at FROM cards WHERE card_id = ?;", "abcd1234");
+      select_int64(db, "SELECT updated_at FROM cards WHERE card_id = ?;", card_a_id);
   REQUIRE(created > 0);
   REQUIRE(updated == created);
 
   // Trash card was marked deleted.
   const auto card_deleted =
-      select_int64(db, "SELECT deleted_at FROM cards WHERE card_id = ?;", "dead9999");
+      select_int64(db, "SELECT deleted_at FROM cards WHERE card_id = ?;", trash_card_id);
   REQUIRE(card_deleted > 0);
 
   // Message defaults were applied for no-front-matter file.
@@ -459,7 +462,7 @@ TEST_CASE("Rebuilder rebuilds cards/messages with defaults, links, trash and FTS
 
   // Message link + card link were inserted and normalized by rebuilder.
   holder::card::LinkRepo links(db);
-  const auto out_card = links.list_outgoing(project_id, "beef5678");
+  const auto out_card = links.list_outgoing(project_id, card_b_id);
   REQUIRE(out_card.size() == 1);
   REQUIRE(out_card[0].to_type == "card");
   REQUIRE(out_card[0].kind == "ref");
@@ -472,11 +475,11 @@ TEST_CASE("Rebuilder rebuilds cards/messages with defaults, links, trash and FTS
 
   // Milestone was inserted and normalized (project_id/card_id/created_at/updated_at) by rebuilder.
   holder::card::MilestoneRepo milestones(db);
-  const auto card_milestones = milestones.list_for_card(project_id, "beef5678");
+  const auto card_milestones = milestones.list_for_card(project_id, card_b_id);
   REQUIRE(card_milestones.size() == 1);
   REQUIRE(card_milestones[0].milestone_id == "mile-b1");
   REQUIRE(card_milestones[0].project_id == project_id);
-  REQUIRE(card_milestones[0].card_id == "beef5678");
+  REQUIRE(card_milestones[0].card_id == card_b_id);
   REQUIRE(card_milestones[0].start_at == 500);
   REQUIRE(card_milestones[0].kind == std::optional<std::string>("Renewal"));
   REQUIRE(card_milestones[0].created_at > 0);
@@ -488,8 +491,8 @@ TEST_CASE("Rebuilder rebuilds cards/messages with defaults, links, trash and FTS
 
   // Tags were extracted from the active card's body and indexed; the trashed card's tag was not.
   holder::card::TagRepo tags(db);
-  REQUIRE(tags.list_tags_for_card(project_id, "beef5678") == std::vector<std::string>{"todo"});
-  REQUIRE(tags.list_card_ids_with_tag(project_id, "todo") == std::vector<std::string>{"beef5678"});
+  REQUIRE(tags.list_tags_for_card(project_id, card_b_id) == std::vector<std::string>{"todo"});
+  REQUIRE(tags.list_card_ids_with_tag(project_id, "todo") == std::vector<std::string>{card_b_id});
   REQUIRE(tags.list_card_ids_with_tag(project_id, "ghost").empty());
 }
 
@@ -505,7 +508,7 @@ TEST_CASE("Rebuilder excludes a trashed card's milestones from the index", "[reb
   create_project(db, project_id, root.string());
 
   holder::model::Card trashed;
-  trashed.card_id = "trshmil1";
+  trashed.card_id = "550e8400-e29b-41d4-a716-446655440000";
   trashed.project_id = project_id;
   trashed.title = "Trashed";
   trashed.rel_path = holder::core::card_trash_rel_path(trashed.card_id);
@@ -553,7 +556,8 @@ TEST_CASE("Rebuilder derive_title falls back when heading is blank", "[rebuild]"
   create_project(db, project_id, root.string());
 
   // First line is whitespace-only heading marker; derive_title should fall back to card_id.
-  const auto card_rel = holder::core::card_rel_path("abcd1234");
+  const std::string card_id = "550e8400-e29b-41d4-a716-446655440000";
+  const auto card_rel = holder::core::card_rel_path(card_id);
   write_file(root / card_rel, "#    \nbody\n");
 
   holder::index::FtsIndexer fts(db);
@@ -570,9 +574,9 @@ TEST_CASE("Rebuilder derive_title falls back when heading is blank", "[rebuild]"
   REQUIRE(stats.cards == 1);
 
   const auto title =
-      select_text_optional(db, "SELECT title FROM cards WHERE card_id = ?;", "abcd1234");
+      select_text_optional(db, "SELECT title FROM cards WHERE card_id = ?;", card_id);
   REQUIRE(title.has_value());
-  REQUIRE(title.value() == "abcd1234");
+  REQUIRE(title.value() == card_id);
 }
 
 TEST_CASE("Rebuilder derive_title falls back when first line is whitespace only", "[rebuild]") {
@@ -586,7 +590,8 @@ TEST_CASE("Rebuilder derive_title falls back when first line is whitespace only"
   std::filesystem::create_directories(root);
   create_project(db, project_id, root.string());
 
-  const auto card_rel = holder::core::card_rel_path("abcd1234");
+  const std::string card_id = "550e8400-e29b-41d4-a716-446655440000";
+  const auto card_rel = holder::core::card_rel_path(card_id);
   write_file(root / card_rel, "    \nbody\n");
 
   holder::index::FtsIndexer fts(db);
@@ -603,9 +608,9 @@ TEST_CASE("Rebuilder derive_title falls back when first line is whitespace only"
   REQUIRE(stats.cards == 1);
 
   const auto title =
-      select_text_optional(db, "SELECT title FROM cards WHERE card_id = ?;", "abcd1234");
+      select_text_optional(db, "SELECT title FROM cards WHERE card_id = ?;", card_id);
   REQUIRE(title.has_value());
-  REQUIRE(title.value() == "abcd1234");
+  REQUIRE(title.value() == card_id);
 }
 
 TEST_CASE("Rebuilder rejects invalid card front matter", "[rebuild]") {
@@ -807,10 +812,10 @@ TEST_CASE("Rebuilder rejects cards with unresolved parent graph", "[rebuild]") {
   create_project(db, project_id, root.string());
 
   holder::model::Card child;
-  child.card_id = "abcd1234";
+  child.card_id = "550e8400-e29b-41d4-a716-446655440000";
   child.project_id = project_id;
   child.title = "Child";
-  child.parent_card_id = "missing999";
+  child.parent_card_id = "01890f3e-7b5a-7cc8-98c4-dc0c0c07398f";
   child.rel_path = holder::core::card_rel_path(child.card_id);
   child.created_at = 1;
   child.updated_at = 1;
@@ -845,7 +850,9 @@ TEST_CASE("Rebuilder tolerates invalid trashed ai messages when configured", "[r
   std::filesystem::create_directories(root);
   create_project(db, project_id, root.string());
 
-  const auto card_rel = holder::core::card_rel_path("abcd1234");
+  const auto card_rel = holder::core::card_rel_path(
+      "550e8400-e29b-41d4-a716-446655440000"
+  );
   write_file(root / card_rel, "# ok\n");
 
   holder::model::AiMessage good_msg;
