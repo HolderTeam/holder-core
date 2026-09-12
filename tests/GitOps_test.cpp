@@ -26,6 +26,8 @@ TEST_CASE("GitOps default stage_paths stages every supplied path", "[git]") {
 
 TEST_CASE("canonical_repo_key tolerates an empty unresolved path", "[git]") {
   REQUIRE(holder::git::canonical_repo_key({}).empty());
+  const auto oversized = std::filesystem::path("/") / std::string(5000, 'x');
+  REQUIRE(holder::git::canonical_repo_key(oversized) == oversized.lexically_normal());
 }
 
 TEST_CASE("RealGitOps probe_remote throws when repo is not opened", "[git]") {

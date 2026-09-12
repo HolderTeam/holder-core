@@ -137,7 +137,7 @@ static ExtractorState parse_tags(const std::string& markdown_body) {
   md_parse(markdown_body.c_str(), static_cast<MD_SIZE>(markdown_body.size()), &parser, &state);
 
   return state;
-}
+} // LCOV_EXCL_LINE - GCC emits an uncovered function-end counter.
 
 std::vector<std::string> extract_tags(const std::string& markdown_body) {
   return parse_tags(markdown_body).tags;

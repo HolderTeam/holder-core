@@ -85,7 +85,7 @@ std::string join_tag_line(const std::vector<std::string>& tags) {
     line += tags[i];
   }
   return line;
-}
+} // LCOV_EXCL_LINE - GCC emits an uncovered function-end counter.
 
 } // namespace
 

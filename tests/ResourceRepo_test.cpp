@@ -8,6 +8,10 @@
 #include "model/Location.h"
 #include "model/Project.h"
 #include "model/Resource.h"
+#include "card/CardFrontMatter.h"
+#include "card/CardPaths.h"
+#include "card/CardRepo.h"
+#include "card/LinkRepo.h"
 #include "git/GitOps.h"
 #include "platform/Db.h"
 #include "platform/Tx.h"
@@ -131,6 +135,36 @@ holder::model::Location sample_location() {
 
 int always_interrupt(void*) {
   return 1;
+}
+
+struct InterruptAfter {
+  int remaining;
+};
+
+int interrupt_after(void* data) {
+  auto* state = static_cast<InterruptAfter*>(data);
+  return --state->remaining <= 0 ? 1 : 0;
+}
+
+template <typename Fn>
+bool observes_sqlite_failure(
+    holder::platform::Db& db,
+    const std::string& expected,
+    Fn&& operation
+) {
+  for (int threshold = 1; threshold <= 1000; ++threshold) {
+    InterruptAfter state{threshold};
+    sqlite3_progress_handler(db.handle(), 1, interrupt_after, &state);
+    try {
+      operation();
+    } catch (const std::exception& error) {
+      sqlite3_progress_handler(db.handle(), 0, nullptr, nullptr);
+      if (std::string(error.what()).rfind(expected, 0) == 0) return true;
+      continue;
+    }
+    sqlite3_progress_handler(db.handle(), 0, nullptr, nullptr);
+  }
+  return false;
 }
 
 } // namespace
@@ -290,6 +324,9 @@ TEST_CASE("Resource repository validates ownership links", "[resource]") {
   REQUIRE_THROWS(resources.put_bundle(invalid));
 
   holder::resource::LocationRepo(db).put(sample_location());
+  auto invalid_location = sample_location();
+  invalid_location.location_id.clear();
+  REQUIRE_THROWS(holder::resource::LocationRepo(db).put(invalid_location));
   resources.put_bundle(sample_bundle());
   REQUIRE_THROWS(resources.add(sample_bundle().resource));
 }
@@ -340,6 +377,48 @@ TEST_CASE("Resource and Location repositories surface interrupted sqlite steps",
   REQUIRE_THROWS(resources.remove("resource-1234"));
   REQUIRE_THROWS(resources.remove_project("project-1234"));
   sqlite3_progress_handler(db.handle(), 0, nullptr, nullptr);
+}
+
+TEST_CASE("Resource and Location repositories report nested sqlite scan failures",
+          "[resource]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  create_project(db, "project-1234");
+  holder::resource::LocationRepo locations(db);
+  holder::resource::ResourceRepo resources(db);
+  locations.put(sample_location());
+  resources.put_bundle(sample_bundle());
+
+  CHECK(observes_sqlite_failure(db, "get resource metadata failed", [&] {
+    (void)resources.get("resource-1234");
+  }));
+  CHECK(observes_sqlite_failure(db, "get assets failed", [&] {
+    (void)resources.get_bundle("resource-1234");
+  }));
+  CHECK(observes_sqlite_failure(db, "get placements failed", [&] {
+    (void)resources.get_bundle("resource-1234");
+  }));
+  CHECK(observes_sqlite_failure(db, "find asset hash failed", [&] {
+    (void)resources.find_by_asset_hash("project-1234", std::string(64, 'a'));
+  }));
+  CHECK(observes_sqlite_failure(db, "list resources failed", [&] {
+    (void)resources.list("project-1234");
+  }));
+  CHECK(observes_sqlite_failure(db, "get location failed", [&] {
+    (void)locations.get("location-1234");
+  }));
+  CHECK(observes_sqlite_failure(db, "list locations failed", [&] {
+    (void)locations.list("project-1234");
+  }));
+  CHECK(observes_sqlite_failure(db, "location use check failed", [&] {
+    (void)locations.is_in_use("location-1234");
+  }));
+
+  db.exec("CREATE TRIGGER block_resource_remove BEFORE DELETE ON resources "
+          "BEGIN SELECT RAISE(ABORT, 'blocked resource removal'); END;");
+  REQUIRE_THROWS(resources.remove("resource-1234"));
 }
 
 TEST_CASE("Project rebuild reconstructs resources assets placements and locations", "[resource]") {
@@ -560,6 +639,13 @@ TEST_CASE("Encrypted Resource and Location manifests rebuild after projection "
   REQUIRE(rebuilt.locations == 1);
   REQUIRE(holder::resource::ResourceRepo(db).get_bundle("resource-1234")->resource.label == "Boiler фото");
   REQUIRE(holder::resource::LocationRepo(db).get("location-1234")->name == "Family Assets");
+
+  REQUIRE_THROWS(holder::resource::LocationStore(db, nullptr, &git)
+                     .remove("location-1234"));
+  holder::resource::ResourceStore(db, nullptr, &git).remove("resource-1234");
+  REQUIRE_FALSE(holder::resource::ResourceRepo(db).get("resource-1234").has_value());
+  holder::resource::LocationStore(db, nullptr, &git).remove("location-1234");
+  REQUIRE_FALSE(holder::resource::LocationRepo(db).get("location-1234").has_value());
 }
 
 TEST_CASE("Encrypted resource stores reject projects without key identities",
@@ -583,4 +669,79 @@ TEST_CASE("Encrypted resource stores reject projects without key identities",
                      .put(sample_location()));
   REQUIRE_THROWS(
       holder::resource::ResourceStore(db, nullptr, &git).put(sample_bundle()));
+
+  holder::resource::LocationRepo(db).put(sample_location());
+  holder::resource::ResourceRepo(db).put_bundle(sample_bundle());
+  holder::model::Card card;
+  card.card_id = "card-1234";
+  card.project_id = project.project_id;
+  card.title = "Card";
+  card.rel_path = holder::core::card_rel_path(card.card_id);
+  card.created_at = 1;
+  card.updated_at = 1;
+  holder::card::CardRepo(db).create(card);
+  holder::model::CardLink link;
+  link.project_id = project.project_id;
+  link.from_card_id = card.card_id;
+  link.to_card_id = "resource-1234";
+  link.to_type = "resource";
+  link.kind = "attachment";
+  link.created_at = 1;
+  holder::card::LinkRepo(db).upsert_links(project.project_id, card.card_id,
+                                           {link});
+  const auto card_path = std::filesystem::path(project.root_path) / card.rel_path;
+  write_text(card_path,
+             holder::core::render_card_front_matter(card, {link}, {}) + "body");
+  REQUIRE_THROWS(holder::resource::ResourceStore(db, nullptr, &git)
+                     .remove("resource-1234"));
+}
+
+TEST_CASE("Resource and Location stores rebuild after projection writes fail",
+          "[resource][rebuild]") {
+  const auto dir = make_temp_dir();
+  const auto project_root = dir / "project";
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  holder::model::Project project;
+  project.project_id = "project-1234";
+  project.name = "Project";
+  project.root_path = project_root.string();
+  project.privacy_mode = "plain";
+  project.created_at = 1;
+  project.updated_at = 1;
+  holder::project::ProjectRepo(db).create(project);
+  holder::git::RealGitOps git;
+
+  SECTION("location put") {
+    db.exec("CREATE TRIGGER block_location_put BEFORE INSERT ON storage_locations "
+            "BEGIN SELECT RAISE(ABORT, 'blocked location put'); END;");
+    REQUIRE_THROWS(holder::resource::LocationStore(db, nullptr, &git)
+                       .put(sample_location()));
+  }
+
+  SECTION("location remove") {
+    holder::resource::LocationStore store(db, nullptr, &git);
+    store.put(sample_location());
+    db.exec("CREATE TRIGGER block_location_remove BEFORE DELETE ON storage_locations "
+            "BEGIN SELECT RAISE(ABORT, 'blocked location remove'); END;");
+    REQUIRE_THROWS(store.remove("location-1234"));
+  }
+
+  SECTION("resource put") {
+    holder::resource::LocationRepo(db).put(sample_location());
+    db.exec("CREATE TRIGGER block_resource_put BEFORE INSERT ON resources "
+            "BEGIN SELECT RAISE(ABORT, 'blocked resource put'); END;");
+    REQUIRE_THROWS(holder::resource::ResourceStore(db, nullptr, &git)
+                       .put(sample_bundle()));
+  }
+
+  SECTION("resource remove") {
+    holder::resource::LocationStore(db, nullptr, &git).put(sample_location());
+    holder::resource::ResourceStore store(db, nullptr, &git);
+    store.put(sample_bundle());
+    db.exec("CREATE TRIGGER block_resource_remove BEFORE DELETE ON resources "
+            "BEGIN SELECT RAISE(ABORT, 'blocked resource remove'); END;");
+    REQUIRE_THROWS(store.remove("resource-1234"));
+  }
 }

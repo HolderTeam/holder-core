@@ -253,6 +253,7 @@ TEST_CASE("FtsIndexer throws when sqlite handle is closed", "[fts]") {
   db.close();
 
   REQUIRE_THROWS(fts.upsert_card("card-1", "proj-1", "Title", "Body"));
+  REQUIRE_THROWS(fts.get_body("card-1"));
 }
 
 namespace {

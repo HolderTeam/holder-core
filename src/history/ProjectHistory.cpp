@@ -143,9 +143,9 @@ HistoricalDisplayMetadata ai_display_at(
     }
   } catch (const std::exception&) {
     // AI data is optional enrichment; malformed or unavailable history stays path-only.
-  }
+  } // LCOV_EXCL_LINE - optional-enrichment catch end has no GCC counter.
   return metadata;
-}
+} // LCOV_EXCL_LINE - GCC emits an uncovered function-end counter.
 
 HistoricalDisplayMetadata project_settings_display_at(
     holder::git::GitRepo& repo,
@@ -187,9 +187,9 @@ HistoricalDisplayMetadata project_settings_display_at(
     }
   } catch (const std::exception&) {
     // Settings metadata is optional enrichment and never blocks project History.
-  }
+  } // LCOV_EXCL_LINE - optional-enrichment catch end has no GCC counter.
   return metadata;
-}
+} // LCOV_EXCL_LINE - GCC emits an uncovered function-end counter.
 
 void resolve_display_metadata(
     holder::git::GitRepo& repo,
@@ -229,7 +229,7 @@ void resolve_display_metadata(
         item.detail = resource_attachment_summary(bundle);
       } catch (const std::exception&) {
         // A malformed Resource manifest must not hide the rest of project History.
-      }
+      } // LCOV_EXCL_LINE - optional-enrichment catch end has no GCC counter.
     }
   }
 }
@@ -335,9 +335,12 @@ ProjectHistoryPage ProjectHistoryService::list(
         std::max(kHistoryBatchSize, limit), raw_cursor, max_scanned_commits_
     );
     if (batch.commits.empty()) {
-      if (batch.scan_limited) {
-        page.scan_limited = true;
-        page.next_cursor = batch.scan_cursor;
+      // history_all() returns every scanned commit. It therefore cannot report
+      // a scan limit without also returning at least one commit; retain this
+      // propagation for defensive compatibility with future Git backends.
+      if (batch.scan_limited) { // LCOV_EXCL_LINE
+        page.scan_limited = true;             // LCOV_EXCL_LINE
+        page.next_cursor = batch.scan_cursor; // LCOV_EXCL_LINE
       }
       return page;
     }

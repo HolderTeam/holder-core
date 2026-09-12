@@ -401,6 +401,56 @@ TEST_CASE("Project history describes historical project settings without secrets
   CHECK(found_project);
 }
 
+TEST_CASE("Project history ignores settings manifests owned by another project",
+          "[history][git]") {
+  const auto root = project_history_temp_dir();
+  holder::git::GitRepo repo;
+  repo.open_or_init(root);
+
+  holder::model::Project project;
+  project.project_id = "project-history-settings";
+  project.name = "History project";
+  project.root_path = root.string();
+  project.privacy_mode = "plain";
+  project.created_at = 1;
+  project.updated_at = 2;
+
+  auto foreign = project;
+  foreign.project_id = "another-project";
+  repo.write_file(holder::project::kProjectBootstrapPath,
+                  holder::project::render_project_bootstrap(foreign));
+  repo.stage_path(holder::project::kProjectBootstrapPath);
+  repo.commit("Foreign bootstrap");
+  repo.write_file(holder::project::kProjectManifestPath,
+                  holder::project::render_project_manifest(foreign));
+  repo.stage_path(holder::project::kProjectManifestPath);
+  repo.commit("Foreign manifest");
+
+  const auto page = holder::history::ProjectHistoryService().list(project);
+  REQUIRE(page.activities.size() == 2);
+  for (const auto& activity : page.activities) {
+    REQUIRE(activity.affected_objects.size() == 1);
+    REQUIRE(activity.affected_objects[0].items.size() == 1);
+    CHECK_FALSE(activity.affected_objects[0].items[0].title.has_value());
+    CHECK_FALSE(activity.affected_objects[0].items[0].detail.has_value());
+  }
+}
+
+TEST_CASE("Project history returns no activity for an unborn repository",
+          "[history][git]") {
+  const auto root = project_history_temp_dir();
+  holder::git::GitRepo repo;
+  repo.open_or_init(root);
+  holder::model::Project project;
+  project.project_id = "project-history-empty";
+  project.root_path = root.string();
+  project.privacy_mode = "plain";
+  const auto page = holder::history::ProjectHistoryService().list(project);
+  CHECK(page.activities.empty());
+  CHECK_FALSE(page.scan_limited);
+  CHECK_FALSE(page.next_cursor.has_value());
+}
+
 TEST_CASE("Project history paginates incrementally and exposes bounded scan continuations", "[history][git]") {
   const auto root = project_history_temp_dir();
   holder::git::GitRepo repo;

@@ -28,6 +28,26 @@ std::filesystem::path make_temp_dir() {
   return dir;
 }
 
+void remove_parent_tree_object(const std::filesystem::path& root) {
+  git_repository* raw = nullptr;
+  REQUIRE(git_repository_open(&raw, root.string().c_str()) == 0);
+  git_reference* head = nullptr;
+  REQUIRE(git_repository_head(&head, raw) == 0);
+  git_commit* commit = nullptr;
+  REQUIRE(git_commit_lookup(&commit, raw, git_reference_target(head)) == 0);
+  git_commit* parent = nullptr;
+  REQUIRE(git_commit_parent(&parent, commit, 0) == 0);
+  char oid_text[GIT_OID_HEXSZ + 1]{};
+  git_oid_tostr(oid_text, sizeof(oid_text), git_commit_tree_id(parent));
+  const std::string oid(oid_text);
+  git_commit_free(parent);
+  git_commit_free(commit);
+  git_reference_free(head);
+  git_repository_free(raw);
+  REQUIRE(std::filesystem::remove(root / ".git" / "objects" /
+                                  oid.substr(0, 2) / oid.substr(2)));
+}
+
 void init_bare_repo(const std::filesystem::path& repo_path) {
   git_libgit2_init();
   std::filesystem::create_directories(repo_path.parent_path());
@@ -1061,4 +1081,51 @@ TEST_CASE("GitRepo history handles unborn repos pagination and invalid cursors",
   REQUIRE_THROWS(
       repo.history_for_paths({"cards/a.md"}, 10, "not-a-reachable-oid", 100));
   REQUIRE_THROWS(repo.history_all(10, "not-a-reachable-oid", 100));
+}
+
+TEST_CASE("GitRepo history reports malformed HEAD and missing parent trees",
+          "[git][history]") {
+  SECTION("malformed HEAD") {
+    const auto root = make_temp_dir();
+    holder::git::GitRepo repo;
+    repo.open_or_init(root);
+    repo.write_file("card.md", "one");
+    repo.stage_path("card.md");
+    repo.commit("one");
+    std::ofstream(root / ".git" / "HEAD", std::ios::trunc) << "not-an-oid\n";
+    REQUIRE_THROWS(repo.history_for_paths({"card.md"}, 10, std::nullopt, 100));
+    REQUIRE_THROWS(repo.history_all(10, std::nullopt, 100));
+  }
+
+  SECTION("history_for_paths releases a commit after tree lookup failure") {
+    const auto root = make_temp_dir();
+    holder::git::GitRepo repo;
+    repo.open_or_init(root);
+    repo.write_file("card.md", "one");
+    repo.stage_path("card.md");
+    repo.commit("one");
+    repo.write_file("card.md", "two");
+    repo.stage_path("card.md");
+    repo.commit("two");
+    remove_parent_tree_object(root);
+    holder::git::GitRepo history;
+    history.open_existing(root);
+    REQUIRE_THROWS(history.history_for_paths({"card.md"}, 10, std::nullopt, 100));
+  }
+
+  SECTION("history_all releases a commit after tree lookup failure") {
+    const auto root = make_temp_dir();
+    holder::git::GitRepo repo;
+    repo.open_or_init(root);
+    repo.write_file("card.md", "one");
+    repo.stage_path("card.md");
+    repo.commit("one");
+    repo.write_file("card.md", "two");
+    repo.stage_path("card.md");
+    repo.commit("two");
+    remove_parent_tree_object(root);
+    holder::git::GitRepo history;
+    history.open_existing(root);
+    REQUIRE_THROWS(history.history_all(10, std::nullopt, 100));
+  }
 }

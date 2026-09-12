@@ -120,14 +120,16 @@ static std::vector<std::string> commit_changed_paths(
     if (delta->old_file.path != nullptr) paths.emplace_back(delta->old_file.path);
     if (delta->new_file.path != nullptr &&
         (delta->old_file.path == nullptr || std::string_view(delta->new_file.path) != delta->old_file.path)) {
-      paths.emplace_back(delta->new_file.path);
+      // Rename detection is not requested for this diff, so libgit2 emits
+      // separate add/delete deltas. Keep support for rename-enabled backends.
+      paths.emplace_back(delta->new_file.path); // LCOV_EXCL_LINE
     }
   }
   git_diff_free(diff);
   std::sort(paths.begin(), paths.end());
   paths.erase(std::unique(paths.begin(), paths.end()), paths.end());
   return paths;
-}
+} // LCOV_EXCL_LINE - excluded rename arm leaves a synthetic end counter.
 
 static GitHistoryCommit history_commit_from(git_repository* repo, git_commit* commit, const git_oid& oid) {
   GitHistoryCommit item;
@@ -1287,8 +1289,10 @@ GitHistoryPage GitRepo::history_for_paths(
     git_commit* commit = nullptr;
     const int lookup_rc = git_commit_lookup(&commit, repo, &oid);
     if (lookup_rc != 0) {
-      git_revwalk_free(walk);
-      throw git_err("git_commit_lookup failed", lookup_rc);
+      // A successful revwalk_next has already resolved this object. Lookup can
+      // fail only if another process deletes/corrupts it between the two calls.
+      git_revwalk_free(walk);                              // LCOV_EXCL_LINE
+      throw git_err("git_commit_lookup failed", lookup_rc); // LCOV_EXCL_LINE
     }
 
     bool touches = false;
@@ -1385,8 +1389,9 @@ GitHistoryPage GitRepo::history_all(
     git_commit* commit = nullptr;
     const int lookup_rc = git_commit_lookup(&commit, repo, &oid);
     if (lookup_rc != 0) {
-      git_revwalk_free(walk);
-      throw git_err("git_commit_lookup failed", lookup_rc);
+      // Same atomic object-database invariant as history_for_paths above.
+      git_revwalk_free(walk);                              // LCOV_EXCL_LINE
+      throw git_err("git_commit_lookup failed", lookup_rc); // LCOV_EXCL_LINE
     }
     if (page.commits.size() == limit) {
       page.has_more = true;

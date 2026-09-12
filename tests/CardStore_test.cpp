@@ -340,6 +340,17 @@ TEST_CASE("CardStore create_batch stages and commits the batch once", "[cardstor
     item.updated_at = i + 1;
     items.push_back(std::move(item));
   }
+  holder::model::CardLink valid_link;
+  valid_link.to_card_id = "old-card-1";
+  valid_link.to_type = "card";
+  valid_link.kind = "wiki";
+  items[0].links.push_back(valid_link);
+  auto non_card_link = valid_link;
+  non_card_link.to_type = "resource";
+  items[0].links.push_back(non_card_link);
+  auto missing_link = valid_link;
+  missing_link.to_card_id = "outside-snapshot";
+  items[0].links.push_back(missing_link);
   int next_id = 0;
   store.create_batch(
       "proj-1",
@@ -353,6 +364,9 @@ TEST_CASE("CardStore create_batch stages and commits the batch once", "[cardstor
   CHECK(git.staged_path_count == items.size());
   CHECK(git.commit_calls == 1);
   CHECK(count_commits(project_root) == 1);
+  const auto links = holder::card::LinkRepo(db).list_outgoing("proj-1", "new-card-0");
+  REQUIRE(links.size() == 1);
+  CHECK(links[0].to_card_id == "new-card-1");
 }
 
 TEST_CASE("CardStore update writes file and updates metadata", "[cardstore]") {
@@ -2087,4 +2101,67 @@ TEST_CASE("CardStore tag and historical restore methods reject missing cards",
   REQUIRE_THROWS(store.add_tag("missing-card", "todo", 1));
   REQUIRE_THROWS(store.remove_tag("missing-card", "todo", 1));
   REQUIRE_THROWS(store.list_editable_tags("missing-card"));
+}
+
+TEST_CASE("CardStore rejects missing milestone content and malformed historical blobs",
+          "[cardstore][history]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  const auto project_root = dir / "project_repo";
+  create_project(db, "proj-history-errors", project_root.string());
+
+  holder::index::FtsIndexer fts(db);
+  holder::card::CardStore store(db, &fts);
+  holder::card::CardRepo cards(db);
+
+  holder::model::Card missing_content;
+  missing_content.card_id = "missingcontent01";
+  missing_content.project_id = "proj-history-errors";
+  missing_content.title = "Missing";
+  missing_content.rel_path = holder::core::card_rel_path(missing_content.card_id);
+  missing_content.created_at = 1;
+  missing_content.updated_at = 1;
+  cards.create(missing_content);
+  REQUIRE_THROWS(store.update_milestones(missing_content.card_id, 2));
+
+  holder::model::Card bad_path = missing_content;
+  bad_path.card_id = "badrestore01";
+  bad_path.rel_path = "cards/wrong.md";
+  cards.create(bad_path);
+  REQUIRE_THROWS(store.restore_version(bad_path.card_id, "unused-oid", 2));
+
+  holder::model::Card card;
+  card.card_id = "badblob01";
+  card.project_id = "proj-history-errors";
+  card.title = "Current";
+  card.created_at = 1;
+  card.updated_at = 1;
+  store.create(card, "current body");
+
+  holder::git::GitRepo repo;
+  repo.open_existing(project_root);
+  const auto path = holder::core::card_rel_path(card.card_id);
+  const std::string binary("binary\0body", 11);
+  repo.write_file(path, binary);
+  repo.stage_path(path);
+  repo.commit("Binary historical blob");
+  const auto binary_oid = repo.head_oid();
+  REQUIRE(binary_oid.has_value());
+
+  repo.write_file(path, "not front matter");
+  repo.stage_path(path);
+  repo.commit("Malformed historical blob");
+  const auto malformed_oid = repo.head_oid();
+  REQUIRE(malformed_oid.has_value());
+
+  const auto current = cards.get(card.card_id);
+  REQUIRE(current.has_value());
+  repo.write_file(path, holder::core::render_card_front_matter(*current, {}, {}) + "current body");
+  repo.stage_path(path);
+  repo.commit("Restore valid current blob");
+
+  REQUIRE_THROWS(store.restore_version(card.card_id, *binary_oid, 3));
+  REQUIRE_THROWS(store.restore_version(card.card_id, *malformed_oid, 3));
 }

@@ -54,8 +54,10 @@ std::string encode_project_blob(
     const std::string& plain
 ) {
   if (project.privacy_mode != "encrypted_git") return plain;
+  // stage_asset_file() validates the same project key before either helper is
+  // reached; these checks defend future call-order changes.
   if (!project.project_key_id.has_value() || project.project_key_id->empty()) {
-    throw std::runtime_error("encrypted project missing project_key_id");
+    throw std::runtime_error("encrypted project missing project_key_id"); // LCOV_EXCL_LINE
   }
   return holder::privacy::encrypt_project_blob(project.project_id, *project.project_key_id, plain);
 }
@@ -66,7 +68,7 @@ std::string decode_project_blob(
 ) {
   if (project.privacy_mode != "encrypted_git") return raw;
   if (!project.project_key_id.has_value() || project.project_key_id->empty()) {
-    throw std::runtime_error("encrypted project missing project_key_id");
+    throw std::runtime_error("encrypted project missing project_key_id"); // LCOV_EXCL_LINE
   }
   return holder::privacy::decrypt_project_blob(project.project_id, *project.project_key_id, raw);
 }
