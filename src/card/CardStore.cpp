@@ -7,6 +7,7 @@
 #include "card/TagLineEditor.h"
 #include "git/GitOps.h"
 #include "git/GitRepo.h"
+#include "identity/Uuid.h"
 #include "platform/Fs.h"
 #include "platform/Tx.h"
 #include "privacy/ProjectPrivacy.h"
@@ -168,7 +169,7 @@ void CardStore::create_batch(
   // snapshot's original card_id to the id it was actually written under here.
   std::map<std::string, std::string> id_remap;
   for (const auto& item : items) {
-    id_remap[item.card_id] = uuid_v4();
+    id_remap[item.card_id] = holder::identity::generate_id(project.id_scheme);
   }
 
   std::vector<std::string> staged_paths;

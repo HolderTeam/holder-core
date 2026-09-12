@@ -1,6 +1,7 @@
 #include "project/DefaultProject.h"
 
 #include "card/CardStore.h"
+#include "identity/Uuid.h"
 #include "model/Card.h"
 #include "project/ProjectRepo.h"
 #include "project/ProjectStore.h"
@@ -45,7 +46,7 @@ std::optional<holder::model::Project> ensure_default_project(
 
   holder::card::CardStore card_store(db, fts, /*fs=*/nullptr, git);
   holder::model::Card welcome;
-  welcome.card_id = uuid_v4();
+  welcome.card_id = holder::identity::generate_id(created.id_scheme);
   welcome.project_id = created.project_id;
   welcome.title = welcome_title;
   welcome.created_at = now_epoch_seconds();

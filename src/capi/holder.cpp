@@ -966,8 +966,7 @@ int resolve_pull_conflicts(
       project,
       git,
       diverged,
-      now,
-      holder::identity::uuid_v4
+      now
   );
 }
 
@@ -1971,8 +1970,18 @@ int holder_card_create(
   }
 
   try {
+    holder::project::ProjectRepo project_repo(context->db);
+    const auto project = project_repo.get(project_id);
+    if (!project.has_value()) {
+      return set_error(
+          out_error,
+          HOLDER_ERROR_RUNTIME,
+          "project not found: " + std::string(project_id)
+      );
+    }
+
     holder::model::Card card;
-    card.card_id = holder::identity::uuid_v4();
+    card.card_id = holder::identity::generate_id(project->id_scheme);
     card.project_id = project_id;
     card.title = title;
     card.created_at = now_epoch_seconds();

@@ -18,6 +18,7 @@
 #include "project/ProjectRepo.h"
 #include "project/Rebuilder.h"
 
+#include <algorithm>
 #include <fstream>
 
 namespace {
@@ -101,6 +102,7 @@ TEST_CASE(
   holder::project::ProjectRepo local_projects(local_db);
   holder::model::Project local_project = seeded_project;
   local_project.root_path = local_dir.string();
+  local_project.id_scheme = holder::model::IdScheme::Uuid7;
   local_projects.create(local_project);
   holder::store::Rebuilder(local_db, &local_fts).rebuild_project(local_project);
   holder::card::CardStore(local_db, &local_fts, nullptr, &local_git)
@@ -116,23 +118,24 @@ TEST_CASE(
   }
   REQUIRE(diverged_seen);
 
+  auto stale_project = local_project;
+  stale_project.id_scheme = holder::model::IdScheme::Uuid4;
   const int resolved = holder::sync::resolve_pull_conflicts(
-      local_db,
-      &local_fts,
-      local_project,
-      local_git,
-      diverged,
-      3,
-      []() { return "conflicted-copy-id"; }
+      local_db, &local_fts, stale_project, local_git, diverged, 3
   );
   REQUIRE(resolved == 1);
 
-  const auto duplicate = holder::card::CardRepo(local_db).get("conflicted-copy-id");
-  REQUIRE(duplicate.has_value());
+  const auto cards = holder::card::CardRepo(local_db).list_all(project_id);
+  const auto duplicate = std::find_if(cards.begin(), cards.end(), [](const auto& candidate) {
+    return candidate.card_id != "shared-card";
+  });
+  REQUIRE(duplicate != cards.end());
+  REQUIRE(duplicate->card_id.size() == 36);
+  REQUIRE(duplicate->card_id[14] == '7');
   REQUIRE(duplicate->title == "Shared (conflicted copy)");
 
   holder::card::CardStore local_store(local_db, &local_fts, nullptr, &local_git);
-  const auto content = local_store.get_content(duplicate.value());
+  const auto content = local_store.get_content(*duplicate);
   REQUIRE(content.has_value());
   REQUIRE(*content == "local edit");
 }
@@ -216,19 +219,12 @@ TEST_CASE(
   REQUIRE(diverged_seen);
 
   const int resolved = holder::sync::resolve_pull_conflicts(
-      local_db,
-      &local_fts,
-      local_project,
-      local_git,
-      diverged,
-      3,
-      []() { return "conflicted-copy-id"; }
+      local_db, &local_fts, local_project, local_git, diverged, 3
   );
   REQUIRE(resolved == 0);
-  REQUIRE_FALSE(holder::card::CardRepo(local_db).get("conflicted-copy-id").has_value());
 }
 
-TEST_CASE("resolve_pull_conflicts skips a conflict whose duplicate card_id collides", "[sync]") {
+TEST_CASE("resolve_pull_conflicts creates UUIDv4 copies for UUIDv4 projects", "[sync]") {
   const auto dir = make_temp_dir();
   const std::string project_id = "proj-1";
   const auto remote_dir = dir / "remote";
@@ -273,15 +269,16 @@ TEST_CASE("resolve_pull_conflicts skips a conflict whose duplicate card_id colli
   }
   REQUIRE(diverged_seen);
 
-  // Force a card_id collision: "uuid_v4" hands back the id of a card that already exists.
   const int resolved = holder::sync::resolve_pull_conflicts(
-      local_db,
-      &local_fts,
-      local_project,
-      local_git,
-      diverged,
-      3,
-      []() { return "shared-card"; }
+      local_db, &local_fts, local_project, local_git, diverged, 3
   );
-  REQUIRE(resolved == 0);
+  REQUIRE(resolved == 1);
+
+  const auto cards = holder::card::CardRepo(local_db).list_all(project_id);
+  const auto duplicate = std::find_if(cards.begin(), cards.end(), [](const auto& candidate) {
+    return candidate.card_id != "shared-card";
+  });
+  REQUIRE(duplicate != cards.end());
+  REQUIRE(duplicate->card_id.size() == 36);
+  REQUIRE(duplicate->card_id[14] == '4');
 }

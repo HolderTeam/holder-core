@@ -45,6 +45,8 @@ TEST_CASE("ensure_default_project creates a project and welcome card when empty"
   holder::card::CardRepo card_repo(db);
   const auto cards = card_repo.list_all(created->project_id);
   REQUIRE(cards.size() == 1);
+  REQUIRE(cards[0].card_id.size() == 36);
+  REQUIRE(cards[0].card_id[14] == '7');
   REQUIRE(cards[0].title == "Welcome");
 }
 
