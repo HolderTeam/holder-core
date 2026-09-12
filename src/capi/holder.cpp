@@ -10,6 +10,7 @@
 #include "git/GitOps.h"
 #include "git/RepoSyncMetrics.h"
 #include "history/CardHistory.h"
+#include "identity/Uuid.h"
 #include "index/FtsIndexer.h"
 #include "index/Reindexer.h"
 #include "model/ProjectSyncState.h"
@@ -1848,7 +1849,11 @@ int holder_project_create(
 
     holder::project::ProjectStore store(context->db);
     const auto created =
-        store.create(std::move(project), uuid_v4, context->data_dir / "projects");
+        store.create(
+		     std::move(project),
+		     holder::identity::uuid_v4,
+		     context->data_dir / "projects"
+	);
 
     if (root_path != nullptr && root_path[0] != '\0') {
       // This generic C API does not yet persist a registry for caller-selected
@@ -1981,7 +1986,7 @@ int holder_card_create(
 
   try {
     holder::model::Card card;
-    card.card_id = uuid_v4();
+    card.card_id = holder::identity::uuid_v4();
     card.project_id = project_id;
     card.title = title;
     card.created_at = now_epoch_seconds();
