@@ -437,6 +437,9 @@ TEST_CASE(
     return p.root_path == plain_root.string();
   });
   REQUIRE(plain != projects.end());
+  REQUIRE(plain->project_id.size() == 36);
+  REQUIRE(plain->project_id[14] == '4');
+  REQUIRE(plain->id_scheme == holder::model::IdScheme::Uuid4);
   REQUIRE(plain->privacy_mode == "plain");
   REQUIRE_FALSE(plain->project_key_id.has_value());
 

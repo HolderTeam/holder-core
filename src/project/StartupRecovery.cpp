@@ -1,5 +1,6 @@
 #include "project/StartupRecovery.h"
 
+#include "identity/Uuid.h"
 #include "project/ProjectManifest.h"
 #include "project/ProjectRepo.h"
 #include "project/Rebuilder.h"
@@ -110,7 +111,7 @@ std::vector<holder::model::Project> recover_project_roots(
     holder::platform::Db& db,
     holder::index::FtsIndexer* fts,
     std::vector<std::filesystem::path> roots,
-    const std::function<std::string()>& uuid_v4,
+    const std::function<std::string()>& /*uuid_v4*/,
     bool require_durable_manifest
 ) {
   std::vector<holder::model::Project> recovered;
@@ -130,12 +131,14 @@ std::vector<holder::model::Project> recover_project_roots(
         if (require_durable_manifest) {
           throw std::runtime_error("project has no durable manifest: " + root.string());
         }
-        project.project_id = uuid_v4();
         project.name = derive_project_name_from_root(root);
         project.root_path = root.string();
         project.created_at = now_epoch_seconds();
         project.updated_at = project.created_at;
         load_privacy_metadata(project);
+        if (project.project_id.empty()) {
+          project.project_id = holder::identity::generate_id(project.id_scheme);
+        }
         spdlog::warn(
             "Recovering legacy project without durable metadata: {}. "
             "Its identity may not be recoverable after database loss.",
