@@ -61,6 +61,7 @@ add_executable(holder_core_tests
   TagExtractor_test.cpp
   TagLineEditor_test.cpp
   TagRepo_test.cpp
+  Uuid_test.cpp
 )
 
 target_link_libraries(holder_core_tests PRIVATE
