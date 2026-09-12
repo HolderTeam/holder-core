@@ -243,11 +243,10 @@ TEST_CASE("Encrypted assets reject changed identity and bytes", "[asset]") {
       staged.plaintext
   ));
 
-  std::fstream file(dir / "stored.bin", std::ios::binary | std::ios::in | std::ios::out);
-  REQUIRE(file.is_open());
-  file.seekp(-1, std::ios::end);
-  file.put('\0');
-  file.close();
+  auto tampered = read_binary(dir / "stored.bin");
+  REQUIRE_FALSE(tampered.empty());
+  tampered.back() = static_cast<char>(static_cast<unsigned char>(tampered.back()) ^ 0x01U);
+  write_binary(dir / "stored.bin", tampered);
   REQUIRE_THROWS(holder::resource::recover_asset_file(
       dir / "stored.bin",
       dir / "tampered.bin",
