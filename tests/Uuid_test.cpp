@@ -82,3 +82,24 @@ TEST_CASE("generate_id dispatches UUIDv7 schemes", "[identity][uuid]") {
   REQUIRE(uuid[14] == '7');
   REQUIRE(has_rfc_variant(uuid));
 }
+
+TEST_CASE("UUID validation accepts Holder UUIDv4 and UUIDv7 identities", "[identity][uuid]") {
+  REQUIRE(holder::identity::is_valid_uuid("550e8400-e29b-41d4-a716-446655440000"));
+  REQUIRE(holder::identity::is_valid_uuid("01890f3e-7b5a-7cc8-98c4-dc0c0c07398f"));
+}
+
+TEST_CASE("UUID validation rejects malformed and unsupported identities", "[identity][uuid]") {
+  SECTION("malformed structure") {
+    REQUIRE_FALSE(holder::identity::is_valid_uuid("not-a-uuid"));
+    REQUIRE_FALSE(holder::identity::is_valid_uuid("550e8400e29b-41d4-a716-446655440000"));
+    REQUIRE_FALSE(holder::identity::is_valid_uuid("550e8400-e29b-41d4-a716-44665544000z"));
+  }
+
+  SECTION("unsupported version") {
+    REQUIRE_FALSE(holder::identity::is_valid_uuid("550e8400-e29b-51d4-a716-446655440000"));
+  }
+
+  SECTION("invalid RFC variant") {
+    REQUIRE_FALSE(holder::identity::is_valid_uuid("550e8400-e29b-41d4-7716-446655440000"));
+  }
+}

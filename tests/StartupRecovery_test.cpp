@@ -7,6 +7,8 @@
 #include "ai/AiMessageFrontMatter.h"
 #include "ai/AiMessagePaths.h"
 #include "ai/AiThreadManifest.h"
+#include "card/CardFrontMatter.h"
+#include "card/CardPaths.h"
 #include "card/CardRepo.h"
 #include "card/CardStore.h"
 #include "git/GitOps.h"
@@ -110,6 +112,45 @@ TEST_CASE("Rebuilder rejects card front matter without card id", "[startup][reco
   project.updated_at = 1;
 
   REQUIRE_THROWS(rebuilder.rebuild_project(project));
+}
+
+TEST_CASE("Rebuilder rejects a non-UUID canonical card identity", "[startup][recovery]") {
+  const auto dir = holder::test::make_temp_dir();
+  const auto root = dir / "project";
+  auto db = holder::test::open_db_with_schema(dir / "holder.db");
+
+  holder::model::Project project;
+  project.project_id = "project-with-invalid-card";
+  project.name = "Project";
+  project.root_path = root.string();
+  project.privacy_mode = "plain";
+  project.created_at = 1;
+  project.updated_at = 1;
+  holder::project::ProjectRepo(db).create(project);
+
+  holder::model::Card card;
+  card.card_id = "card-one";
+  card.project_id = project.project_id;
+  card.title = "Invalid identity";
+  card.rel_path = holder::core::card_rel_path(card.card_id);
+  card.created_at = 1;
+  card.updated_at = 1;
+  write_startup_file(
+      root / card.rel_path,
+      holder::core::render_card_front_matter(card, {}, {}) + "Body\n"
+  );
+
+  try {
+    (void)holder::store::Rebuilder(db, nullptr).rebuild_project(project);
+    FAIL("Expected a non-UUID card identity to be rejected");
+  } catch (const std::exception& ex) {
+    REQUIRE(
+        std::string(ex.what()) == "invalid card_id in file: expected UUIDv4 or UUIDv7"
+    );
+  }
+  holder::card::CardRepo cards(db);
+  REQUIRE_FALSE(cards.get(card.card_id).has_value());
+  REQUIRE(cards.list_all(project.project_id).empty());
 }
 
 TEST_CASE("Rebuilder rejects ai message front matter without message id", "[startup][recovery]") {
@@ -310,8 +351,10 @@ TEST_CASE(
 
   holder::index::FtsIndexer original_fts(original_db);
   holder::card::CardStore original_store(original_db, &original_fts);
+  const std::string uuid4_card_id = "550e8400-e29b-41d4-a716-446655440000";
+  const std::string uuid7_card_id = "01890f3e-7b5a-7cc8-98c4-dc0c0c07398f";
   holder::model::Card card;
-  card.card_id = "card-1";
+  card.card_id = uuid4_card_id;
   card.project_id = project.project_id;
   card.title = "Welcome to Holder";
   card.created_at = 1;
@@ -319,7 +362,7 @@ TEST_CASE(
   original_store.create(card, "# Welcome to Holder\n\nRecovered body.\n");
 
   holder::model::Card child;
-  child.card_id = "card-2";
+  child.card_id = uuid7_card_id;
   child.project_id = project.project_id;
   child.title = "Child";
   child.parent_card_id = card.card_id;
@@ -361,15 +404,15 @@ TEST_CASE(
   for (const auto& rebuilt : cards) {
     const auto content = recovered_store.get_content(rebuilt);
     REQUIRE(content.has_value());
-    if (rebuilt.card_id == "card-1") {
+    if (rebuilt.card_id == uuid4_card_id) {
       saw_parent = true;
       REQUIRE(rebuilt.title == "Welcome to Holder");
       REQUIRE(content.value() == "# Welcome to Holder\n\nRecovered body.\n");
     }
-    if (rebuilt.card_id == "card-2") {
+    if (rebuilt.card_id == uuid7_card_id) {
       saw_child = true;
       REQUIRE(rebuilt.parent_card_id.has_value());
-      REQUIRE(rebuilt.parent_card_id.value() == "card-1");
+      REQUIRE(rebuilt.parent_card_id.value() == uuid4_card_id);
       REQUIRE(content.value() == "# Child\n\nNested body.\n");
     }
   }
@@ -386,14 +429,20 @@ TEST_CASE(
   const auto recovered_db_path = dir / "recovered.db";
   const auto plain_root = projects_root / "plain-no-metadata";
   const auto no_key_root = projects_root / "encrypted-no-key-id";
+  const auto plain_card_rel = holder::core::card_rel_path(
+      "550e8400-e29b-41d4-a716-446655440000"
+  );
+  const auto no_key_card_rel = holder::core::card_rel_path(
+      "01890f3e-7b5a-7cc8-98c4-dc0c0c07398f"
+  );
 
-  std::filesystem::create_directories(plain_root / "cards" / "ab" / "cd");
-  std::filesystem::create_directories(no_key_root / "cards" / "de" / "f0");
+  std::filesystem::create_directories((plain_root / plain_card_rel).parent_path());
+  std::filesystem::create_directories((no_key_root / no_key_card_rel).parent_path());
   std::filesystem::create_directories(no_key_root / ".holder");
 
   {
     std::ofstream card(
-        plain_root / "cards" / "ab" / "cd" / "abcd1234.md",
+        plain_root / plain_card_rel,
         std::ios::binary | std::ios::trunc
     );
     REQUIRE(card.is_open());
@@ -409,7 +458,7 @@ TEST_CASE(
   }
   {
     std::ofstream card(
-        no_key_root / "cards" / "de" / "f0" / "def01234.md",
+        no_key_root / no_key_card_rel,
         std::ios::binary | std::ios::trunc
     );
     REQUIRE(card.is_open());
@@ -542,14 +591,15 @@ TEST_CASE(
   holder::index::FtsIndexer original_fts(original_db);
   holder::card::CardStore original_store(original_db, &original_fts);
   holder::model::Card card;
-  card.card_id = "card-1";
+  card.card_id = "550e8400-e29b-41d4-a716-446655440000";
   card.project_id = project.project_id;
   card.title = "Encrypted card";
   card.created_at = 1;
   card.updated_at = 1;
   original_store.create(card, "# Encrypted card\n\nRecovered body.\n");
 
-  const auto card_path = projects_root / "mismatch" / "cards" / "ca" / "rd" / "card-1.md";
+  const auto card_path = projects_root / "mismatch" /
+                         holder::core::card_rel_path(card.card_id);
   std::ifstream in(card_path, std::ios::binary);
   REQUIRE(in.is_open());
   const std::string envelope(
@@ -623,7 +673,7 @@ TEST_CASE(
   holder::index::FtsIndexer original_fts(original_db);
   holder::card::CardStore original_store(original_db, &original_fts);
   holder::model::Card card;
-  card.card_id = "card-1";
+  card.card_id = "550e8400-e29b-41d4-a716-446655440000";
   card.project_id = project.project_id;
   card.title = "Encrypted card";
   card.created_at = 1;
@@ -708,14 +758,15 @@ TEST_CASE(
   holder::index::FtsIndexer original_fts(original_db);
   holder::card::CardStore original_store(original_db, &original_fts);
   holder::model::Card card;
-  card.card_id = "card-1";
+  card.card_id = "550e8400-e29b-41d4-a716-446655440000";
   card.project_id = project.project_id;
   card.title = "Encrypted card";
   card.created_at = 1;
   card.updated_at = 1;
   original_store.create(card, "# Encrypted card\n\nRecovered body.\n");
 
-  const auto card_path = projects_root / "fallback-fail" / "cards" / "ca" / "rd" / "card-1.md";
+  const auto card_path = projects_root / "fallback-fail" /
+                         holder::core::card_rel_path(card.card_id);
   std::ifstream in(card_path, std::ios::binary);
   REQUIRE(in.is_open());
   const std::string envelope(
