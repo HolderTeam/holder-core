@@ -31,14 +31,16 @@ class Statement {
 };
 
 void bind_text(sqlite3_stmt* stmt, int index, const std::string& value) {
+  // Every call uses a live prepared statement and a statically valid parameter
+  // index; SQLite can fail here only on process-wide allocation failure.
   if (sqlite3_bind_text(stmt, index, value.c_str(), -1, SQLITE_TRANSIENT) != SQLITE_OK) {
-    throw std::runtime_error("sqlite bind text failed");
+    throw std::runtime_error("sqlite bind text failed"); // LCOV_EXCL_LINE
   }
 }
 
 void bind_int64(sqlite3_stmt* stmt, int index, long long value) {
   if (sqlite3_bind_int64(stmt, index, value) != SQLITE_OK) {
-    throw std::runtime_error("sqlite bind integer failed");
+    throw std::runtime_error("sqlite bind integer failed"); // LCOV_EXCL_LINE
   }
 }
 
@@ -63,7 +65,7 @@ holder::model::Resource read_resource_row(sqlite3_stmt* stmt) {
   resource.created_at = sqlite3_column_int64(stmt, 4);
   resource.updated_at = sqlite3_column_int64(stmt, 5);
   return resource;
-}
+} // LCOV_EXCL_LINE - GCC emits an uncovered function-end counter.
 
 void validate_resource(const holder::model::Resource& resource) {
   if (resource.resource_id.empty() || resource.project_id.empty() || resource.type.empty() ||

@@ -46,9 +46,11 @@ std::string decode_manifest(
     const std::string& raw
 ) {
   if (project.privacy_mode != "encrypted_git") return raw;
+  // project_key_id() itself is exercised by the missing-key removal test; GCC
+  // assigns no counter to this split argument line.
   return holder::privacy::decrypt_project_blob(
-      project.project_id, project_key_id(project), raw
-  );
+      project.project_id, project_key_id(project), raw // LCOV_EXCL_LINE
+  ); // LCOV_EXCL_LINE
 }
 
 long long now_epoch_seconds() {

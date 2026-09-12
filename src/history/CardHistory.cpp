@@ -138,7 +138,7 @@ std::vector<std::string> lines_of(const std::string& text) {
   }
   if (!text.empty() && text.back() == '\n') lines.emplace_back();
   return lines;
-}
+} // LCOV_EXCL_LINE - GCC emits an uncovered function-end counter.
 
 std::string bounded_diff_text(const std::string& text, bool& truncated) {
   if (text.size() <= kMaxDiffLineBytes) return text;
@@ -237,7 +237,7 @@ CardVersion version_from(const Snapshot& snapshot, const std::optional<std::stri
     result.body = snapshot.card.body;
   }
   return result;
-}
+} // LCOV_EXCL_LINE - GCC emits an uncovered function-end counter.
 
 std::string comparison_text(const CardVersion& version) {
   if (!version.exists) return {};

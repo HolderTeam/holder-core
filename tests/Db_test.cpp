@@ -47,6 +47,47 @@ void write_file(const std::filesystem::path& path, const std::string& body = "fi
   output << body;
 }
 
+int deny_sqlite_read(
+    void* data, int action, const char* detail1, const char*, const char*, const char*
+) {
+  const auto* table = static_cast<const std::string*>(data);
+  if (action == SQLITE_READ && detail1 != nullptr && *table == detail1) return SQLITE_DENY;
+  return SQLITE_OK;
+}
+
+int deny_sqlite_pragma(
+    void* data, int action, const char* detail1, const char*, const char*, const char*
+) {
+  const auto* pragma = static_cast<const std::string*>(data);
+  if (action == SQLITE_PRAGMA && detail1 != nullptr && *pragma == detail1) return SQLITE_DENY;
+  return SQLITE_OK;
+}
+
+struct DenySelectAfter {
+  int remaining;
+};
+
+int deny_nth_select(
+    void* data, int action, const char*, const char*, const char*, const char*
+) {
+  auto* state = static_cast<DenySelectAfter*>(data);
+  if (action == SQLITE_SELECT && --state->remaining == 0) return SQLITE_DENY;
+  return SQLITE_OK;
+}
+
+int interrupt_sqlite(void*) {
+  return 1;
+}
+
+int create_sidecar_on_close(unsigned event, void* data, void*, void*) {
+  if (event != SQLITE_TRACE_CLOSE) return 0;
+  const auto& sidecar = *static_cast<const std::filesystem::path*>(data);
+  std::error_code ignored;
+  std::filesystem::create_directories(sidecar, ignored);
+  std::ofstream(sidecar / "child", std::ios::binary) << "fixture";
+  return 0;
+}
+
 void write_plain_project_manifest(
     const std::filesystem::path& root,
     const std::string& project_id
@@ -208,6 +249,117 @@ TEST_CASE("Database durable ownership audit checks every Git-owned object kind",
   REQUIRE_THROWS(holder::platform::audit_core_durable_ownership(db));
   write_file(root / holder::resource::location_rel_path("location-1234"));
   REQUIRE_NOTHROW(holder::platform::audit_core_durable_ownership(db));
+}
+
+TEST_CASE("Database durable ownership audit reports prepare failures for every query",
+          "[db][rebuild]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  db.exec(schema_sql());
+
+  for (std::string table :
+       {"projects", "ai_messages", "ai_threads", "resources", "storage_locations"}) {
+    REQUIRE(sqlite3_set_authorizer(db.handle(), deny_sqlite_read, &table) == SQLITE_OK);
+    REQUIRE_THROWS(holder::platform::audit_core_durable_ownership(db));
+    REQUIRE(sqlite3_set_authorizer(db.handle(), nullptr, nullptr) == SQLITE_OK);
+  }
+
+  bool saw_thread_prepare = false;
+  for (int select = 1; select <= 12 && !saw_thread_prepare; ++select) {
+    DenySelectAfter state{select};
+    REQUIRE(sqlite3_set_authorizer(db.handle(), deny_nth_select, &state) == SQLITE_OK);
+    try {
+      holder::platform::audit_core_durable_ownership(db);
+    } catch (const std::exception& error) {
+      saw_thread_prepare =
+          std::string(error.what()).find("prepare AI thread ownership") !=
+          std::string::npos;
+    }
+    REQUIRE(sqlite3_set_authorizer(db.handle(), nullptr, nullptr) == SQLITE_OK);
+  }
+  CHECK(saw_thread_prepare);
+}
+
+TEST_CASE("Database rebuild reports aggregate and validation preparation failures",
+          "[db][rebuild]") {
+  const auto dir = make_temp_dir();
+
+  SECTION("old durable count query cannot prepare") {
+    const auto database = dir / "old-count.db";
+    holder::platform::Db db;
+    db.open(database);
+    db.exec(schema_sql());
+    db.close();
+    holder::platform::DatabaseRebuildRequest request;
+    request.database_path = database;
+    request.backup_root = dir / "backups";
+    request.schema_sql = schema_sql();
+    request.hooks.audit_existing = [](holder::platform::Db& old) {
+      old.exec("DROP TABLE resource_metadata;");
+    };
+    REQUIRE_THROWS(holder::platform::rebuild_database_projection(request));
+  }
+
+  SECTION("old durable count query is interrupted while stepping") {
+    const auto database = dir / "old-count-step.db";
+    holder::platform::Db db;
+    db.open(database);
+    db.exec(schema_sql());
+    db.close();
+    holder::platform::DatabaseRebuildRequest request;
+    request.database_path = database;
+    request.backup_root = dir / "backups";
+    request.schema_sql = schema_sql();
+    request.hooks.audit_existing = [](holder::platform::Db& old) {
+      sqlite3_progress_handler(old.handle(), 1, interrupt_sqlite, nullptr);
+    };
+    REQUIRE_THROWS_WITH(
+        holder::platform::rebuild_database_projection(request),
+        Catch::Matchers::ContainsSubstring("failed to count projects")
+    );
+  }
+
+  SECTION("integrity pragma cannot prepare") {
+    std::string denied = "integrity_check";
+    holder::platform::DatabaseRebuildRequest request;
+    request.database_path = dir / "integrity.db";
+    request.schema_sql = schema_sql();
+    request.dry_run = true;
+    request.hooks.restore_after_projects = [&](holder::platform::Db& rebuilt) {
+      REQUIRE(sqlite3_set_authorizer(rebuilt.handle(), deny_sqlite_pragma, &denied) == SQLITE_OK);
+    };
+    REQUIRE_THROWS(holder::platform::rebuild_database_projection(request));
+  }
+
+  SECTION("foreign key pragma cannot prepare") {
+    std::string denied = "foreign_key_check";
+    holder::platform::DatabaseRebuildRequest request;
+    request.database_path = dir / "foreign-key.db";
+    request.schema_sql = schema_sql();
+    request.dry_run = true;
+    request.hooks.restore_after_projects = [&](holder::platform::Db& rebuilt) {
+      REQUIRE(sqlite3_set_authorizer(rebuilt.handle(), deny_sqlite_pragma, &denied) == SQLITE_OK);
+    };
+    REQUIRE_THROWS(holder::platform::rebuild_database_projection(request));
+  }
+
+  SECTION("rebuild sidecar cannot be removed") {
+    holder::platform::DatabaseRebuildRequest request;
+    request.database_path = dir / "sidecar.db";
+    request.schema_sql = schema_sql();
+    request.dry_run = true;
+    auto sidecar = std::filesystem::path(request.database_path.string() +
+                                         ".rebuild.tmp-wal");
+    request.hooks.validate_rebuilt = [&](holder::platform::Db& rebuilt) {
+      REQUIRE(sqlite3_trace_v2(rebuilt.handle(), SQLITE_TRACE_CLOSE,
+                               create_sidecar_on_close, &sidecar) == SQLITE_OK);
+    };
+    REQUIRE_THROWS_WITH(
+        holder::platform::rebuild_database_projection(request),
+        Catch::Matchers::ContainsSubstring("failed to remove rebuild database sidecar")
+    );
+  }
 }
 
 TEST_CASE("Database rebuild rejects unsafe inputs before replacing the database", "[db][rebuild]") {

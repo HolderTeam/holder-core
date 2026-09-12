@@ -665,6 +665,48 @@ TEST_CASE("Card history bounds unrelated revision scanning with a continuation",
   CHECK_FALSE(second.next_cursor.has_value());
 }
 
+TEST_CASE("Card history preserves a scan continuation after returning a matching commit",
+          "[history][git]") {
+  const auto root = history_temp_dir();
+  const std::string card_id = "abcd-partial-bounded-scan";
+  holder::git::GitRepo repo;
+  repo.open_or_init(root);
+  repo.write_file("older-note.txt", "older unrelated revision\n");
+  repo.stage_path("older-note.txt");
+  repo.commit("Add unrelated note");
+  write_commit(repo, card_id, "Bounded", "Newest card version\n",
+               "Add card Bounded");
+
+  holder::model::Project project;
+  project.project_id = "project-history";
+  project.root_path = root.string();
+  project.privacy_mode = "plain";
+  const auto page = holder::history::CardHistoryService(1).list(project, card_id);
+  REQUIRE(page.entries.size() == 1);
+  CHECK(page.scan_limited);
+  REQUIRE(page.next_cursor.has_value());
+}
+
+TEST_CASE("Card history advances through a full raw history batch",
+          "[history][git]") {
+  const auto root = history_temp_dir();
+  const std::string card_id = "abcd-full-raw-batch";
+  holder::git::GitRepo repo;
+  repo.open_or_init(root);
+  for (int revision = 0; revision < 201; ++revision) {
+    write_commit(repo, card_id, "Batch", "Revision " + std::to_string(revision),
+                 "Move card Batch");
+  }
+
+  holder::model::Project project;
+  project.project_id = "project-history";
+  project.root_path = root.string();
+  project.privacy_mode = "plain";
+  const auto page = holder::history::CardHistoryService().list(project, card_id, 200);
+  REQUIRE(page.entries.size() == 200);
+  REQUIRE(page.next_cursor.has_value());
+}
+
 TEST_CASE("Card history pagination does not split an editing session", "[history][git]") {
   const auto root = history_temp_dir();
   const std::string card_id = "abcd-session-page";

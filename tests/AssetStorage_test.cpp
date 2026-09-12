@@ -124,6 +124,7 @@ class FileGit final : public holder::git::GitOps {
     std::filesystem::create_directories(root_);
   }
   void write_file(const std::filesystem::path& relative, const std::string& content) override {
+    if (fail_writes) throw std::runtime_error("injected Git write failure");
     const auto path = root_ / relative;
     std::filesystem::create_directories(path.parent_path());
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
@@ -147,6 +148,7 @@ class FileGit final : public holder::git::GitOps {
   std::filesystem::path root_;
   std::vector<std::string> staged;
   std::vector<std::string> commits;
+  bool fail_writes = false;
 };
 
 class InvisibleAfterPutProvider final
@@ -159,10 +161,15 @@ public:
   void get(const std::string &, const std::filesystem::path &) override {
     throw std::runtime_error("not stored");
   }
-  bool exists(const std::string &) override { return false; }
-  void remove(const std::string &) override {}
+  bool exists(const std::string &) override { return available; }
+  void remove(const std::string &) override {
+    remove_called = true;
+    throw std::runtime_error("cleanup unavailable");
+  }
 
   bool put_called = false;
+  bool remove_called = false;
+  bool available = true;
 };
 
 } // namespace
@@ -573,12 +580,29 @@ TEST_CASE("Asset import stores, links, deduplicates and retrieves", "[asset]") {
 
   request.source_file = dir / "invisible-object.bin";
   write_pattern(request.source_file, 333);
+  InvisibleAfterPutProvider unavailable;
+  unavailable.available = false;
+  REQUIRE_THROWS(importer.import_file(request, unavailable));
+  REQUIRE(unavailable.put_called);
+  REQUIRE_FALSE(unavailable.remove_called);
+
   InvisibleAfterPutProvider invisible;
+  git.fail_writes = true;
   REQUIRE_THROWS(importer.import_file(request, invisible));
+  git.fail_writes = false;
   REQUIRE(invisible.put_called);
+  REQUIRE(invisible.remove_called);
 
   db.exec("UPDATE cards SET rel_path = 'cards/wrong.md' WHERE card_id = "
           "'card-1234';");
+  REQUIRE_THROWS(importer.import_file(request, provider));
+
+  db.exec("UPDATE cards SET rel_path = '" + card.rel_path +
+          "' WHERE card_id = 'card-1234';");
+  db.exec("CREATE TRIGGER block_import_projection BEFORE INSERT ON resources "
+          "BEGIN SELECT RAISE(ABORT, 'blocked import projection'); END;");
+  request.source_file = dir / "post-commit-projection-failure.bin";
+  write_pattern(request.source_file, 337);
   REQUIRE_THROWS(importer.import_file(request, provider));
 }
 

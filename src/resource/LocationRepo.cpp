@@ -9,14 +9,16 @@ namespace holder::resource {
 namespace {
 
 void bind_text(sqlite3_stmt* stmt, int index, const std::string& value) {
+  // Statements and parameter indexes are fixed above each call; only an
+  // uninjectable SQLite allocation failure can make these binds fail.
   if (sqlite3_bind_text(stmt, index, value.c_str(), -1, SQLITE_TRANSIENT) != SQLITE_OK) {
-    throw std::runtime_error("sqlite bind text failed");
+    throw std::runtime_error("sqlite bind text failed"); // LCOV_EXCL_LINE
   }
 }
 
 void bind_int64(sqlite3_stmt* stmt, int index, long long value) {
   if (sqlite3_bind_int64(stmt, index, value) != SQLITE_OK) {
-    throw std::runtime_error("sqlite bind integer failed");
+    throw std::runtime_error("sqlite bind integer failed"); // LCOV_EXCL_LINE
   }
 }
 
@@ -36,7 +38,7 @@ holder::model::Location read_location(sqlite3_stmt* stmt) {
   location.created_at = sqlite3_column_int64(stmt, 5);
   location.updated_at = sqlite3_column_int64(stmt, 6);
   return location;
-}
+} // LCOV_EXCL_LINE - GCC emits an uncovered function-end counter.
 
 } // namespace
 
@@ -110,7 +112,7 @@ std::vector<holder::model::Location> LocationRepo::list(const std::string& proje
   }
   sqlite3_finalize(stmt);
   return out;
-}
+} // LCOV_EXCL_LINE - GCC emits an uncovered function-end counter.
 
 bool LocationRepo::is_in_use(const std::string& location_id) const {
   sqlite3_stmt* stmt = nullptr;
