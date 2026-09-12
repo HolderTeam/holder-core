@@ -5,9 +5,6 @@
 #include "model/Project.h"
 #include "platform/Db.h"
 
-#include <functional>
-#include <string>
-
 namespace holder::sync {
 
 // A pull only fetches and checks out git's working tree; nothing else keeps the SQLite card
@@ -37,8 +34,7 @@ int resolve_pull_conflicts(
     const holder::model::Project& project,
     holder::git::RealGitOps& git,
     const holder::git::NonFastForwardPullError& diverged,
-    long long now,
-    const std::function<std::string()>& uuid_v4
+    long long now
 );
 
 } // namespace holder::sync

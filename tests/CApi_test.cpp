@@ -44,6 +44,19 @@ std::string read_schema_sql() {
   return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
 }
 
+bool is_canonical_uuid_version(const std::string& value, char version) {
+  if (value.size() != 36 || value[14] != version) return false;
+  for (std::size_t index = 0; index < value.size(); ++index) {
+    if (index == 8 || index == 13 || index == 18 || index == 23) {
+      if (value[index] != '-') return false;
+    } else if (!((value[index] >= '0' && value[index] <= '9') ||
+                 (value[index] >= 'a' && value[index] <= 'f'))) {
+      return false;
+    }
+  }
+  return value[19] == '8' || value[19] == '9' || value[19] == 'a' || value[19] == 'b';
+}
+
 void seed_project(const std::filesystem::path& data_dir) {
   const auto db_path = data_dir / "server" / "holder.db";
   std::filesystem::create_directories(db_path.parent_path());
@@ -57,6 +70,7 @@ void seed_project(const std::filesystem::path& data_dir) {
   project.root_path = "/tmp/home";
   project.git_remote_url = "git@example.com:holder/home.git";
   project.git_provider = "github";
+  project.id_scheme = holder::model::IdScheme::Uuid4;
   project.created_at = 10;
   project.updated_at = 20;
 
@@ -102,7 +116,8 @@ void seed_git_project(
     const std::filesystem::path& data_dir,
     const std::string& project_id,
     const std::filesystem::path& root_path,
-    const std::optional<std::string>& remote_url
+    const std::optional<std::string>& remote_url,
+    holder::model::IdScheme id_scheme = holder::model::IdScheme::Uuid4
 ) {
   const auto db_path = data_dir / "server" / "holder.db";
   std::filesystem::create_directories(db_path.parent_path());
@@ -115,6 +130,7 @@ void seed_git_project(
   project.name = "Git Project";
   project.root_path = root_path.string();
   project.git_remote_url = remote_url;
+  project.id_scheme = id_scheme;
   // Tests using this helper write plain (unencrypted) markdown directly to
   // the working tree, so this must not be the default "encrypted_git" --
   // that would (correctly) trip assert_encryption_push_safe.
@@ -703,10 +719,11 @@ TEST_CASE("C API creates a card with generated id and rel_path", "[capi]") {
   REQUIRE(error == nullptr);
 
   const auto body = nlohmann::json::parse(card_json);
+  const auto card_id = body["card_id"].get<std::string>();
   REQUIRE(body["title"] == "Welcome");
   REQUIRE(body["project_id"] == project_id);
   REQUIRE(body["parent_card_id"].is_null());
-  REQUIRE_FALSE(body["card_id"].get<std::string>().empty());
+  REQUIRE(is_canonical_uuid_version(card_id, '7'));
   REQUIRE_FALSE(body["rel_path"].get<std::string>().empty());
 
   holder_string_free(card_json);
@@ -716,6 +733,43 @@ TEST_CASE("C API creates a card with generated id and rel_path", "[capi]") {
   REQUIRE(nlohmann::json::parse(list_json).size() == 1);
   holder_string_free(list_json);
 
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API creates UUIDv4 card IDs for UUIDv4 projects", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  const auto project_root = data_dir / "projects" / "uuid4-project";
+  seed_git_project(
+      data_dir,
+      "uuid4-project",
+      project_root,
+      std::nullopt,
+      holder::model::IdScheme::Uuid4
+  );
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* card_json = nullptr;
+  REQUIRE(
+      holder_card_create(
+          context,
+          "uuid4-project",
+          "Legacy-compatible card",
+          "body",
+          nullptr,
+          &card_json,
+          &error
+      ) == HOLDER_OK
+  );
+  const auto card = nlohmann::json::parse(card_json);
+  REQUIRE(is_canonical_uuid_version(card.at("card_id").get<std::string>(), '4'));
+  REQUIRE(card.at("title") == "Legacy-compatible card");
+  REQUIRE(card.at("project_id") == "uuid4-project");
+
+  holder_string_free(card_json);
   holder_context_destroy(context);
 }
 
@@ -1245,6 +1299,8 @@ TEST_CASE(
   const auto oldest = find_by_title("Oldest");
   REQUIRE(newest != restored_cards.end());
   REQUIRE(oldest != restored_cards.end());
+  REQUIRE(is_canonical_uuid_version((*newest)["card_id"].get<std::string>(), '7'));
+  REQUIRE(is_canonical_uuid_version((*oldest)["card_id"].get<std::string>(), '7'));
   REQUIRE((*newest)["links"][0]["to_id"] == (*oldest)["card_id"]);
   REQUIRE((*newest)["links"][0]["label"] == "see also");
   REQUIRE((*newest)["milestones"][0]["kind"] == "Deadline");

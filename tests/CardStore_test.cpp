@@ -70,7 +70,8 @@ void apply_schema(holder::platform::Db& db) {
 void create_project(
     holder::platform::Db& db,
     const std::string& project_id,
-    const std::string& root_path
+    const std::string& root_path,
+    holder::model::IdScheme id_scheme = holder::model::IdScheme::Uuid4
 ) {
   holder::project::ProjectRepo repo(db);
   holder::model::Project project;
@@ -78,6 +79,7 @@ void create_project(
   project.name = "Project";
   project.root_path = root_path;
   project.privacy_mode = "plain";
+  project.id_scheme = id_scheme;
   project.project_key_id.reset();
   project.created_at = 1;
   project.updated_at = 1;
@@ -326,7 +328,12 @@ TEST_CASE("CardStore create_batch stages and commits the batch once", "[cardstor
   db.open(dir / "holder.db");
   apply_schema(db);
   const auto project_root = dir / "project_repo";
-  create_project(db, "proj-1", project_root.string());
+  create_project(
+      db,
+      "proj-1",
+      project_root.string(),
+      holder::model::IdScheme::Uuid7
+  );
 
   BulkTrackingGitOps git;
   holder::card::CardStore store(db, nullptr, nullptr, &git);
@@ -351,11 +358,10 @@ TEST_CASE("CardStore create_batch stages and commits the batch once", "[cardstor
   auto missing_link = valid_link;
   missing_link.to_card_id = "outside-snapshot";
   items[0].links.push_back(missing_link);
-  int next_id = 0;
   store.create_batch(
       "proj-1",
       items,
-      [&next_id]() { return "new-card-" + std::to_string(next_id++); },
+      []() { return "new-milestone-id"; },
       "Restore batch"
   );
 
@@ -364,9 +370,23 @@ TEST_CASE("CardStore create_batch stages and commits the batch once", "[cardstor
   CHECK(git.staged_path_count == items.size());
   CHECK(git.commit_calls == 1);
   CHECK(count_commits(project_root) == 1);
-  const auto links = holder::card::LinkRepo(db).list_outgoing("proj-1", "new-card-0");
+  const auto cards = holder::card::CardRepo(db).list_all("proj-1");
+  REQUIRE(cards.size() == items.size());
+  const auto card_0 = std::find_if(cards.begin(), cards.end(), [](const auto& card) {
+    return card.title == "Card 0";
+  });
+  const auto card_1 = std::find_if(cards.begin(), cards.end(), [](const auto& card) {
+    return card.title == "Card 1";
+  });
+  REQUIRE(card_0 != cards.end());
+  REQUIRE(card_1 != cards.end());
+  REQUIRE(card_0->card_id.size() == 36);
+  REQUIRE(card_1->card_id.size() == 36);
+  CHECK(card_0->card_id[14] == '7');
+  CHECK(card_1->card_id[14] == '7');
+  const auto links = holder::card::LinkRepo(db).list_outgoing("proj-1", card_0->card_id);
   REQUIRE(links.size() == 1);
-  CHECK(links[0].to_card_id == "new-card-1");
+  CHECK(links[0].to_card_id == card_1->card_id);
 }
 
 TEST_CASE("CardStore update writes file and updates metadata", "[cardstore]") {

@@ -72,9 +72,10 @@ class CardStore {
   // one git commit for the whole batch, message = commit_message. project_id must already
   // exist (see BACKUP_RESTORE_IMPLEMENTATION_PLAN.md step 4: this is the bulk-write half of
   // restore; the caller creates the fresh project first via ProjectStore::create). Every card
-  // gets a fresh card_id from uuid_v4 (see BatchCardInput's card_id doc comment for why); each
-  // milestone likewise gets a fresh milestone_id. A link only survives if its to_card_id
-  // matches another item's original card_id in the same batch, remapped to that item's new id.
+  // gets a fresh card_id using the persisted project's IdScheme (see BatchCardInput's card_id
+  // doc comment for why); each milestone gets a fresh UUIDv4 milestone_id. A link only survives
+  // if its to_card_id matches another item's original card_id in the same batch, remapped to
+  // that item's new id.
   void create_batch(
       const std::string& project_id,
       const std::vector<BatchCardInput>& items,

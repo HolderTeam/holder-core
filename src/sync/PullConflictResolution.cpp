@@ -2,9 +2,13 @@
 
 #include "card/CardFrontMatter.h"
 #include "card/CardStore.h"
+#include "identity/Uuid.h"
 #include "model/Card.h"
 #include "privacy/ProjectPrivacy.h"
+#include "project/ProjectRepo.h"
 #include "project/Rebuilder.h"
+
+#include <stdexcept>
 
 namespace holder::sync {
 
@@ -22,9 +26,13 @@ int resolve_pull_conflicts(
     const holder::model::Project& project,
     holder::git::RealGitOps& git,
     const holder::git::NonFastForwardPullError& diverged,
-    long long now,
-    const std::function<std::string()>& uuid_v4
+    long long now
 ) {
+  const auto current_project = holder::project::ProjectRepo(db).get(project.project_id);
+  if (!current_project.has_value()) {
+    throw std::runtime_error("project not found: " + project.project_id);
+  }
+
   const auto merge_result = git.merge_remote_taking_theirs_for_conflicts(
       "origin",
       diverged.local_oid_hex,
@@ -54,7 +62,7 @@ int resolve_pull_conflicts(
     if (!parsed.has_front_matter) continue;
 
     holder::model::Card duplicate;
-    duplicate.card_id = uuid_v4();
+    duplicate.card_id = holder::identity::generate_id(current_project->id_scheme);
     duplicate.project_id = project.project_id;
     duplicate.title = parsed.card.title + " (conflicted copy)";
     duplicate.parent_card_id = parsed.card.parent_card_id;
