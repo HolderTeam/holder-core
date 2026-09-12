@@ -532,8 +532,8 @@ TEST_CASE("C API creates a plain project defaulting root_path and privacy_mode",
   REQUIRE(body["name"] == "Home");
   REQUIRE(body["privacy_mode"] == "plain");
   REQUIRE(body["id_scheme"] == "uuid7");
-  REQUIRE_FALSE(body["project_id"].get<std::string>().empty());
   const std::string project_id = body["project_id"].get<std::string>();
+  REQUIRE(is_canonical_uuid_version(project_id, '7'));
   const std::string root_path = body["root_path"].get<std::string>();
   const std::filesystem::path project_root(root_path);
   REQUIRE(project_root.filename() == "home");
@@ -1254,6 +1254,7 @@ TEST_CASE(
 
   const std::string new_project_id = restored_project["project_id"].get<std::string>();
   REQUIRE(new_project_id != "project-1");
+  REQUIRE(is_canonical_uuid_version(new_project_id, '7'));
   REQUIRE(restored_project["name"] == "Restored Project");
   REQUIRE(restored_project["privacy_mode"] == "plain");
   REQUIRE(restored_project["id_scheme"] == "uuid7");

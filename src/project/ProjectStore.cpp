@@ -1,5 +1,6 @@
 #include "project/ProjectStore.h"
 
+#include "identity/Uuid.h"
 #include "privacy/ProjectPrivacy.h"
 #include "project/ProjectManifest.h"
 #include "project/ProjectPaths.h"
@@ -30,7 +31,7 @@ holder::model::Project ProjectStore::create(
     const std::optional<std::filesystem::path>& projects_root
 ) {
   if (project.project_id.empty()) {
-    project.project_id = uuid_v4();
+    project.project_id = holder::identity::generate_id(project.id_scheme);
   }
   if (project.created_at <= 0) {
     project.created_at = now_epoch_seconds();

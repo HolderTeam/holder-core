@@ -23,6 +23,19 @@ std::function<std::string()> counting_uuid_v4(const std::string& prefix) {
   };
 }
 
+bool is_canonical_uuid_version(const std::string& value, char version) {
+  if (value.size() != 36 || value[14] != version) return false;
+  for (std::size_t index = 0; index < value.size(); ++index) {
+    if (index == 8 || index == 13 || index == 18 || index == 23) {
+      if (value[index] != '-') return false;
+    } else if (!((value[index] >= '0' && value[index] <= '9') ||
+                 (value[index] >= 'a' && value[index] <= 'f'))) {
+      return false;
+    }
+  }
+  return value[19] == '8' || value[19] == '9' || value[19] == 'a' || value[19] == 'b';
+}
+
 } // namespace
 
 TEST_CASE("ProjectStore create defaults id, timestamps, and root_path", "[project_store]") {
@@ -37,7 +50,7 @@ TEST_CASE("ProjectStore create defaults id, timestamps, and root_path", "[projec
 
   const auto created = store.create(input, counting_uuid_v4("id"), dir / "projects");
 
-  REQUIRE(created.project_id == "id-1");
+  REQUIRE(is_canonical_uuid_version(created.project_id, '7'));
   REQUIRE(created.created_at > 0);
   REQUIRE(created.updated_at == created.created_at);
   REQUIRE(created.root_path == (dir / "projects" / "home").string());
@@ -62,10 +75,12 @@ TEST_CASE("ProjectStore create honors an explicit root_path", "[project_store]")
   holder::model::Project input;
   input.name = "Home";
   input.privacy_mode = "plain";
+  input.id_scheme = holder::model::IdScheme::Uuid4;
   input.root_path = (dir / "custom-root").string();
 
   const auto created = store.create(input, counting_uuid_v4("id"), std::nullopt);
 
+  REQUIRE(is_canonical_uuid_version(created.project_id, '4'));
   REQUIRE(created.root_path == (dir / "custom-root").string());
 }
 
