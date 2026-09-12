@@ -10,6 +10,7 @@
 #include "platform/Db.h"
 #include "project/ProjectRepo.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <filesystem>
@@ -88,6 +89,24 @@ void create_project(holder::platform::Db& db, const std::string& project_id) {
   repo.create(project);
 }
 
+void create_card(
+    holder::card::CardRepo& repo,
+    const std::string& card_id,
+    const std::string& project_id,
+    const std::string& title,
+    const std::optional<long long>& deleted_at = std::nullopt
+) {
+  holder::model::Card card;
+  card.card_id = card_id;
+  card.project_id = project_id;
+  card.title = title;
+  card.rel_path = "cards/" + card_id + ".md";
+  card.created_at = 1;
+  card.updated_at = 1;
+  card.deleted_at = deleted_at;
+  repo.create(card);
+}
+
 int sqlite_interrupt_cb(void* data) {
   auto* flag = static_cast<int*>(data);
   return (flag && *flag) ? 1 : 0;
@@ -159,6 +178,128 @@ TEST_CASE("CardRepo CRUD", "[cardrepo]") {
   REQUIRE(deleted->deleted_at.has_value());
   REQUIRE(deleted->deleted_at.value() == 40);
   REQUIRE(deleted->updated_at == 41);
+}
+
+TEST_CASE("CardRepo finds an exact card ID within project and deletion scope", "[cardrepo]") {
+  const auto dir = make_temp_dir();
+  const auto db_path = dir / "holder.db";
+
+  holder::platform::Db db;
+  db.open(db_path);
+  apply_schema(db);
+  create_project(db, "proj-1");
+  create_project(db, "proj-2");
+
+  holder::card::CardRepo repo(db);
+  const std::string live_id = "11111111-1111-4111-8111-111111111111";
+  const std::string trashed_id = "22222222-2222-7222-8222-222222222222";
+  create_card(repo, live_id, "proj-1", "Live card");
+  create_card(repo, trashed_id, "proj-1", "Trashed card", 50);
+
+  const auto live = repo.find_by_id("proj-1", live_id, holder::model::CardScope::Live);
+  REQUIRE(live.has_value());
+  REQUIRE(live->card_id == live_id);
+  REQUIRE(live->title == "Live card");
+  REQUIRE_FALSE(live->deleted_at.has_value());
+  REQUIRE_FALSE(repo.find_by_id("proj-1", live_id, holder::model::CardScope::Trashed));
+
+  const auto trashed =
+      repo.find_by_id("proj-1", trashed_id, holder::model::CardScope::Trashed);
+  REQUIRE(trashed.has_value());
+  REQUIRE(trashed->deleted_at == 50);
+  REQUIRE_FALSE(repo.find_by_id("proj-1", trashed_id, holder::model::CardScope::Live));
+
+  REQUIRE(repo.find_by_id("proj-1", live_id, holder::model::CardScope::Either));
+  REQUIRE(repo.find_by_id("proj-1", trashed_id, holder::model::CardScope::Either));
+  REQUIRE_FALSE(repo.find_by_id("proj-2", live_id, holder::model::CardScope::Either));
+}
+
+TEST_CASE("CardRepo finds literal leading card ID prefixes with a limit", "[cardrepo]") {
+  const auto dir = make_temp_dir();
+  const auto db_path = dir / "holder.db";
+
+  holder::platform::Db db;
+  db.open(db_path);
+  apply_schema(db);
+  create_project(db, "proj-1");
+  create_project(db, "proj-2");
+
+  holder::card::CardRepo repo(db);
+  const std::string first_id = "12345678-1234-4123-8123-123456789abc";
+  const std::string second_id = "12345678-1234-7123-8123-123456789abd";
+  const std::string trashed_id = "12345678-9999-4999-8999-999999999999";
+  const std::string fragment_id = "aaaaaaaa-1234-4123-8123-123456781234";
+  create_card(repo, first_id, "proj-1", "First");
+  create_card(repo, second_id, "proj-1", "Second");
+  create_card(repo, trashed_id, "proj-1", "Trashed", 50);
+  create_card(repo, fragment_id, "proj-1", "Fragment only");
+  create_card(repo, "12345678-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "proj-2", "Other project");
+
+  const auto live =
+      repo.find_by_id_prefix("proj-1", "12345678", holder::model::CardScope::Live, 10);
+  REQUIRE(live.size() == 2);
+  REQUIRE(live[0].card_id == first_id);
+  REQUIRE(live[1].card_id == second_id);
+
+  const auto trashed =
+      repo.find_by_id_prefix("proj-1", "12345678", holder::model::CardScope::Trashed, 10);
+  REQUIRE(trashed.size() == 1);
+  REQUIRE(trashed[0].card_id == trashed_id);
+
+  const auto either =
+      repo.find_by_id_prefix("proj-1", "12345678", holder::model::CardScope::Either, 10);
+  REQUIRE(either.size() == 3);
+  REQUIRE(std::none_of(either.begin(), either.end(), [&](const auto& card) {
+    return card.card_id == fragment_id;
+  }));
+
+  REQUIRE(repo.find_by_id_prefix("proj-1", "12345678", holder::model::CardScope::Either, 1).size()
+          == 1);
+  REQUIRE(repo.find_by_id_prefix("proj-1", "12345678", holder::model::CardScope::Either, 0).empty());
+}
+
+TEST_CASE("CardRepo finds exact titles within project and deletion scope", "[cardrepo]") {
+  const auto dir = make_temp_dir();
+  const auto db_path = dir / "holder.db";
+
+  holder::platform::Db db;
+  db.open(db_path);
+  apply_schema(db);
+  create_project(db, "proj-1");
+  create_project(db, "proj-2");
+
+  holder::card::CardRepo repo(db);
+  create_card(repo, "31111111-1111-4111-8111-111111111111", "proj-1", "Roadmap");
+  create_card(repo, "32222222-2222-4222-8222-222222222222", "proj-1", "Roadmap");
+  create_card(repo, "33333333-3333-7333-8333-333333333333", "proj-1", "Roadmap", 50);
+  create_card(repo, "34444444-4444-4444-8444-444444444444", "proj-1", "Roadmaps");
+  create_card(repo, "35555555-5555-4555-8555-555555555555", "proj-1", "roadmap");
+  create_card(repo, "36666666-6666-4666-8666-666666666666", "proj-2", "Roadmap");
+
+  const auto live =
+      repo.find_by_exact_title("proj-1", "Roadmap", holder::model::CardScope::Live, 10);
+  REQUIRE(live.size() == 2);
+  REQUIRE(live[0].title == "Roadmap");
+  REQUIRE(live[1].title == "Roadmap");
+  REQUIRE_FALSE(live[0].deleted_at.has_value());
+  REQUIRE_FALSE(live[1].deleted_at.has_value());
+
+  const auto trashed =
+      repo.find_by_exact_title("proj-1", "Roadmap", holder::model::CardScope::Trashed, 10);
+  REQUIRE(trashed.size() == 1);
+  REQUIRE(trashed[0].deleted_at == 50);
+
+  REQUIRE(repo.find_by_exact_title("proj-1", "Roadmap", holder::model::CardScope::Either, 10).size()
+          == 3);
+  REQUIRE(repo.find_by_exact_title("proj-1", "Roadmap", holder::model::CardScope::Either, 1).size()
+          == 1);
+  REQUIRE(repo.find_by_exact_title("proj-1", "Roadmaps", holder::model::CardScope::Either, 10).size()
+          == 1);
+  REQUIRE(repo.find_by_exact_title("proj-1", "Road", holder::model::CardScope::Either, 10).empty());
+  REQUIRE(repo.find_by_exact_title("proj-1", "ROADMAP", holder::model::CardScope::Either, 10).empty());
+  REQUIRE(repo.find_by_exact_title("proj-2", "Roadmap", holder::model::CardScope::Either, 10).size()
+          == 1);
+  REQUIRE(repo.find_by_exact_title("proj-1", "Roadmap", holder::model::CardScope::Either, 0).empty());
 }
 
 TEST_CASE("CardRepo counts children and handles deleted_at on create", "[cardrepo]") {
@@ -292,6 +433,13 @@ TEST_CASE("CardRepo methods throw sqlite errors when DB is closed", "[cardrepo]"
   db.close();
 
   REQUIRE_THROWS(repo.get("missing"));
+  REQUIRE_THROWS(repo.find_by_id("proj-1", "missing", holder::model::CardScope::Either));
+  REQUIRE_THROWS(
+      repo.find_by_id_prefix("proj-1", "missing", holder::model::CardScope::Either, 10)
+  );
+  REQUIRE_THROWS(
+      repo.find_by_exact_title("proj-1", "Missing", holder::model::CardScope::Either, 10)
+  );
   REQUIRE_THROWS(repo.list_roots("proj-1"));
   REQUIRE_THROWS(repo.list_children("proj-1", "parent"));
   REQUIRE_THROWS(repo.list_all("proj-1"));

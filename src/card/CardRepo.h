@@ -15,6 +15,23 @@ class CardRepo {
 
   void create(const holder::model::Card& card);
   std::optional<holder::model::Card> get(const std::string& card_id) const;
+  std::optional<holder::model::Card> find_by_id(
+      const std::string& project_id,
+      const std::string& card_id,
+      holder::model::CardScope scope
+  ) const;
+  std::vector<holder::model::Card> find_by_id_prefix(
+      const std::string& project_id,
+      const std::string& prefix,
+      holder::model::CardScope scope,
+      int limit
+  ) const;
+  std::vector<holder::model::Card> find_by_exact_title(
+      const std::string& project_id,
+      const std::string& title,
+      holder::model::CardScope scope,
+      int limit
+  ) const;
 
   std::vector<holder::model::Card> list_roots(const std::string& project_id) const;
   std::vector<holder::model::Card> list_children(

@@ -73,6 +73,18 @@ holder::model::Card read_card(sqlite3_stmt* stmt) {
   return c;
 } // LCOV_EXCL_LINE
 
+std::string deletion_scope_clause(holder::model::CardScope scope) {
+  switch (scope) {
+    case holder::model::CardScope::Live:
+      return " AND deleted_at IS NULL";
+    case holder::model::CardScope::Trashed:
+      return " AND deleted_at IS NOT NULL";
+    case holder::model::CardScope::Either:
+      return {};
+  }
+  throw std::invalid_argument("invalid card scope"); // LCOV_EXCL_LINE
+}
+
 } // namespace
 
 CardRepo::CardRepo(holder::platform::Db& db)
@@ -131,6 +143,122 @@ std::optional<holder::model::Card> CardRepo::get(const std::string& card_id) con
     throw_sqlite(db_.handle(), "get card failed");
   }
   return std::nullopt;
+}
+
+std::optional<holder::model::Card> CardRepo::find_by_id(
+    const std::string& project_id,
+    const std::string& card_id,
+    holder::model::CardScope scope
+) const {
+  const std::string sql =
+      "SELECT card_id, project_id, title, rel_path, parent_card_id, sort_key, "
+      "created_at, updated_at, deleted_at "
+      "FROM cards WHERE project_id = ? AND card_id = ?" +
+      deletion_scope_clause(scope) + ";";
+
+  sqlite3_stmt* stmt = nullptr;
+  if (sqlite3_prepare_v2(db_.handle(), sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+    throw_sqlite(db_.handle(), "prepare find card by id failed");
+  }
+
+  bind_text(stmt, 1, project_id);
+  bind_text(stmt, 2, card_id);
+
+  const int rc = sqlite3_step(stmt);
+  if (rc == SQLITE_ROW) {
+    auto card = read_card(stmt);
+    sqlite3_finalize(stmt);
+    return card;
+  }
+
+  sqlite3_finalize(stmt); // LCOV_EXCL_LINE
+  if (rc != SQLITE_DONE) {
+    throw_sqlite(db_.handle(), "find card by id failed"); // LCOV_EXCL_LINE
+  }
+  return std::nullopt;
+}
+
+std::vector<holder::model::Card> CardRepo::find_by_id_prefix(
+    const std::string& project_id,
+    const std::string& prefix,
+    holder::model::CardScope scope,
+    int limit
+) const {
+  if (limit <= 0) return {};
+
+  // Canonical card IDs contain only hexadecimal digits and hyphens. The range keeps
+  // SQLite on the project/card ID index; substr preserves literal starts-with
+  // semantics even if a non-canonical value exists in an older database.
+  const std::string sql =
+      "SELECT card_id, project_id, title, rel_path, parent_card_id, sort_key, "
+      "created_at, updated_at, deleted_at "
+      "FROM cards WHERE project_id = ? AND card_id >= ? AND card_id < (? || '~') "
+      "AND substr(card_id, 1, length(?)) = ?" +
+      deletion_scope_clause(scope) + " ORDER BY card_id ASC LIMIT ?;";
+
+  sqlite3_stmt* stmt = nullptr;
+  if (sqlite3_prepare_v2(db_.handle(), sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+    throw_sqlite(db_.handle(), "prepare find cards by id prefix failed");
+  }
+
+  bind_text(stmt, 1, project_id);
+  bind_text(stmt, 2, prefix);
+  bind_text(stmt, 3, prefix);
+  bind_text(stmt, 4, prefix);
+  bind_text(stmt, 5, prefix);
+  sqlite3_bind_int(stmt, 6, limit);
+
+  std::vector<holder::model::Card> out;
+  while (true) {
+    const int rc = sqlite3_step(stmt);
+    if (rc == SQLITE_ROW) {
+      out.push_back(read_card(stmt));
+      continue;
+    }
+    if (rc == SQLITE_DONE) break;
+    sqlite3_finalize(stmt); // LCOV_EXCL_LINE
+    throw_sqlite(db_.handle(), "find cards by id prefix failed"); // LCOV_EXCL_LINE
+  }
+  sqlite3_finalize(stmt); // LCOV_EXCL_LINE
+  return out;
+}
+
+std::vector<holder::model::Card> CardRepo::find_by_exact_title(
+    const std::string& project_id,
+    const std::string& title,
+    holder::model::CardScope scope,
+    int limit
+) const {
+  if (limit <= 0) return {};
+
+  const std::string sql =
+      "SELECT card_id, project_id, title, rel_path, parent_card_id, sort_key, "
+      "created_at, updated_at, deleted_at "
+      "FROM cards WHERE project_id = ? AND title = ?" +
+      deletion_scope_clause(scope) + " LIMIT ?;";
+
+  sqlite3_stmt* stmt = nullptr;
+  if (sqlite3_prepare_v2(db_.handle(), sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+    throw_sqlite(db_.handle(), "prepare find cards by exact title failed");
+  }
+
+  bind_text(stmt, 1, project_id);
+  bind_text(stmt, 2, title);
+  sqlite3_bind_int(stmt, 3, limit);
+
+  std::vector<holder::model::Card> out;
+  while (true) {
+    const int rc = sqlite3_step(stmt);
+    if (rc == SQLITE_ROW) {
+      out.push_back(read_card(stmt));
+      continue;
+    }
+    if (rc == SQLITE_DONE) break;
+    sqlite3_finalize(stmt); // LCOV_EXCL_LINE
+    throw_sqlite(db_.handle(), "find cards by exact title failed"); // LCOV_EXCL_LINE
+  }
+  sqlite3_finalize(stmt); // LCOV_EXCL_LINE
+  return out;
 }
 
 std::vector<holder::model::Card> CardRepo::list_roots(const std::string& project_id) const {
