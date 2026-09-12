@@ -86,6 +86,7 @@ TEST_CASE("ProjectRepo CRUD", "[projectrepo]") {
   project.project_id = "proj-1";
   project.name = "Alpha";
   project.root_path = "/tmp/alpha";
+  project.id_scheme = holder::model::IdScheme::Uuid7;
   project.created_at = 10;
   project.updated_at = 10;
 
@@ -97,10 +98,12 @@ TEST_CASE("ProjectRepo CRUD", "[projectrepo]") {
   REQUIRE(fetched->root_path == "/tmp/alpha");
   REQUIRE(fetched->privacy_mode == "encrypted_git");
   REQUIRE_FALSE(fetched->project_key_id.has_value());
+  REQUIRE(fetched->id_scheme == holder::model::IdScheme::Uuid7);
 
   auto list = repo.list();
   REQUIRE(list.size() == 1);
   REQUIRE(list[0].project_id == "proj-1");
+  REQUIRE(list[0].id_scheme == holder::model::IdScheme::Uuid7);
 
   repo.update_name("proj-1", "Beta", 20);
   const auto updated_name = repo.get("proj-1");
@@ -143,10 +146,16 @@ TEST_CASE("ProjectRepo CRUD", "[projectrepo]") {
   REQUIRE(cleared_key.has_value());
   REQUIRE_FALSE(cleared_key->project_key_id.has_value());
 
-  repo.touch_updated("proj-1", 42);
+  repo.update_id_scheme("proj-1", holder::model::IdScheme::Uuid4, 42);
+  const auto updated_id_scheme = repo.get("proj-1");
+  REQUIRE(updated_id_scheme.has_value());
+  REQUIRE(updated_id_scheme->id_scheme == holder::model::IdScheme::Uuid4);
+  REQUIRE(updated_id_scheme->updated_at == 42);
+
+  repo.touch_updated("proj-1", 43);
   const auto touched = repo.get("proj-1");
   REQUIRE(touched.has_value());
-  REQUIRE(touched->updated_at == 42);
+  REQUIRE(touched->updated_at == 43);
 
   repo.remove("proj-1");
   REQUIRE_FALSE(repo.get("proj-1").has_value());
@@ -194,6 +203,10 @@ TEST_CASE("ProjectRepo throws prepare failures when DB handle is missing", "[pro
   REQUIRE_THROWS_WITH(
       repo.update_project_key_id("p1", std::optional<std::string>("k"), 1),
       Catch::Matchers::ContainsSubstring("prepare update project key id failed")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.update_id_scheme("p1", holder::model::IdScheme::Uuid7, 1),
+      Catch::Matchers::ContainsSubstring("prepare update project id scheme failed")
   );
   REQUIRE_THROWS_WITH(
       repo.touch_updated("p1", 1),
@@ -246,6 +259,10 @@ TEST_CASE("ProjectRepo throws when sqlite step fails", "[projectrepo]") {
   REQUIRE_THROWS_WITH(
       repo.update_project_key_id("p1", std::optional<std::string>("kid"), 3),
       Catch::Matchers::ContainsSubstring("update project key id failed")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.update_id_scheme("p1", holder::model::IdScheme::Uuid7, 3),
+      Catch::Matchers::ContainsSubstring("update project id scheme failed")
   );
   REQUIRE_THROWS_WITH(
       repo.touch_updated("p1", 3),

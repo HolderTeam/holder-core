@@ -83,6 +83,7 @@ std::string render_project_manifest(const holder::model::Project& project) {
       {"version", 1}, // LCOV_EXCL_LINE - GCC assigns no counter to this executed initializer.
       {"project_id", project.project_id},
       {"name", project.name},
+      {"id_scheme", holder::model::to_string(project.id_scheme)},
       {"created_at", project.created_at},
       {"updated_at", project.updated_at},
   };
@@ -162,6 +163,23 @@ holder::model::Project read_project_manifest(const std::filesystem::path& root_p
     throw std::runtime_error("project manifest id does not match bootstrap: " + manifest_path.string());
   }
   project.name = required_nonempty_string(manifest, "name", manifest_path);
+  if (manifest.contains("id_scheme")) {
+    if (!manifest.at("id_scheme").is_string()) {
+      throw std::runtime_error(
+          "project metadata field 'id_scheme' is not a string: " + manifest_path.string()
+      );
+    }
+    const auto id_scheme = holder::model::id_scheme_from_string(
+        manifest.at("id_scheme").get<std::string>()
+    );
+    if (!id_scheme.has_value()) {
+      throw std::runtime_error(
+          "unsupported project id scheme '" +
+          manifest.at("id_scheme").get<std::string>() + "': " + manifest_path.string()
+      );
+    }
+    project.id_scheme = *id_scheme;
+  }
   project.created_at = manifest.at("created_at").get<long long>();
   project.updated_at = manifest.at("updated_at").get<long long>();
   if (manifest.contains("git_provider") && manifest.at("git_provider").is_string()) {

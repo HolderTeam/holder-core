@@ -156,6 +156,7 @@ add_library(holder STATIC
   src/history/CardHistory.cpp
   src/history/ProjectHistory.cpp
   src/identity/Uuid.cpp
+  src/model/IdScheme.cpp
   src/index/FtsIndexer.cpp
   src/index/Reindexer.cpp
   src/platform/Db.cpp

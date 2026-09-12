@@ -345,6 +345,12 @@ TEST_CASE("C API rebuilds its SQLite projection from managed project files", "[c
 
   context = nullptr;
   REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  char* projects_json = nullptr;
+  REQUIRE(holder_project_list(context, &projects_json, &error) == HOLDER_OK);
+  const auto recovered_projects = nlohmann::json::parse(projects_json);
+  REQUIRE(recovered_projects.size() == 1);
+  REQUIRE(recovered_projects[0].at("id_scheme") == "uuid7");
+  holder_string_free(projects_json);
   char* content = nullptr;
   REQUIRE(holder_card_get_content(context, card_id.c_str(), &content, &error) == HOLDER_OK);
   REQUIRE(std::string(content) == "Body survives");
@@ -509,6 +515,7 @@ TEST_CASE("C API creates a plain project defaulting root_path and privacy_mode",
   const auto body = nlohmann::json::parse(json);
   REQUIRE(body["name"] == "Home");
   REQUIRE(body["privacy_mode"] == "plain");
+  REQUIRE(body["id_scheme"] == "uuid7");
   REQUIRE_FALSE(body["project_id"].get<std::string>().empty());
   const std::string project_id = body["project_id"].get<std::string>();
   const std::string root_path = body["root_path"].get<std::string>();
@@ -1195,6 +1202,7 @@ TEST_CASE(
   REQUIRE(new_project_id != "project-1");
   REQUIRE(restored_project["name"] == "Restored Project");
   REQUIRE(restored_project["privacy_mode"] == "plain");
+  REQUIRE(restored_project["id_scheme"] == "uuid7");
   REQUIRE(restored_project["git_remote_url"].is_null());
 
   // Same cards, flattened (no parent_card_id) -- but a fresh card_id per card, since card_id

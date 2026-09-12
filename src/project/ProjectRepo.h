@@ -43,6 +43,11 @@ class ProjectRepo {
       const std::optional<std::string>& project_key_id,
       long long updated_at
   );
+  void update_id_scheme(
+      const std::string& project_id,
+      holder::model::IdScheme id_scheme,
+      long long updated_at
+  );
   void touch_updated(const std::string& project_id, long long updated_at);
   void remove(const std::string& project_id);
 

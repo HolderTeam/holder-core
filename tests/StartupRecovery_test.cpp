@@ -288,6 +288,7 @@ TEST_CASE(
   project.name = "Home";
   project.root_path = (projects_root / "home").string();
   project.privacy_mode = "encrypted_git";
+  project.id_scheme = holder::model::IdScheme::Uuid7;
   project.created_at = 1;
   project.updated_at = 1;
   original_project_repo.create(project);
@@ -304,6 +305,8 @@ TEST_CASE(
         return std::string("generated-key");
       }
   );
+  project = original_project_repo.get(project.project_id).value();
+  holder::project::write_project_manifest(git, project);
 
   holder::index::FtsIndexer original_fts(original_db);
   holder::card::CardStore original_store(original_db, &original_fts);
@@ -340,6 +343,7 @@ TEST_CASE(
   REQUIRE(recovered[0].name == "Home");
   REQUIRE(recovered[0].root_path == (projects_root / "home").string());
   REQUIRE(recovered[0].privacy_mode == "encrypted_git");
+  REQUIRE(recovered[0].id_scheme == holder::model::IdScheme::Uuid7);
   REQUIRE(recovered[0].project_key_id.has_value());
 
   holder::project::ProjectRepo recovered_project_repo(recovered_db);
@@ -347,6 +351,7 @@ TEST_CASE(
   const auto projects = recovered_project_repo.list();
   REQUIRE(projects.size() == 1);
   REQUIRE(projects[0].project_id == "proj-1");
+  REQUIRE(projects[0].id_scheme == holder::model::IdScheme::Uuid7);
   const auto cards = recovered_card_repo.list_all(projects[0].project_id);
   REQUIRE(cards.size() == 2);
 

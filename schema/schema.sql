@@ -1,4 +1,4 @@
--- schema.sql (schema version 4)
+-- schema.sql (schema version 5)
 -- Local-first holder schema: projects, cards, links, milestones, resources, AI threads/messages, and FTS5.
 -- The app/server is responsible for keeping FTS tables in sync (no triggers in v0.1).
 
@@ -15,9 +15,11 @@ CREATE TABLE IF NOT EXISTS projects (
   git_provider   TEXT NULL,              -- optional provider label
   privacy_mode   TEXT NOT NULL DEFAULT 'encrypted_git', -- 'encrypted_git' | 'plain'
   project_key_id TEXT NULL,              -- keyring identifier (no secret bytes in DB)
+  id_scheme      TEXT NOT NULL DEFAULT 'uuid4', -- 'uuid4' | 'uuid7'
   created_at  INTEGER NOT NULL,          -- unix epoch seconds (or ms, but be consistent)
   updated_at  INTEGER NOT NULL,
-  CHECK(privacy_mode IN ('encrypted_git', 'plain'))
+  CHECK(privacy_mode IN ('encrypted_git', 'plain')),
+  CHECK(id_scheme IN ('uuid4', 'uuid7'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_projects_updated
@@ -452,7 +454,7 @@ CREATE TABLE IF NOT EXISTS schema_version (
   version INTEGER NOT NULL
 );
 
--- Initialize schema version to 4 if empty
+-- Initialize schema version to 5 if empty
 INSERT INTO schema_version(version)
-SELECT 4
+SELECT 5
 WHERE NOT EXISTS (SELECT 1 FROM schema_version);

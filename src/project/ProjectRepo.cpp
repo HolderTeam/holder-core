@@ -57,8 +57,15 @@ holder::model::Project read_project(sqlite3_stmt* stmt) {
   } else {
     p.project_key_id.reset();
   }
-  p.created_at = sqlite3_column_int64(stmt, 7);
-  p.updated_at = sqlite3_column_int64(stmt, 8);
+  const auto id_scheme = holder::model::id_scheme_from_string(
+      reinterpret_cast<const char*>(sqlite3_column_text(stmt, 7))
+  );
+  if (!id_scheme.has_value()) {
+    throw std::runtime_error("unsupported project id scheme in database");
+  }
+  p.id_scheme = *id_scheme;
+  p.created_at = sqlite3_column_int64(stmt, 8);
+  p.updated_at = sqlite3_column_int64(stmt, 9);
   return p;
 } // LCOV_EXCL_LINE
 
@@ -70,8 +77,8 @@ ProjectRepo::ProjectRepo(holder::platform::Db& db)
 void ProjectRepo::create(const holder::model::Project& project) {
   static constexpr const char* SQL =
       "INSERT INTO projects(project_id, name, root_path, git_remote_url, git_provider, "
-      "privacy_mode, project_key_id, created_at, updated_at) "
-      "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?);";
+      "privacy_mode, project_key_id, id_scheme, created_at, updated_at) "
+      "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?);";
 
   sqlite3_stmt* stmt = nullptr;
   if (sqlite3_prepare_v2(db_.handle(), SQL, -1, &stmt, nullptr) != SQLITE_OK) {
@@ -85,8 +92,9 @@ void ProjectRepo::create(const holder::model::Project& project) {
   bind_text_optional(stmt, 5, project.git_provider);
   bind_text(stmt, 6, project.privacy_mode);
   bind_text_optional(stmt, 7, project.project_key_id);
-  bind_int64(stmt, 8, project.created_at);
-  bind_int64(stmt, 9, project.updated_at);
+  bind_text(stmt, 8, std::string(holder::model::to_string(project.id_scheme)));
+  bind_int64(stmt, 9, project.created_at);
+  bind_int64(stmt, 10, project.updated_at);
 
   const int rc = sqlite3_step(stmt);
   sqlite3_finalize(stmt);
@@ -98,7 +106,7 @@ void ProjectRepo::create(const holder::model::Project& project) {
 std::optional<holder::model::Project> ProjectRepo::get(const std::string& project_id) const {
   static constexpr const char* SQL =
       "SELECT project_id, name, root_path, git_remote_url, git_provider, privacy_mode, "
-      "project_key_id, created_at, updated_at "
+      "project_key_id, id_scheme, created_at, updated_at "
       "FROM projects WHERE project_id = ?;";
 
   sqlite3_stmt* stmt = nullptr;
@@ -125,7 +133,7 @@ std::optional<holder::model::Project> ProjectRepo::get(const std::string& projec
 std::vector<holder::model::Project> ProjectRepo::list() const {
   static constexpr const char* SQL =
       "SELECT project_id, name, root_path, git_remote_url, git_provider, privacy_mode, "
-      "project_key_id, created_at, updated_at "
+      "project_key_id, id_scheme, created_at, updated_at "
       "FROM projects ORDER BY updated_at DESC;";
 
   sqlite3_stmt* stmt = nullptr;
@@ -290,6 +298,30 @@ void ProjectRepo::update_project_key_id(
   sqlite3_finalize(stmt);
   if (rc != SQLITE_DONE) {
     throw_sqlite(db_.handle(), "update project key id failed"); // LCOV_EXCL_LINE
+  }
+}
+
+void ProjectRepo::update_id_scheme(
+    const std::string& project_id,
+    holder::model::IdScheme id_scheme,
+    long long updated_at
+) {
+  static constexpr const char* SQL =
+      "UPDATE projects SET id_scheme = ?, updated_at = ? WHERE project_id = ?;";
+
+  sqlite3_stmt* stmt = nullptr;
+  if (sqlite3_prepare_v2(db_.handle(), SQL, -1, &stmt, nullptr) != SQLITE_OK) {
+    throw_sqlite(db_.handle(), "prepare update project id scheme failed");
+  }
+
+  bind_text(stmt, 1, std::string(holder::model::to_string(id_scheme)));
+  bind_int64(stmt, 2, updated_at);
+  bind_text(stmt, 3, project_id);
+
+  const int rc = sqlite3_step(stmt);
+  sqlite3_finalize(stmt);
+  if (rc != SQLITE_DONE) {
+    throw_sqlite(db_.handle(), "update project id scheme failed"); // LCOV_EXCL_LINE
   }
 }
 

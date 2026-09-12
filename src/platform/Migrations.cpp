@@ -6,6 +6,7 @@
 #include <sqlite3.h>
 #include <sstream>
 #include <stdexcept>
+#include <string_view>
 
 namespace holder::platform {
 namespace {
@@ -183,6 +184,47 @@ UPDATE schema_version SET version = 4 WHERE version = 3;
   tx.commit();
 }
 
+bool projects_has_id_scheme(Db& db) {
+  sqlite3_stmt* stmt = nullptr;
+  if (sqlite3_prepare_v2(db.handle(), "PRAGMA table_info(projects);", -1, &stmt, nullptr) !=
+      SQLITE_OK) {
+    throw std::runtime_error(
+        std::string("failed to inspect projects schema: ") + sqlite3_errmsg(db.handle())
+    );
+  }
+
+  while (true) {
+    const int rc = sqlite3_step(stmt);
+    if (rc == SQLITE_ROW) {
+      const auto* name = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
+      if (name != nullptr && std::string_view(name) == "id_scheme") {
+        sqlite3_finalize(stmt);
+        return true;
+      }
+      continue;
+    }
+    sqlite3_finalize(stmt);
+    if (rc != SQLITE_DONE) {
+      throw std::runtime_error(
+          std::string("failed to inspect projects schema: ") + sqlite3_errmsg(db.handle())
+      );
+    }
+    return false;
+  }
+}
+
+void migrate_v4_to_v5(Db& db) {
+  Tx tx(db);
+  if (!projects_has_id_scheme(db)) {
+    db.exec(
+        "ALTER TABLE projects ADD COLUMN id_scheme TEXT NOT NULL DEFAULT 'uuid4' "
+        "CHECK(id_scheme IN ('uuid4', 'uuid7'));"
+    );
+  }
+  db.exec("UPDATE schema_version SET version = 5 WHERE version = 4;");
+  tx.commit();
+}
+
 } // namespace
 
 std::string Migrations::read_file(const std::filesystem::path& p) {
@@ -259,6 +301,11 @@ bool Migrations::migrate_to_latest(Db& db) {
     case 3:
       migrate_v3_to_v4(db);
       version = 4;
+      migrated = true;
+      break;
+    case 4:
+      migrate_v4_to_v5(db);
+      version = 5;
       migrated = true;
       break;
     default:

@@ -85,7 +85,8 @@ holder::model::Project encrypted_project(const std::filesystem::path& dir) {
   db.exec(
       "CREATE TABLE projects (project_id TEXT PRIMARY KEY, name TEXT NOT NULL, root_path TEXT NOT "
       "NULL, git_remote_url TEXT NULL, git_provider TEXT NULL, privacy_mode TEXT NOT NULL DEFAULT "
-      "'plain', project_key_id TEXT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);"
+      "'plain', project_key_id TEXT NULL, id_scheme TEXT NOT NULL DEFAULT 'uuid4', created_at "
+      "INTEGER NOT NULL, updated_at INTEGER NOT NULL);"
   );
   holder::model::Project project;
   project.project_id = "project-asset-test";
@@ -242,11 +243,10 @@ TEST_CASE("Encrypted assets reject changed identity and bytes", "[asset]") {
       staged.plaintext
   ));
 
-  std::fstream file(dir / "stored.bin", std::ios::binary | std::ios::in | std::ios::out);
-  REQUIRE(file.is_open());
-  file.seekp(-1, std::ios::end);
-  file.put('\0');
-  file.close();
+  auto tampered = read_binary(dir / "stored.bin");
+  REQUIRE_FALSE(tampered.empty());
+  tampered.back() = static_cast<char>(static_cast<unsigned char>(tampered.back()) ^ 0x01U);
+  write_binary(dir / "stored.bin", tampered);
   REQUIRE_THROWS(holder::resource::recover_asset_file(
       dir / "stored.bin",
       dir / "tampered.bin",
