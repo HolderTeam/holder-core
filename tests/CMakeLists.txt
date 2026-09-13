@@ -21,6 +21,7 @@ add_executable(holder_core_tests
   CApi_test.cpp
   CardFrontMatter_test.cpp
   CardPaths_test.cpp
+  CardReferenceResolver_test.cpp
   CardRepo_test.cpp
   CardStore_test.cpp
   CardStoreFsFailure_test.cpp
