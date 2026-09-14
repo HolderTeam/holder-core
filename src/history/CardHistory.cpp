@@ -3,6 +3,7 @@
 #include "card/CardFrontMatter.h"
 #include "card/CardPaths.h"
 #include "git/GitRepo.h"
+#include "git/RevisionReferenceResolver.h"
 #include "privacy/ProjectPrivacy.h"
 
 #include <algorithm>
@@ -246,6 +247,26 @@ std::string comparison_text(const CardVersion& version) {
   return text;
 }
 
+CardHistoryComparison compare_snapshots(
+    holder::git::GitRepo& repo,
+    const holder::model::Project& project,
+    const std::string& card_id,
+    const std::optional<std::string>& from_oid,
+    const std::optional<std::string>& to_oid
+) {
+  const auto before = snapshot_at(repo, project, card_id, from_oid);
+  const auto after = snapshot_at(repo, project, card_id, to_oid);
+
+  CardHistoryComparison result;
+  result.from = version_from(before, from_oid);
+  result.to = version_from(after, to_oid);
+  result.summary = describe_change(before, after, "updated");
+  result.lines = line_diff(
+      comparison_text(result.from), comparison_text(result.to), result.truncated
+  );
+  return result;
+}
+
 } // namespace
 
 CardHistoryPage CardHistoryService::list(
@@ -366,16 +387,28 @@ CardHistoryComparison CardHistoryService::compare(
   holder::git::GitRepo repo;
   repo.open_existing(project.root_path);
   const auto resolved_to = to_oid.has_value() ? to_oid : repo.head_oid();
-  const auto before = snapshot_at(repo, project, card_id, from_oid);
-  const auto after = snapshot_at(repo, project, card_id, resolved_to);
+  return compare_snapshots(repo, project, card_id, from_oid, resolved_to);
+}
 
-  CardHistoryComparison result;
-  result.from = version_from(before, from_oid);
-  result.to = version_from(after, resolved_to);
-  result.summary = describe_change(before, after, "updated");
-  result.lines = line_diff(
-      comparison_text(result.from), comparison_text(result.to), result.truncated
-  );
+CardHistoryChangeResult CardHistoryService::compare_change(
+    const holder::model::Project& project,
+    const std::string& card_id,
+    const std::string& revision_reference
+) const {
+  if (card_id.size() < 4) throw std::invalid_argument("card_id is invalid");
+  holder::git::GitRepo repo;
+  repo.open_existing(project.root_path);
+
+  CardHistoryChangeResult result;
+  result.revision = holder::git::RevisionReferenceResolver(repo).resolve(revision_reference);
+  if (result.revision.status != holder::git::RevisionReferenceStatus::Resolved) return result;
+
+  const auto& selected_oid = *result.revision.oid;
+  const auto parent_oids = repo.commit_parent_oids(selected_oid);
+  const auto from_oid = parent_oids.empty()
+      ? std::optional<std::string>{}
+      : std::optional<std::string>{parent_oids.front()};
+  result.comparison = compare_snapshots(repo, project, card_id, from_oid, selected_oid);
   return result;
 }
 

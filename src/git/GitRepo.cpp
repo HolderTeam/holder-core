@@ -1244,6 +1244,29 @@ std::optional<std::string> GitRepo::head_oid() {
   return oid_to_hex(oid);
 }
 
+std::vector<std::string> GitRepo::commit_parent_oids(const std::string& commit_oid_hex) {
+  ensure_open();
+  auto* repo = reinterpret_cast<git_repository*>(repo_);
+
+  git_oid oid{};
+  if (git_oid_fromstr(&oid, commit_oid_hex.c_str()) != 0) {
+    throw std::invalid_argument("commit_oid_hex is invalid");
+  }
+
+  git_commit* commit = nullptr;
+  const int rc = git_commit_lookup(&commit, repo, &oid);
+  if (rc != 0) throw git_err("git_commit_lookup failed", rc);
+
+  std::vector<std::string> parent_oids;
+  const auto parent_count = git_commit_parentcount(commit);
+  parent_oids.reserve(parent_count);
+  for (unsigned int i = 0; i < parent_count; ++i) {
+    parent_oids.push_back(oid_to_hex(*git_commit_parent_id(commit, i)));
+  }
+  git_commit_free(commit);
+  return parent_oids;
+}
+
 GitHistoryPage GitRepo::history_for_paths(
     const std::vector<fs::path>& relative_paths,
     std::size_t limit,

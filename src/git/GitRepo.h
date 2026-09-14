@@ -154,6 +154,11 @@ class GitRepo {
       std::size_t max_scanned_commits = 10'000
   );
 
+  // Return the commit's parents in Git order. The first item is the first
+  // parent used by ordinary first-parent comparisons; a root commit returns
+  // an empty vector.
+  std::vector<std::string> commit_parent_oids(const std::string& commit_oid_hex);
+
   // Current commit OID, or nullopt for an unborn repository.
   std::optional<std::string> head_oid();
 

@@ -7,6 +7,8 @@
 #include "core_test_helpers.h"
 #include "git/GitRepo.h"
 #include "git/RevisionReferenceResolver.h"
+#include "history/CardHistory.h"
+#include "model/Project.h"
 
 #include <git2.h>
 
@@ -178,6 +180,19 @@ TEST_CASE(
   );
   REQUIRE(ambiguous.status == RevisionReferenceStatus::Ambiguous);
   REQUIRE_FALSE(ambiguous.oid.has_value());
+
+  holder::model::Project project;
+  project.project_id = "project-history";
+  project.root_path = root.string();
+  project.privacy_mode = "plain";
+  const auto change = holder::history::CardHistoryService().compare_change(
+      project,
+      "abcd-ambiguous-revision",
+      first_oid.substr(0, RevisionReferenceResolver::kMinimumPrefixLength)
+  );
+  REQUIRE(change.revision.status == RevisionReferenceStatus::Ambiguous);
+  REQUIRE_FALSE(change.revision.oid.has_value());
+  REQUIRE_FALSE(change.comparison.has_value());
 
   require_resolved(resolver.resolve(first_oid), first_oid);
   require_resolved(resolver.resolve(second_oid), second_oid);
