@@ -215,6 +215,51 @@ TEST_CASE("Card history lists card-only commits and groups adjacent edits", "[hi
   CHECK(page.entries[2].summary == "Card created");
 }
 
+TEST_CASE("Card history compares the change introduced by a revision", "[history][git]") {
+  const auto root = history_temp_dir();
+  const std::string card_id = "abcd-revision-change";
+  holder::git::GitRepo repo;
+  repo.open_or_init(root);
+  write_commit(repo, card_id, "Change", "Original body\n", "Add card Change");
+  const auto creation_oid = repo.head_oid().value();
+  write_commit(repo, card_id, "Change", "Revised body\n", "Update card Change");
+  const auto edit_oid = repo.head_oid().value();
+
+  holder::model::Project project;
+  project.project_id = "project-history";
+  project.root_path = root.string();
+  project.privacy_mode = "plain";
+  holder::history::CardHistoryService service;
+
+  const auto creation = service.compare_change(project, card_id, creation_oid);
+  REQUIRE(creation.revision.status == holder::git::RevisionReferenceStatus::Resolved);
+  REQUIRE(creation.revision.oid == creation_oid);
+  REQUIRE(creation.comparison.has_value());
+  CHECK_FALSE(creation.comparison->from.exists);
+  CHECK(creation.comparison->from.oid.empty());
+  CHECK(creation.comparison->to.exists);
+  CHECK(creation.comparison->to.oid == creation_oid);
+  CHECK(creation.comparison->to.body == "Original body\n");
+
+  const auto edit = service.compare_change(project, card_id, edit_oid.substr(0, 8));
+  REQUIRE(edit.revision.status == holder::git::RevisionReferenceStatus::Resolved);
+  REQUIRE(edit.revision.oid == edit_oid);
+  REQUIRE(edit.comparison.has_value());
+  CHECK(edit.comparison->from.exists);
+  CHECK(edit.comparison->from.oid == creation_oid);
+  CHECK(edit.comparison->from.body == "Original body\n");
+  CHECK(edit.comparison->to.oid == edit_oid);
+  CHECK(edit.comparison->to.body == "Revised body\n");
+  CHECK(std::none_of(edit.comparison->lines.begin(), edit.comparison->lines.end(), [](const auto& line) {
+    return line.origin == '+' && line.text == "# Change";
+  }));
+
+  const auto missing = service.compare_change(project, card_id, "00000000");
+  CHECK(missing.revision.status == holder::git::RevisionReferenceStatus::NotFound);
+  CHECK_FALSE(missing.revision.oid.has_value());
+  CHECK_FALSE(missing.comparison.has_value());
+}
+
 TEST_CASE("Card history splits editing sessions at author and time boundaries", "[history][git]") {
   const auto root = history_temp_dir();
   const std::string card_id = "abcd-session-boundaries";
@@ -405,6 +450,16 @@ TEST_CASE("Card history retains both merge parents and the resulting card state"
   const auto comparison = service.compare(project, card_id, first_parent_oid, merge_oid);
   CHECK(comparison.from.body == "Main branch\n");
   CHECK(comparison.to.body == "Combined branches\n");
+
+  const auto change = service.compare_change(project, card_id, merge_oid);
+  REQUIRE(change.revision.status == holder::git::RevisionReferenceStatus::Resolved);
+  REQUIRE(change.revision.oid == merge_oid);
+  REQUIRE(change.comparison.has_value());
+  CHECK(change.comparison->from.oid == first_parent_oid);
+  CHECK(change.comparison->from.oid != second_parent_oid);
+  CHECK(change.comparison->from.body == "Main branch\n");
+  CHECK(change.comparison->to.oid == merge_oid);
+  CHECK(change.comparison->to.body == "Combined branches\n");
 }
 
 TEST_CASE("Card history classifies direct metadata, move, Trash, and deletion changes", "[history][git]") {

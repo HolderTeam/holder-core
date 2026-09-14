@@ -1,5 +1,6 @@
 #pragma once
 
+#include "git/RevisionReferenceResolver.h"
 #include "model/Project.h"
 
 #include <optional>
@@ -65,6 +66,11 @@ struct CardHistoryComparison {
   bool truncated = false;
 };
 
+struct CardHistoryChangeResult {
+  holder::git::RevisionReferenceResult revision;
+  std::optional<CardHistoryComparison> comparison;
+};
+
 class CardHistoryService {
  public:
   explicit CardHistoryService(std::size_t max_scanned_commits = 10'000)
@@ -82,6 +88,17 @@ class CardHistoryService {
       const std::string& card_id,
       const std::optional<std::string>& from_oid,
       const std::optional<std::string>& to_oid = std::nullopt
+  ) const;
+
+  // Compare the state introduced by revision_reference against its first
+  // parent. Merge commits deliberately use only their first parent; root
+  // commits use the same previously-nonexistent state as compare(nullopt, to).
+  // The revision result preserves typed not-found/ambiguous resolution and,
+  // when resolved, contains the canonical full commit OID.
+  CardHistoryChangeResult compare_change(
+      const holder::model::Project& project,
+      const std::string& card_id,
+      const std::string& revision_reference
   ) const;
 
  private:
