@@ -11,6 +11,8 @@
 
 namespace holder::git {
 
+class RevisionReferenceResolver;
+
 struct GitHistoryCommit {
   std::string oid;
   std::vector<std::string> parent_oids;
@@ -170,6 +172,8 @@ class GitRepo {
   std::filesystem::path repo_dir() const { return repo_dir_; }
 
  private:
+  friend class RevisionReferenceResolver;
+
   void ensure_open() const;
 
   // Create author/committer signature.

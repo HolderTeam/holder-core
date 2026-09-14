@@ -153,6 +153,7 @@ add_library(holder STATIC
   src/git/GitRepo.cpp
   src/git/RepoLocks.cpp
   src/git/RepoSyncMetrics.cpp
+  src/git/RevisionReferenceResolver.cpp
   src/git/SshAgentAndFileCredentialProvider.cpp
   src/history/CardHistory.cpp
   src/history/ProjectHistory.cpp

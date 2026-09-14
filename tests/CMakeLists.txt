@@ -57,6 +57,7 @@ add_executable(holder_core_tests
   Reindexer_test.cpp
   RemoteProbe_test.cpp
   RepoSyncMetrics_test.cpp
+  RevisionReferenceResolver_test.cpp
   ResourceRepo_test.cpp
   SecretStore_test.cpp
   StartupRecovery_test.cpp
