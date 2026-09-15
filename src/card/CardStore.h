@@ -34,6 +34,20 @@ enum class RemoveTagResult {
   InvalidTag,
 };
 
+// A partial milestone update. std::optional fields whose value cannot be null use
+// nullopt to mean "unchanged". Nullable fields have an accompanying has_* flag so
+// callers can distinguish "unchanged" from "clear this field".
+struct MilestoneUpdate {
+  std::optional<long long> start_at;
+  bool has_end_at = false;
+  std::optional<long long> end_at;
+  std::optional<bool> all_day;
+  bool has_kind = false;
+  std::optional<std::string> kind;
+  bool has_description = false;
+  std::optional<std::string> description;
+};
+
 // One card's worth of input to CardStore::create_batch: card_id/title/content plus outgoing
 // links and milestones, in the same shape holder_backup_snapshot_page emits (see
 // BACKUP_RESTORE_IMPLEMENTATION_PLAN.md step 4). card_id here is the *original* id, used only
@@ -97,6 +111,17 @@ class CardStore {
   );
   void update_links(const std::string& card_id, long long updated_at);
   void update_milestones(const std::string& card_id, long long updated_at);
+  // Updates one milestone only when project_id, card_id, and milestone_id identify the same
+  // live card milestone. Returns nullopt for a missing card/milestone or any ownership mismatch.
+  // The resulting milestone range is validated before the card file, projection, or Git history
+  // is changed. Identity and creation metadata are always preserved.
+  std::optional<holder::model::Milestone> update_milestone(
+      const std::string& project_id,
+      const std::string& card_id,
+      const std::string& milestone_id,
+      const MilestoneUpdate& update,
+      long long updated_at
+  );
   void trash(const std::string& card_id, long long deleted_at);
   void restore(const std::string& card_id, long long updated_at);
   // Restores the card snapshot at historical_oid through the ordinary CardStore write path.

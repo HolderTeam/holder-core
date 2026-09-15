@@ -41,6 +41,7 @@ add_executable(holder_core_tests
   LinkKindCatalog_test.cpp
   LinkRepo_test.cpp
   MilestoneRepo_test.cpp
+  MilestoneUpdate_test.cpp
   Migrations_test.cpp
   PrivacyCryptoService_test.cpp
   PrivacyError_test.cpp
