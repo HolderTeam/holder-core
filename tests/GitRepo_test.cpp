@@ -337,6 +337,31 @@ TEST_CASE("GitRepo push_branch returns up_to_date for unborn branch with remote"
   REQUIRE(result.error_message.empty());
 }
 
+TEST_CASE("GitRepo push_branch distinguishes changed and unchanged remote refs", "[git][push-result]") {
+  const auto dir = make_temp_dir();
+  init_bare_repo(dir / "remote");
+  holder::git::GitRepo local;
+  local.open_or_init(dir / "local");
+  local.set_remote("origin", (dir / "remote").string());
+  local.write_file("seed.txt", "seed");
+  local.stage_path("seed.txt");
+  local.commit("Seed local repository");
+  const auto first = local.push_branch("origin", "", true);
+  CAPTURE(first.error_message);
+  REQUIRE(first.status == holder::git::PushStatus::Pushed);
+  const auto second = local.push_branch("origin", "", true);
+  REQUIRE(second.status == holder::git::PushStatus::UpToDate);
+  REQUIRE(second.local_head_commit == first.local_head_commit);
+  REQUIRE(second.error_message.empty());
+  local.write_file("seed.txt", "local edits");
+  const auto dirty = local.push_branch("origin", "", true);
+  REQUIRE(dirty.status == holder::git::PushStatus::UpToDate);
+  REQUIRE(dirty.local_head_commit == first.local_head_commit);
+  local.stage_path("seed.txt");
+  local.commit("Commit edits");
+  REQUIRE(local.push_branch("origin", "", true).status == holder::git::PushStatus::Pushed);
+}
+
 TEST_CASE("GitRepo push_branch can set upstream on success", "[git]") {
   const auto dir = make_temp_dir();
   const auto remote_dir = dir / "remote";

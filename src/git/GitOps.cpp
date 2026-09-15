@@ -47,6 +47,10 @@ RemoteProbeResult RealGitOps::probe_remote(const std::string& name) {
   return repo_.probe_remote(name);
 }
 
+RemoteProbeResult RealGitOps::probe_remote_url(const std::string& url) {
+  return repo_.probe_remote_url(url);
+}
+
 // LCOV_EXCL_START
 PushResult RealGitOps::push_branch(
     const std::string& name,

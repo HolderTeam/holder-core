@@ -9,6 +9,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <fstream>
+#include <memory>
 #include <set>
 #include <stdexcept>
 #include <string_view>
@@ -177,6 +178,7 @@ static RemoteProbeStatus classify_remote_probe_error(const std::string& message)
     return RemoteProbeStatus::NotFound;
   }
   if (contains_icase(message, "unsupported url protocol") ||
+      contains_icase(message, "invalid argument: 'port'") ||
       contains_icase(message, "invalid url") || contains_icase(message, "malformed")) {
     return RemoteProbeStatus::InvalidRemoteUrl;
   }
@@ -321,6 +323,34 @@ static git_remote_callbacks make_remote_callbacks(GitCredentialProvider* provide
   if (rc != 0) throw git_err("git_remote_init_callbacks failed", rc); // LCOV_EXCL_LINE
   callbacks.credentials = git_credential_acquire_cb;
   callbacks.payload = provider;
+  return callbacks;
+}
+
+struct PushCallbackPayload {
+  GitCredentialProvider* credentials;
+  bool changed = false;
+};
+
+static git_remote_callbacks make_push_callbacks(PushCallbackPayload& payload) {
+  auto callbacks = make_remote_callbacks(payload.credentials);
+  callbacks.payload = &payload;
+  callbacks.credentials = [](git_credential** out,
+                             const char* url,
+                             const char* username,
+                             unsigned int allowed_types,
+                             void* data) {
+    auto& push = *static_cast<PushCallbackPayload*>(data);
+    return git_credential_acquire_cb(out, url, username, allowed_types, push.credentials);
+  };
+  callbacks.push_negotiation = [](const git_push_update** updates, size_t count, void* data) {
+    auto& push = *static_cast<PushCallbackPayload*>(data);
+    // Negotiation compares actual remote refs with the requested refs, without
+    // a separate fetch or relying on potentially stale remote-tracking refs.
+    for (size_t i = 0; i < count; ++i) {
+      if (!git_oid_equal(&updates[i]->src, &updates[i]->dst)) push.changed = true;
+    }
+    return 0;
+  };
   return callbacks;
 }
 
@@ -783,34 +813,14 @@ void GitRepo::remove_remote(const std::string& name) {
   spdlog::info("Removed git remote {}", name);
 }
 
-RemoteProbeResult GitRepo::probe_remote(const std::string& name) {
-  ensure_open();
-  auto* repo = reinterpret_cast<git_repository*>(repo_);
-
-  git_remote* remote = nullptr;
-  const int lookup = git_remote_lookup(&remote, repo, name.c_str());
-  if (lookup == GIT_ENOTFOUND) {
-    return {
-        .status = RemoteProbeStatus::RemoteUnset,
-        .remote_has_head = false,
-        .error_message = "Remote not configured: " + name,
-    };
-  }
-  if (lookup != 0) {
-    return {
-        .status = RemoteProbeStatus::UnknownError,
-        .remote_has_head = false,
-        .error_message = git_error_message_or_default("git_remote_lookup failed"), // LCOV_EXCL_LINE
-    }; // LCOV_EXCL_LINE
-  }
-
-  auto callbacks = make_remote_callbacks(credential_provider_.get());
+static RemoteProbeResult probe_connection(git_remote* remote, GitCredentialProvider* credentials) {
+  const std::unique_ptr<git_remote, decltype(&git_remote_free)> guard(remote, git_remote_free);
+  auto callbacks = make_remote_callbacks(credentials);
   const int connect_rc =
       git_remote_connect(remote, GIT_DIRECTION_FETCH, &callbacks, nullptr, nullptr);
   if (connect_rc != 0) {
     const std::string error = git_error_message_or_default("git_remote_connect failed");
     const auto status = classify_remote_probe_error(error);
-    git_remote_free(remote);
     return {
         .status = status,
         .remote_has_head = false,
@@ -826,7 +836,6 @@ RemoteProbeResult GitRepo::probe_remote(const std::string& name) {
     ); // LCOV_EXCL_LINE
     const auto status = classify_remote_probe_error(error); // LCOV_EXCL_LINE
     git_remote_disconnect(remote); // LCOV_EXCL_LINE
-    git_remote_free(remote); // LCOV_EXCL_LINE
     return {
         .status = status,
         .remote_has_head = false,
@@ -835,12 +844,42 @@ RemoteProbeResult GitRepo::probe_remote(const std::string& name) {
   } // LCOV_EXCL_LINE
 
   git_remote_disconnect(remote);
-  git_remote_free(remote);
   return {
       .status = RemoteProbeStatus::Reachable,
       .remote_has_head = heads_len > 0,
       .error_message = {},
   };
+}
+
+RemoteProbeResult GitRepo::probe_remote(const std::string& name) {
+  ensure_open();
+  git_remote* remote = nullptr;
+  const int lookup =
+      git_remote_lookup(&remote, reinterpret_cast<git_repository*>(repo_), name.c_str());
+  if (lookup == GIT_ENOTFOUND) {
+    return {RemoteProbeStatus::RemoteUnset, false, "Remote not configured: " + name};
+  }
+  if (lookup != 0) {
+    return {
+        RemoteProbeStatus::UnknownError,
+        false,
+        git_error_message_or_default("git_remote_lookup failed")
+    };
+  }
+  return probe_connection(remote, credential_provider_.get());
+}
+
+RemoteProbeResult GitRepo::probe_remote_url(const std::string& url) {
+  if (url.empty()) return {RemoteProbeStatus::RemoteUnset, false, "Remote URL is not configured."};
+  git_remote* remote = nullptr;
+  if (git_remote_create_detached(&remote, url.c_str()) != 0) {
+    return {
+        RemoteProbeStatus::InvalidRemoteUrl,
+        false,
+        git_error_message_or_default("Invalid remote URL.")
+    };
+  }
+  return probe_connection(remote, credential_provider_.get());
 }
 
 PushResult GitRepo::push_branch(
@@ -909,7 +948,8 @@ PushResult GitRepo::push_branch(
   git_push_options push_opts{};
   rc = git_push_options_init(&push_opts, GIT_PUSH_OPTIONS_VERSION);
   if (rc != 0) throw git_err("git_push_options_init failed", rc); // LCOV_EXCL_LINE
-  push_opts.callbacks = make_remote_callbacks(credential_provider_.get());
+  PushCallbackPayload push_payload{credential_provider_.get()};
+  push_opts.callbacks = make_push_callbacks(push_payload);
   rc = git_remote_push(remote, &refspecs, &push_opts);
   if (rc != 0) {
     const std::string error = git_error_message_or_default("git_remote_push failed");
@@ -936,7 +976,7 @@ PushResult GitRepo::push_branch(
 
   git_remote_free(remote);
   return {
-      .status = PushStatus::Pushed,
+      .status = push_payload.changed ? PushStatus::Pushed : PushStatus::UpToDate,
       .ahead_count = 0,
       .behind_count = 0,
       .local_head_commit = local_head_commit,

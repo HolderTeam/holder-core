@@ -103,6 +103,9 @@ class GitRepo {
   void pull_remote_ff_only(const std::string& name);
   // Probe remote reachability and whether it has a default HEAD.
   RemoteProbeResult probe_remote(const std::string& name);
+  // Uses a detached remote and the configured credentials; no repository is needed
+  // and no configuration, refs, or files are changed.
+  RemoteProbeResult probe_remote_url(const std::string& url);
   // Push local branch to remote.
   PushResult push_branch(const std::string& name, const std::string& branch, bool set_upstream);
 
