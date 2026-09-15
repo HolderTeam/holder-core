@@ -169,6 +169,65 @@ bool observes_sqlite_failure(
 
 } // namespace
 
+TEST_CASE("Card resource join isolates attachments and paginates live cards", "[resource][attachments]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  create_project(db, "project-1234");
+  create_project(db, "other-project");
+  holder::model::Card card;
+  card.card_id = "card-1234";
+  card.project_id = "project-1234";
+  card.title = "Card";
+  card.rel_path = "cards/card.md";
+  holder::card::CardRepo(db).create(card);
+  holder::resource::ResourceRepo resources(db);
+  auto resource = sample_bundle().resource;
+  resources.add(resource);
+  auto second = resource;
+  second.resource_id = "resource-2";
+  resources.add(second);
+  auto foreign = resource;
+  foreign.resource_id = "foreign-resource";
+  foreign.project_id = "other-project";
+  resources.add(foreign);
+  holder::model::CardLink link;
+  link.project_id = card.project_id;
+  link.from_card_id = card.card_id;
+  link.to_card_id = resource.resource_id;
+  link.to_type = "resource";
+  link.kind = "attachment";
+  holder::card::LinkRepo links(db);
+  links.upsert_links(card.project_id, card.card_id, {link, link});
+  REQUIRE(resources.list_for_card(card.project_id, card.card_id).size() == 1);
+  REQUIRE(resources.list_for_card(card.project_id, card.card_id)[0].metadata == resource.metadata);
+  link.to_card_id = second.resource_id;
+  link.kind = "ref";
+  links.upsert_links(card.project_id, card.card_id, {link});
+  REQUIRE(resources.list_for_card(card.project_id, card.card_id).size() == 1);
+  link.kind = "attachment";
+  links.upsert_links(card.project_id, card.card_id, {link});
+  link.to_card_id = foreign.resource_id;
+  links.upsert_links(card.project_id, card.card_id, {link});
+  REQUIRE(resources.list_for_card(card.project_id, card.card_id).size() == 2);
+  REQUIRE(resources.list_for_card("other-project", card.card_id).empty());
+  const auto first = resources.list_for_card(card.project_id, card.card_id, 1, 0);
+  const auto next = resources.list_for_card(card.project_id, card.card_id, 1, 1);
+  REQUIRE(first.size() == 1);
+  REQUIRE(next.size() == 1);
+  REQUIRE(first[0].resource_id != next[0].resource_id);
+  REQUIRE(resources.list_for_card(card.project_id, card.card_id, 1, 2).empty());
+  REQUIRE_THROWS_AS(resources.list_for_card(card.project_id, card.card_id, 0), std::invalid_argument);
+  REQUIRE_THROWS_AS(resources.list_for_card(card.project_id, card.card_id, 1001), std::invalid_argument);
+  REQUIRE_THROWS_AS(resources.list_for_card(card.project_id, card.card_id, 1, -1), std::invalid_argument);
+  links.delete_link(card.project_id, card.card_id, resource.resource_id, "resource", "attachment");
+  REQUIRE(resources.get(resource.resource_id).has_value());
+  REQUIRE(resources.list_for_card(card.project_id, card.card_id).size() == 1);
+  db.exec("UPDATE cards SET deleted_at = 1 WHERE card_id = 'card-1234';");
+  REQUIRE(resources.list_for_card(card.project_id, card.card_id).empty());
+}
+
 TEST_CASE("Resource manifests round-trip canonical complete bundles", "[resource]") {
   const auto bundle = sample_bundle();
   const auto rendered = holder::resource::render_resource_manifest(bundle);
