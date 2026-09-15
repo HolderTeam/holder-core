@@ -320,6 +320,38 @@ std::vector<holder::model::Resource> ResourceRepo::list(const std::string& proje
   return resources;
 }
 
+std::vector<holder::model::Resource> ResourceRepo::list_for_card(
+    const std::string& project_id, const std::string& card_id, int limit, int offset
+) const {
+  if (limit < 1 || limit > 1000 || offset < 0) {
+    throw std::invalid_argument("attachment limit must be 1..1000 and offset nonnegative");
+  }
+  Statement stmt(
+      db_.handle(),
+      "SELECT r.resource_id FROM resources r "
+      "JOIN card_links l ON l.to_card_id = r.resource_id AND l.project_id = r.project_id "
+      "JOIN cards c ON c.card_id = l.from_card_id AND c.project_id = l.project_id "
+      "WHERE r.project_id = ? AND c.card_id = ? AND c.deleted_at IS NULL "
+      "AND l.to_type = 'resource' AND l.kind = 'attachment' "
+      "ORDER BY r.updated_at DESC, r.resource_id LIMIT ? OFFSET ?;",
+      "prepare list card resources failed"
+  );
+  bind_text(stmt.get(), 1, project_id);
+  bind_text(stmt.get(), 2, card_id);
+  bind_int64(stmt.get(), 3, limit);
+  bind_int64(stmt.get(), 4, offset);
+  std::vector<holder::model::Resource> resources;
+  while (true) {
+    const int rc = sqlite3_step(stmt.get());
+    if (rc == SQLITE_DONE) break;
+    if (rc != SQLITE_ROW) {
+      throw std::runtime_error(std::string("list card resources failed: ") + sqlite3_errmsg(db_.handle()));
+    }
+    resources.push_back(get(text_column(stmt.get(), 0)).value());
+  }
+  return resources;
+}
+
 void ResourceRepo::remove(const std::string& resource_id) {
   Statement stmt(db_.handle(), "DELETE FROM resources WHERE resource_id = ?;", "prepare remove resource failed");
   bind_text(stmt.get(), 1, resource_id);

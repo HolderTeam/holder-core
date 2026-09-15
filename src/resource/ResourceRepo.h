@@ -23,6 +23,11 @@ class ResourceRepo {
   void put_bundle(const holder::model::ResourceBundle& bundle);
   void update(const holder::model::Resource& resource);
   std::vector<holder::model::Resource> list(const std::string& project_id) const;
+  // Authoritative live-card attachment join; unrelated link kinds/types are excluded.
+  std::vector<holder::model::Resource> list_for_card(
+      const std::string& project_id, const std::string& card_id,
+      int limit = 100, int offset = 0
+  ) const;
   void remove(const std::string& resource_id);
   void remove_project(const std::string& project_id);
 
