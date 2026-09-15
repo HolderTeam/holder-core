@@ -326,6 +326,34 @@ static git_remote_callbacks make_remote_callbacks(GitCredentialProvider* provide
   return callbacks;
 }
 
+struct PushCallbackPayload {
+  GitCredentialProvider* credentials;
+  bool changed = false;
+};
+
+static git_remote_callbacks make_push_callbacks(PushCallbackPayload& payload) {
+  auto callbacks = make_remote_callbacks(payload.credentials);
+  callbacks.payload = &payload;
+  callbacks.credentials = [](git_credential** out,
+                             const char* url,
+                             const char* username,
+                             unsigned int allowed_types,
+                             void* data) {
+    auto& push = *static_cast<PushCallbackPayload*>(data);
+    return git_credential_acquire_cb(out, url, username, allowed_types, push.credentials);
+  };
+  callbacks.push_negotiation = [](const git_push_update** updates, size_t count, void* data) {
+    auto& push = *static_cast<PushCallbackPayload*>(data);
+    // Negotiation compares actual remote refs with the requested refs, without
+    // a separate fetch or relying on potentially stale remote-tracking refs.
+    for (size_t i = 0; i < count; ++i) {
+      if (!git_oid_equal(&updates[i]->src, &updates[i]->dst)) push.changed = true;
+    }
+    return 0;
+  };
+  return callbacks;
+}
+
 static std::string trim_ref_prefix(const std::string& refname, const std::string& prefix) {
   if (refname.rfind(prefix, 0) == 0) {
     return refname.substr(prefix.size());
@@ -920,7 +948,8 @@ PushResult GitRepo::push_branch(
   git_push_options push_opts{};
   rc = git_push_options_init(&push_opts, GIT_PUSH_OPTIONS_VERSION);
   if (rc != 0) throw git_err("git_push_options_init failed", rc); // LCOV_EXCL_LINE
-  push_opts.callbacks = make_remote_callbacks(credential_provider_.get());
+  PushCallbackPayload push_payload{credential_provider_.get()};
+  push_opts.callbacks = make_push_callbacks(push_payload);
   rc = git_remote_push(remote, &refspecs, &push_opts);
   if (rc != 0) {
     const std::string error = git_error_message_or_default("git_remote_push failed");
@@ -947,7 +976,7 @@ PushResult GitRepo::push_branch(
 
   git_remote_free(remote);
   return {
-      .status = PushStatus::Pushed,
+      .status = push_payload.changed ? PushStatus::Pushed : PushStatus::UpToDate,
       .ahead_count = 0,
       .behind_count = 0,
       .local_head_commit = local_head_commit,
