@@ -56,6 +56,15 @@ class GitOps {
   virtual void remove_remote(const std::string& name) = 0;
   virtual void pull_remote_ff_only(const std::string& name) = 0;
   virtual RemoteProbeResult probe_remote(const std::string& name) = 0;
+  // Probe an explicit URL without opening or changing a repository. Implementations
+  // must reuse their configured credential provider. No fetch or ref updates occur.
+  virtual RemoteProbeResult probe_remote_url(const std::string&) {
+    return {
+        RemoteProbeStatus::UnknownError,
+        false,
+        "URL probes are not supported by this Git adapter."
+    };
+  }
   virtual PushResult push_branch(
       const std::string& name,
       const std::string& branch,
@@ -80,6 +89,7 @@ class RealGitOps final : public GitOps {
   void remove_remote(const std::string& name) override;
   void pull_remote_ff_only(const std::string& name) override;
   RemoteProbeResult probe_remote(const std::string& name) override;
+  RemoteProbeResult probe_remote_url(const std::string& url) override;
   PushResult push_branch(const std::string& name, const std::string& branch, bool set_upstream)
       override;
   std::filesystem::path repo_dir() const override;
