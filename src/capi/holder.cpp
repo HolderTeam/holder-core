@@ -32,6 +32,7 @@
 #include "resource/ResourceRepo.h"
 #include "resource/ResourceStore.h"
 #include "resource/StorageProvider.h"
+#include "sync/ProjectSyncOperation.h"
 #include "sync/ProjectSyncPolicy.h"
 #include "sync/PullConflictResolution.h"
 
@@ -3554,60 +3555,28 @@ int holder_git_pull(
   }
 
   try {
-    holder::project::ProjectRepo repo(context->db);
-    holder::project::ProjectSyncRepo sync_repo(context->db);
-    const auto project_opt = repo.get(project_id);
-    if (!project_opt.has_value()) {
-      return set_error(out_error, HOLDER_ERROR_RUNTIME, "project not found: " + std::string(project_id));
-    }
-    const auto& project = project_opt.value();
-    const auto now = now_epoch_seconds();
-
-    nlohmann::json body = {{"project_id", project_id}};
-
-    if (!project.git_remote_url.has_value() || project.git_remote_url->empty()) {
-      sync_repo.record_pull_result(
-          project_id,
-          "failed",
-          false,
-          std::optional<std::string>{"Remote URL is not configured."},
-          now
-      );
-      body["status"] = "failed";
-      body["error_message"] = "Remote URL is not configured.";
-    } else {
-      auto git = make_project_git(context);
-      auto operation = git->lock_operation(project.root_path);
-      git->open_or_init(project.root_path);
-      git->set_remote("origin", project.git_remote_url.value());
-      try {
-        git->pull_remote_ff_only("origin");
-        rebuild_project_index(context, project);
-        sync_repo.record_pull_result(project_id, "succeeded", true, std::nullopt, now);
-        body["status"] = "succeeded";
-        body["error_message"] = nullptr;
-        body["conflicts_resolved"] = 0;
-      } catch (const holder::git::NonFastForwardPullError& diverged) {
-        const int resolved = resolve_pull_conflicts(context, project, *git, diverged, now);
-        rebuild_project_index(context, project);
-        sync_repo.record_pull_result(project_id, "succeeded", true, std::nullopt, now);
-        body["status"] = "succeeded";
-        body["error_message"] = nullptr;
-        body["conflicts_resolved"] = resolved;
-      } catch (const std::exception& e) {
-        sync_repo.record_pull_result(project_id, "failed", false, std::optional<std::string>(e.what()), now);
-        body["status"] = "failed";
-        body["error_message"] = e.what();
-      }
-      try {
-        refresh_sync_activity_counts(context->db, project_id, project.root_path, now);
-      // LCOV_EXCL_START -- refresh_sync_activity_counts only throws if the repo dir is an
-      // unreadable/corrupted git repo at this exact moment, not practically triggerable
-      // right after a successful push/pull/import against it.
-      } catch (const std::exception&) {
-        // Best-effort only; metrics refresh failure does not fail pull response.
-      }
-      // LCOV_EXCL_STOP
+    auto git = make_project_git(context);
+    const auto result = holder::sync::run_project_sync(
+        context->db,
+        &context->fts,
+        *git,
+        project_id,
+        {.pull = true, .push = false, .push_after_failed_pull = false, .branch = "",
+         .set_upstream = true,
+         .now = now_epoch_seconds()}
+    );
+    nlohmann::json body = {
+        {"project_id", project_id},
+        {"status",
+         result.pull.status == holder::sync::PullPhaseStatus::RemoteUnset
+             ? "failed"
+             : holder::sync::pull_phase_status_name(result.pull.status)},
+        {"error_message",
+         result.pull.error_message.has_value() ? nlohmann::json(*result.pull.error_message)
+                                               : nlohmann::json(nullptr)},
+    };
+    if (result.pull.status == holder::sync::PullPhaseStatus::Succeeded) {
+      body["conflicts_resolved"] = result.pull.conflicts_resolved;
     }
 
     auto* out = duplicate_string(body.dump());
@@ -3722,11 +3691,6 @@ int holder_git_sync_if_due(
     }
 
     const auto now = now_epoch_seconds();
-    auto git = make_project_git(context);
-    auto operation = git->lock_operation(project.root_path);
-    git->open_or_init(project.root_path);
-    git->set_remote("origin", project.git_remote_url.value());
-
     const auto state = sync_repo.get(project_id);
     holder::sync::PullDecisionInput pull_input{
         .last_pull_at = state.has_value() ? state->last_pull_at : std::optional<long long>{},
@@ -3735,92 +3699,36 @@ int holder_git_sync_if_due(
     };
     if (pull_interval_seconds > 0) pull_input.pull_interval_seconds = pull_interval_seconds;
 
-    if (holder::sync::should_attempt_pull(pull_input)) {
-      body["pull_attempted"] = true;
-      try {
-        git->pull_remote_ff_only("origin");
-        rebuild_project_index(context, project);
-        sync_repo.record_pull_result(project_id, "succeeded", true, std::nullopt, now);
-        body["pull_status"] = "succeeded";
-      } catch (const holder::git::NonFastForwardPullError& diverged) {
-        body["pull_conflicts_resolved"] = resolve_pull_conflicts(context, project, *git, diverged, now);
-        rebuild_project_index(context, project);
-        sync_repo.record_pull_result(project_id, "succeeded", true, std::nullopt, now);
-        body["pull_status"] = "succeeded";
-      } catch (const std::exception& e) {
-        sync_repo.record_pull_result(
-            project_id,
-            "failed",
-            false,
-            std::optional<std::string>(e.what()),
-            now
-        );
-        body["pull_status"] = "failed";
-        body["pull_error"] = std::string(e.what());
-      }
-      try {
-        refresh_sync_activity_counts(context->db, project_id, project.root_path, now);
-      // LCOV_EXCL_START -- refresh_sync_activity_counts only throws if the repo dir is an
-      // unreadable/corrupted git repo at this exact moment, not practically triggerable
-      // right after a successful push/pull/import against it.
-      } catch (const std::exception&) {
-        // Best-effort only; metrics refresh failure does not fail sync_if_due.
-      }
-      // LCOV_EXCL_STOP
-    }
-
-    // Re-read rather than reuse `state`: record_pull_result above may have
-    // just written this row, and push's decision should see that write even
-    // though it only reads push-specific fields.
-    const auto state_for_push = sync_repo.get(project_id);
+    const bool pull_due = holder::sync::should_attempt_pull(pull_input);
     holder::sync::PushDecisionInput push_input{
-        .last_push_at = state_for_push.has_value() ? state_for_push->last_push_at
-                                                    : std::optional<long long>{},
-        .next_retry_at = state_for_push.has_value() ? state_for_push->next_retry_at
-                                                     : std::optional<long long>{},
+        .last_push_at = state.has_value() ? state->last_push_at : std::optional<long long>{},
+        .next_retry_at = state.has_value() ? state->next_retry_at : std::optional<long long>{},
         .now = now,
     }; // LCOV_EXCL_LINE -- GCC attributes the already-executed aggregate initialization here.
     if (push_interval_seconds > 0) push_input.push_interval_seconds = push_interval_seconds;
+    const bool push_due = holder::sync::should_attempt_push(push_input);
 
-    if (holder::sync::should_attempt_push(push_input)) {
-      body["push_attempted"] = true;
-      try {
-        if (project.privacy_mode == "encrypted_git") {
-          holder::privacy::assert_encryption_push_safe(project.root_path);
-        }
-        const auto push = git->push_branch("origin", "", true);
-        const bool push_ok = push.status == holder::git::PushStatus::Pushed ||
-                             push.status == holder::git::PushStatus::UpToDate;
-        sync_repo.record_push_result(
-            project_id,
-            holder::git::push_status_name(push.status),
-            push_ok,
-            push.error_message.empty() ? std::optional<std::string>()
-                                       : std::optional<std::string>(push.error_message),
-            now
-        );
-        body["push_status"] = holder::git::push_status_name(push.status);
-        if (!push.error_message.empty()) body["push_error"] = push.error_message;
-      } catch (const std::exception& e) {
-        sync_repo.record_push_result(
-            project_id,
-            holder::git::push_status_name(holder::git::PushStatus::UnknownError),
-            false,
-            std::optional<std::string>(e.what()),
-            now
-        );
-        body["push_status"] = holder::git::push_status_name(holder::git::PushStatus::UnknownError);
-        body["push_error"] = std::string(e.what());
+    if (pull_due || push_due) {
+      auto git = make_project_git(context);
+      const auto result = holder::sync::run_project_sync(
+          context->db,
+          &context->fts,
+          *git,
+          project_id,
+          {.pull = pull_due, .push = push_due, .push_after_failed_pull = true, .branch = "",
+           .set_upstream = true, .now = now}
+      );
+      body["pull_attempted"] = result.pull.attempted;
+      if (result.pull.attempted) {
+        body["pull_status"] = holder::sync::pull_phase_status_name(result.pull.status);
+        body["pull_conflicts_resolved"] = result.pull.conflicts_resolved;
+        if (result.pull.error_message.has_value()) body["pull_error"] = *result.pull.error_message;
       }
-      try {
-        refresh_sync_activity_counts(context->db, project_id, project.root_path, now);
-      // LCOV_EXCL_START -- refresh_sync_activity_counts only throws if the repo dir is an
-      // unreadable/corrupted git repo at this exact moment, not practically triggerable
-      // right after a successful push/pull/import against it.
-      } catch (const std::exception&) {
-        // Best-effort only; metrics refresh failure does not fail sync_if_due.
+      body["push_attempted"] = result.push.attempted;
+      if (result.push.attempted) {
+        body["push_status"] = holder::git::push_status_name(result.push.status);
+        if (result.push.error_message.has_value()) body["push_error"] = *result.push.error_message;
       }
-      // LCOV_EXCL_STOP
     }
 
     auto* out = duplicate_string(body.dump());

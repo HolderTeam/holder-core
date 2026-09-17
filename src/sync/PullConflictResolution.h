@@ -32,7 +32,7 @@ int resolve_pull_conflicts(
     holder::platform::Db& db,
     holder::index::FtsIndexer* fts,
     const holder::model::Project& project,
-    holder::git::RealGitOps& git,
+    holder::git::GitOps& git,
     const holder::git::NonFastForwardPullError& diverged,
     long long now
 );

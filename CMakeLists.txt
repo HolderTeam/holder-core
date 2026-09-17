@@ -189,6 +189,7 @@ add_library(holder STATIC
   src/resource/ResourcePaths.cpp
   src/resource/ResourceRepo.cpp
   src/resource/ResourceStore.cpp
+  src/sync/ProjectSyncOperation.cpp
   src/sync/ProjectSyncPolicy.cpp
   src/sync/PullConflictResolution.cpp
 )
