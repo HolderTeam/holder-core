@@ -705,6 +705,45 @@ nlohmann::json milestone_to_json(const holder::model::Milestone& milestone) {
   return body;
 }
 
+// Parses the tri-state partial-update JSON documented on holder_card_milestone_update_json into
+// a holder::card::MilestoneUpdate. start_at/all_day have no has_* flag -- CardStore::update_milestone
+// treats nullopt as "unchanged" for them and they can never be explicitly cleared, so a present-
+// but-null value for either is a caller error.
+holder::card::MilestoneUpdate milestone_update_from_json(const nlohmann::json& body) {
+  holder::card::MilestoneUpdate update;
+  if (body.contains("start_at")) {
+    if (body.at("start_at").is_null()) {
+      throw std::invalid_argument("start_at must not be null");
+    }
+    update.start_at = body.at("start_at").get<long long>();
+  }
+  if (body.contains("all_day")) {
+    if (body.at("all_day").is_null()) {
+      throw std::invalid_argument("all_day must not be null");
+    }
+    update.all_day = body.at("all_day").get<bool>();
+  }
+  if (body.contains("end_at")) {
+    update.has_end_at = true;
+    if (!body.at("end_at").is_null()) {
+      update.end_at = body.at("end_at").get<long long>();
+    }
+  }
+  if (body.contains("kind")) {
+    update.has_kind = true;
+    if (!body.at("kind").is_null()) {
+      update.kind = body.at("kind").get<std::string>();
+    }
+  }
+  if (body.contains("description")) {
+    update.has_description = true;
+    if (!body.at("description").is_null()) {
+      update.description = body.at("description").get<std::string>();
+    }
+  }
+  return update;
+}
+
 // Adds card_title (null if unresolvable) for the project-wide range listing, where the caller
 // doesn't already know which card each milestone belongs to -- unlike the card-scoped list.
 nlohmann::json milestone_with_card_title_to_json(
@@ -2925,6 +2964,65 @@ int holder_card_milestone_add(
   } catch (...) {
     return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }  // LCOV_EXCL_LINE
+}
+
+int holder_card_milestone_update_json(
+    holder_context* context,
+    const char* project_id,
+    const char* card_id,
+    const char* milestone_id,
+    const char* update_json,
+    char** out_json,
+    holder_error** out_error
+) {
+  if (project_id == nullptr || project_id[0] == '\0') {
+    clear_error(out_error);
+    if (out_json != nullptr) *out_json = nullptr;
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "project_id must not be empty");
+  }
+  if (card_id == nullptr || card_id[0] == '\0') {
+    clear_error(out_error);
+    if (out_json != nullptr) *out_json = nullptr;
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "card_id must not be empty");
+  }
+  if (milestone_id == nullptr || milestone_id[0] == '\0') {
+    clear_error(out_error);
+    if (out_json != nullptr) *out_json = nullptr;
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "milestone_id must not be empty");
+  }
+  if (update_json == nullptr || update_json[0] == '\0') {
+    clear_error(out_error);
+    if (out_json != nullptr) *out_json = nullptr;
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "update_json must not be empty");
+  }
+  // start_at/all_day can never be explicitly cleared (see milestone_update_from_json / the doc
+  // comment on this function) -- checked here, ahead of with_json_output, so this specific
+  // caller mistake reports as HOLDER_ERROR_INVALID_ARGUMENT rather than the HOLDER_ERROR_RUNTIME
+  // that with_json_output's catch-all maps every other std::exception to. Malformed JSON falls
+  // through this try (silently) and is reported as HOLDER_ERROR_RUNTIME below, same as every
+  // other *_json capi function.
+  try {
+    const auto parsed = nlohmann::json::parse(update_json);
+    if ((parsed.contains("start_at") && parsed.at("start_at").is_null()) ||
+        (parsed.contains("all_day") && parsed.at("all_day").is_null())) {
+      clear_error(out_error);
+      if (out_json != nullptr) *out_json = nullptr;
+      return set_error(
+          out_error, HOLDER_ERROR_INVALID_ARGUMENT, "start_at and all_day must not be null"
+      );
+    }
+  } catch (const nlohmann::json::exception&) {
+    // Malformed JSON: fall through to with_json_output, which reports it as HOLDER_ERROR_RUNTIME.
+  }
+  return with_json_output(context, out_json, out_error, [&]() {
+    const auto update = milestone_update_from_json(nlohmann::json::parse(update_json));
+    const auto result = holder::card::CardStore(context->db, &context->fts)
+                             .update_milestone(project_id, card_id, milestone_id, update, now_epoch_seconds());
+    if (!result.has_value()) {
+      throw std::runtime_error("milestone not found: " + std::string(milestone_id));
+    }
+    return milestone_to_json(*result);
+  });
 }
 
 int holder_card_milestone_remove(

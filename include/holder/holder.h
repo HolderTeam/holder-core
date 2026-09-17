@@ -451,6 +451,31 @@ int holder_card_milestone_add(
     holder_error** out_error
 );
 
+// Partially updates one milestone, identified by project_id + card_id + milestone_id all
+// matching the same live card's milestone (CardStore::update_milestone's ownership check).
+// update_json fields follow tri-state partial-update semantics:
+//   - a key entirely absent from update_json means "leave this field unchanged"
+//   - "start_at" (integer, required if present) and "all_day" (bool, required if present)
+//     can never be explicitly cleared -- if the key is present its value must not be JSON
+//     null, or this returns HOLDER_ERROR_INVALID_ARGUMENT
+//   - "end_at" (integer or null), "kind" (string or null), "description" (string or null):
+//     present with a value sets it, present as JSON null explicitly clears it, absent leaves
+//     it unchanged
+// Example update_json: {"start_at": 1234567890, "kind": "Renewal", "end_at": null} changes the
+// start time and kind, clears any end time, and leaves all_day/description untouched.
+// Sets *out_json to the single updated milestone (same shape as one entry of
+// holder_card_milestone_add's list) on success. Returns HOLDER_ERROR_RUNTIME if project_id/
+// card_id/milestone_id don't all identify the same live card's milestone.
+int holder_card_milestone_update_json(
+    holder_context* context,
+    const char* project_id,
+    const char* card_id,
+    const char* milestone_id,
+    const char* update_json,
+    char** out_json,
+    holder_error** out_error
+);
+
 // Removes milestone_id from card_id, if present. A no-op, not an error, if
 // milestone_id doesn't exist or belongs to a different card.
 int holder_card_milestone_remove(

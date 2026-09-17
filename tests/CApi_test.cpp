@@ -2544,6 +2544,16 @@ TEST_CASE("C API reports invalid milestone arguments", "[capi]") {
   holder_error_destroy(error);
   error = nullptr;
 
+  REQUIRE(
+      holder_card_milestone_update_json(
+          nullptr, "project-1", "card-1", "mile-1", "{}", &json, &error
+      ) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(json == nullptr);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
   const auto data_dir = holder::test::make_temp_dir();
   seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
   const auto schema = read_schema_sql();
@@ -2582,6 +2592,32 @@ TEST_CASE("C API reports invalid milestone arguments", "[capi]") {
   error = nullptr;
 
   REQUIRE(
+      holder_card_milestone_update_json(context, "", "card-1", "mile-1", "{}", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+  REQUIRE(
+      holder_card_milestone_update_json(context, "project-1", "", "mile-1", "{}", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+  REQUIRE(
+      holder_card_milestone_update_json(context, "project-1", "card-1", "", "{}", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+  REQUIRE(
+      holder_card_milestone_update_json(
+          context, "project-1", "card-1", "mile-1", "", &json, &error
+      ) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
       holder_card_list_milestones(context, "missing-card", &json, &error) == HOLDER_ERROR_RUNTIME
   );
   holder_error_destroy(error);
@@ -2602,6 +2638,14 @@ TEST_CASE("C API reports invalid milestone arguments", "[capi]") {
   error = nullptr;
 
   REQUIRE(
+      holder_card_milestone_update_json(
+          context, "project-1", "missing-card", "mile-1", "{}", &json, &error
+      ) == HOLDER_ERROR_RUNTIME
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
       holder_card_list_milestones(context, "card-1", nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT
   );
   holder_error_destroy(error);
@@ -2615,6 +2659,13 @@ TEST_CASE("C API reports invalid milestone arguments", "[capi]") {
   REQUIRE(
       holder_project_list_milestones_in_range(context, "project-1", 0, 1000, nullptr, &error) ==
       HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+  REQUIRE(
+      holder_card_milestone_update_json(
+          context, "project-1", "card-1", "mile-1", "{}", nullptr, &error
+      ) == HOLDER_ERROR_INVALID_ARGUMENT
   );
   holder_error_destroy(error);
 
@@ -2732,6 +2783,128 @@ TEST_CASE(
   );
   REQUIRE(nlohmann::json::parse(json).empty());
   holder_string_free(json);
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API card_milestone_update_json applies tri-state partial updates", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_card_create(context, "project-1", "My Car", "content", nullptr, &json, &error) ==
+      HOLDER_OK
+  );
+  const std::string card_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(
+      holder_card_milestone_add(
+          context, card_id.c_str(), 1000, 1, 5000, 1, "Renewal", "Car insurance renewal", &json, &error
+      ) == HOLDER_OK
+  );
+  const std::string milestone_id =
+      nlohmann::json::parse(json)[0]["milestone_id"].get<std::string>();
+  holder_string_free(json);
+
+  // An empty update object is a no-op: everything stays exactly as it was.
+  json = nullptr;
+  REQUIRE(
+      holder_card_milestone_update_json(
+          context, "project-1", card_id.c_str(), milestone_id.c_str(), "{}", &json, &error
+      ) == HOLDER_OK
+  );
+  auto after_noop = nlohmann::json::parse(json);
+  REQUIRE(after_noop["start_at"] == 1000);
+  REQUIRE(after_noop["end_at"] == 5000);
+  REQUIRE(after_noop["all_day"] == true);
+  REQUIRE(after_noop["kind"] == "Renewal");
+  REQUIRE(after_noop["description"] == "Car insurance renewal");
+  holder_string_free(json);
+
+  // Updating start_at alone leaves kind/description/end_at/all_day untouched.
+  json = nullptr;
+  REQUIRE(
+      holder_card_milestone_update_json(
+          context, "project-1", card_id.c_str(), milestone_id.c_str(), R"({"start_at": 2000})",
+          &json, &error
+      ) == HOLDER_OK
+  );
+  auto after_start = nlohmann::json::parse(json);
+  REQUIRE(after_start["start_at"] == 2000);
+  REQUIRE(after_start["end_at"] == 5000);
+  REQUIRE(after_start["kind"] == "Renewal");
+  REQUIRE(after_start["description"] == "Car insurance renewal");
+  holder_string_free(json);
+
+  // Explicitly clearing end_at/kind/description via JSON null.
+  json = nullptr;
+  REQUIRE(
+      holder_card_milestone_update_json(
+          context, "project-1", card_id.c_str(), milestone_id.c_str(),
+          R"({"end_at": null, "kind": null, "description": null})", &json, &error
+      ) == HOLDER_OK
+  );
+  auto after_clear = nlohmann::json::parse(json);
+  REQUIRE(after_clear["start_at"] == 2000);
+  REQUIRE(after_clear["end_at"].is_null());
+  REQUIRE(after_clear["kind"].is_null());
+  REQUIRE(after_clear["description"].is_null());
+  holder_string_free(json);
+
+  // A present-but-null start_at is rejected -- it can never be cleared.
+  json = nullptr;
+  REQUIRE(
+      holder_card_milestone_update_json(
+          context, "project-1", card_id.c_str(), milestone_id.c_str(), R"({"start_at": null})",
+          &json, &error
+      ) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(json == nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  // A present-but-null all_day is likewise rejected.
+  json = nullptr;
+  REQUIRE(
+      holder_card_milestone_update_json(
+          context, "project-1", card_id.c_str(), milestone_id.c_str(), R"({"all_day": null})",
+          &json, &error
+      ) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(json == nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  // Mismatched project_id/card_id/milestone_id ownership is a runtime error.
+  json = nullptr;
+  REQUIRE(
+      holder_card_milestone_update_json(
+          context, "wrong-project", card_id.c_str(), milestone_id.c_str(), "{}", &json, &error
+      ) == HOLDER_ERROR_RUNTIME
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+  REQUIRE(
+      holder_card_milestone_update_json(
+          context, "project-1", "wrong-card", milestone_id.c_str(), "{}", &json, &error
+      ) == HOLDER_ERROR_RUNTIME
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+  REQUIRE(
+      holder_card_milestone_update_json(
+          context, "project-1", card_id.c_str(), "wrong-milestone", "{}", &json, &error
+      ) == HOLDER_ERROR_RUNTIME
+  );
+  holder_error_destroy(error);
+  error = nullptr;
 
   holder_context_destroy(context);
 }
