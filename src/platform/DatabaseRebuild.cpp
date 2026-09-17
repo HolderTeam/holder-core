@@ -2,6 +2,7 @@
 
 #include "ai/AiMessagePaths.h"
 #include "ai/AiThreadManifest.h"
+#include "card/CardPaths.h"
 #include "index/FtsIndexer.h"
 #include "platform/Migrations.h"
 #include "project/ProjectManifest.h"
@@ -360,9 +361,36 @@ void audit_core_durable_ownership(Db& db) {
       "SELECT root_path, '.holder/privacy.json' FROM projects "
       "UNION ALL SELECT root_path, '.holder/project.json' FROM projects;"
   );
-  require_file_rows(
-      db, "card", "SELECT p.root_path, c.rel_path FROM cards c JOIN projects p USING(project_id);"
-  );
+  // Not require_file_rows(db, "card", "... c.rel_path ..."): a trashed card's stored rel_path is
+  // never updated to its post-trash location -- CardStore::trash moves the file to
+  // card_trash_rel_path() and CardRepo::soft_delete only touches deleted_at/updated_at, exactly
+  // like every other soft-delete in this codebase (see the AI message audit just below, which
+  // already gets this right). Checking the stored rel_path as-is would report every trashed card
+  // as "missing" on every rebuild, which is not a rare edge case -- it fires for any project that
+  // has ever had a card trashed. Recompute the expected path from card_id + deleted_at instead of
+  // trusting the stored column, the same way CardStore and Rebuilder already do.
+  {
+    sqlite3_stmt* card_stmt = nullptr;
+    if (sqlite3_prepare_v2(
+            db.handle(),
+            "SELECT p.root_path, c.card_id, c.deleted_at FROM cards c JOIN projects p USING(project_id);",
+            -1, &card_stmt, nullptr
+        ) != SQLITE_OK) {
+      throw std::runtime_error("prepare durable ownership audit failed for card");
+    }
+    while (sqlite3_step(card_stmt) == SQLITE_ROW) {
+      const std::filesystem::path root =
+          reinterpret_cast<const char*>(sqlite3_column_text(card_stmt, 0));
+      const std::string id = reinterpret_cast<const char*>(sqlite3_column_text(card_stmt, 1));
+      const bool deleted = sqlite3_column_type(card_stmt, 2) != SQLITE_NULL;
+      const auto rel = deleted ? holder::core::card_trash_rel_path(id) : holder::core::card_rel_path(id);
+      if (!std::filesystem::is_regular_file(root / rel)) {
+        sqlite3_finalize(card_stmt);
+        throw std::runtime_error("card exists only in SQLite or has a missing durable file");
+      }
+    }
+    sqlite3_finalize(card_stmt);
+  }
 
   sqlite3_stmt* stmt = nullptr;
   if (sqlite3_prepare_v2(
