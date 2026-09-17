@@ -179,6 +179,25 @@ int holder_card_get_content(
     holder_error** out_error
 );
 
+// Resolves reference (a card id, an unambiguous id prefix, or an exact title) against
+// project_id's cards -- the same algorithm behind [[wikilink]] resolution in holder-daemon and
+// holderctl (see CardReferenceResolver). scope is 0 for live cards only, 1 for trashed only, or
+// 2 for either, matching holder::model::CardScope; any other value is an invalid argument.
+// Title matching is case-sensitive exact match only -- no fuzzy or case-insensitive fallback.
+// Sets *out_json to one of:
+//   {"status": "resolved", "match_kind": "full_id"|"id_prefix"|"exact_title", "card": {...}}
+//   {"status": "ambiguous", "match_kind": "id_prefix"|"exact_title", "candidates": [{...}, ...]}
+//   {"status": "not_found"}
+// "card" and each "candidates" entry use the same JSON shape as holder_card_list's entries.
+int holder_card_reference_resolve(
+    holder_context* context,
+    const char* project_id,
+    const char* reference,
+    int scope,
+    char** out_json,
+    holder_error** out_error
+);
+
 // privacy_mode may be NULL/empty, defaulting to "plain". root_path may be
 // NULL/empty, defaulting to a directory derived from the project name under
 // the context's data_dir.

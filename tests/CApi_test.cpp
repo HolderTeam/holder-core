@@ -856,6 +856,238 @@ TEST_CASE("C API reports invalid card get_content arguments", "[capi]") {
   holder_context_destroy(context);
 }
 
+TEST_CASE("C API resolves a card reference by full id", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* project_json = nullptr;
+  REQUIRE(holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
+  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>();
+  holder_string_free(project_json);
+
+  char* card_json = nullptr;
+  REQUIRE(
+      holder_card_create(context, project_id.c_str(), "Sourdough Notes", "body", nullptr, &card_json, &error) ==
+      HOLDER_OK
+  );
+  const std::string card_id = nlohmann::json::parse(card_json)["card_id"].get<std::string>();
+  holder_string_free(card_json);
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_card_reference_resolve(context, project_id.c_str(), card_id.c_str(), 0, &json, &error) ==
+      HOLDER_OK
+  );
+  REQUIRE(error == nullptr);
+  const auto result = nlohmann::json::parse(json);
+  REQUIRE(result.at("status") == "resolved");
+  REQUIRE(result.at("match_kind") == "full_id");
+  REQUIRE(result.at("card").at("card_id") == card_id);
+
+  holder_string_free(json);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API resolves a card reference by unambiguous id prefix", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* project_json = nullptr;
+  REQUIRE(holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
+  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>();
+  holder_string_free(project_json);
+
+  char* card_json = nullptr;
+  REQUIRE(
+      holder_card_create(context, project_id.c_str(), "Sourdough Notes", "body", nullptr, &card_json, &error) ==
+      HOLDER_OK
+  );
+  const std::string card_id = nlohmann::json::parse(card_json)["card_id"].get<std::string>();
+  holder_string_free(card_json);
+
+  const std::string prefix = card_id.substr(0, 8);
+  char* json = nullptr;
+  REQUIRE(
+      holder_card_reference_resolve(context, project_id.c_str(), prefix.c_str(), 0, &json, &error) ==
+      HOLDER_OK
+  );
+  REQUIRE(error == nullptr);
+  const auto result = nlohmann::json::parse(json);
+  REQUIRE(result.at("status") == "resolved");
+  REQUIRE(result.at("match_kind") == "id_prefix");
+  REQUIRE(result.at("card").at("card_id") == card_id);
+
+  holder_string_free(json);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API resolves a card reference by exact title", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* project_json = nullptr;
+  REQUIRE(holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
+  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>();
+  holder_string_free(project_json);
+
+  char* card_json = nullptr;
+  REQUIRE(
+      holder_card_create(context, project_id.c_str(), "Sourdough Notes", "body", nullptr, &card_json, &error) ==
+      HOLDER_OK
+  );
+  const std::string card_id = nlohmann::json::parse(card_json)["card_id"].get<std::string>();
+  holder_string_free(card_json);
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_card_reference_resolve(
+          context, project_id.c_str(), "Sourdough Notes", 0, &json, &error
+      ) == HOLDER_OK
+  );
+  REQUIRE(error == nullptr);
+  const auto result = nlohmann::json::parse(json);
+  REQUIRE(result.at("status") == "resolved");
+  REQUIRE(result.at("match_kind") == "exact_title");
+  REQUIRE(result.at("card").at("card_id") == card_id);
+
+  holder_string_free(json);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API reports ambiguous card reference for duplicate titles", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* project_json = nullptr;
+  REQUIRE(holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
+  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>();
+  holder_string_free(project_json);
+
+  char* card_json = nullptr;
+  REQUIRE(
+      holder_card_create(context, project_id.c_str(), "Duplicate", "first", nullptr, &card_json, &error) ==
+      HOLDER_OK
+  );
+  const std::string first_id = nlohmann::json::parse(card_json)["card_id"].get<std::string>();
+  holder_string_free(card_json);
+
+  card_json = nullptr;
+  REQUIRE(
+      holder_card_create(context, project_id.c_str(), "Duplicate", "second", nullptr, &card_json, &error) ==
+      HOLDER_OK
+  );
+  const std::string second_id = nlohmann::json::parse(card_json)["card_id"].get<std::string>();
+  holder_string_free(card_json);
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_card_reference_resolve(context, project_id.c_str(), "Duplicate", 0, &json, &error) ==
+      HOLDER_OK
+  );
+  REQUIRE(error == nullptr);
+  const auto result = nlohmann::json::parse(json);
+  REQUIRE(result.at("status") == "ambiguous");
+  REQUIRE(result.at("match_kind") == "exact_title");
+  REQUIRE(result.at("candidates").size() == 2);
+  const std::vector<std::string> candidate_ids = {
+      result.at("candidates")[0].at("card_id").get<std::string>(),
+      result.at("candidates")[1].at("card_id").get<std::string>(),
+  };
+  REQUIRE(std::find(candidate_ids.begin(), candidate_ids.end(), first_id) != candidate_ids.end());
+  REQUIRE(std::find(candidate_ids.begin(), candidate_ids.end(), second_id) != candidate_ids.end());
+
+  holder_string_free(json);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API reports not_found for an unresolved card reference", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* project_json = nullptr;
+  REQUIRE(holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
+  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>();
+  holder_string_free(project_json);
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_card_reference_resolve(context, project_id.c_str(), "Nonexistent Card", 0, &json, &error) ==
+      HOLDER_OK
+  );
+  REQUIRE(error == nullptr);
+  const auto result = nlohmann::json::parse(json);
+  REQUIRE(result.at("status") == "not_found");
+
+  holder_string_free(json);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API reports invalid card_reference_resolve arguments", "[capi]") {
+  holder_error* error = nullptr;
+  char* json = nullptr;
+
+  REQUIRE(
+      holder_card_reference_resolve(nullptr, "project-1", "ref", 0, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(json == nullptr);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  REQUIRE(
+      holder_card_reference_resolve(context, "", "ref", 0, &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(error != nullptr);
+  REQUIRE(std::string(holder_error_message(error)).find("project_id") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_card_reference_resolve(context, "project-1", "", 0, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(error != nullptr);
+  REQUIRE(std::string(holder_error_message(error)).find("reference") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_card_reference_resolve(context, "project-1", "ref", 3, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(error != nullptr);
+  REQUIRE(std::string(holder_error_message(error)).find("scope") != std::string::npos);
+  holder_error_destroy(error);
+
+  holder_context_destroy(context);
+}
+
 TEST_CASE("C API reports invalid card create arguments", "[capi]") {
   holder_error* error = nullptr;
   char* json = nullptr;

@@ -1,5 +1,6 @@
 #include "holder/holder.h"
 
+#include "card/CardReferenceResolver.h"
 #include "card/CardRepo.h"
 #include "card/CardStore.h"
 #include "card/LinkKindCatalog.h"
@@ -192,6 +193,31 @@ nlohmann::json card_to_json(const holder::model::Card& card) {
                            ? nlohmann::json(*card.deleted_at)
                            : nlohmann::json(nullptr);
   return body;
+}
+
+std::optional<holder::model::CardScope> card_scope_from_int(int scope) {
+  switch (scope) {
+    case 0:
+      return holder::model::CardScope::Live;
+    case 1:
+      return holder::model::CardScope::Trashed;
+    case 2:
+      return holder::model::CardScope::Either;
+    default:
+      return std::nullopt;
+  }
+}
+
+const char* card_reference_match_kind_to_string(holder::card::CardReferenceMatchKind match_kind) {
+  switch (match_kind) {
+    case holder::card::CardReferenceMatchKind::FullId:
+      return "full_id";
+    case holder::card::CardReferenceMatchKind::IdPrefix:
+      return "id_prefix";
+    case holder::card::CardReferenceMatchKind::ExactTitle:
+      return "exact_title";
+  }
+  return "exact_title"; // LCOV_EXCL_LINE -- exhaustive switch above covers every enumerator
 }
 
 nlohmann::json placement_to_json(const holder::model::Placement& placement) {
@@ -1795,6 +1821,81 @@ int holder_card_get_content(
     }
 
     *out_content = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
+  }  // LCOV_EXCL_LINE
+}
+
+int holder_card_reference_resolve(
+    holder_context* context,
+    const char* project_id,
+    const char* reference,
+    int scope,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (project_id == nullptr || project_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "project_id must not be empty");
+  }
+  if (reference == nullptr || reference[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "reference must not be empty");
+  }
+  const auto scope_enum = card_scope_from_int(scope);
+  if (!scope_enum.has_value()) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "scope must be 0, 1, or 2");
+  }
+
+  try {
+    holder::card::CardRepo repo(context->db);
+    holder::card::CardReferenceResolver resolver(repo);
+    const auto result = resolver.resolve(project_id, reference, *scope_enum);
+
+    nlohmann::json body;
+    switch (result.status) {
+      case holder::card::CardReferenceStatus::Resolved:
+        body = {
+            {"status", "resolved"},
+            {"match_kind", card_reference_match_kind_to_string(*result.match_kind)},
+            {"card", card_to_json(*result.card)},
+        };
+        break;
+      case holder::card::CardReferenceStatus::Ambiguous: {
+        nlohmann::json candidates = nlohmann::json::array();
+        for (const auto& candidate : result.candidates) {
+          candidates.push_back(card_to_json(candidate));
+        }
+        body = {
+            {"status", "ambiguous"},
+            {"match_kind", card_reference_match_kind_to_string(*result.match_kind)},
+            {"candidates", candidates},
+        };
+        break;
+      }
+      case holder::card::CardReferenceStatus::NotFound:
+        body = {{"status", "not_found"}};
+        break;
+    }
+
+    auto* out = duplicate_string(body.dump());
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+    }
+
+    *out_json = out;
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
     return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
