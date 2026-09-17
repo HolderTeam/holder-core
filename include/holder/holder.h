@@ -627,6 +627,20 @@ int holder_git_test_remote(
     holder_error** out_error
 );
 
+// Probes an explicit URL's reachability without touching any project's configured remote or
+// opening/changing any git repository -- nothing is written to disk and the URL is never
+// persisted anywhere. Uses whichever credential provider is currently registered (see
+// holder_keyring_set_provider) for auth, exactly like every other git network operation --
+// callers needing a specific project's identity for the auth handshake (e.g. an SSH remote)
+// must select it first, the same as before calling holder_git_pull/push/test_remote.
+// Sets *out_json to {url, status, remote_has_head, error_message}.
+int holder_git_probe_remote_url(
+    holder_context* context,
+    const char* url,
+    char** out_json,
+    holder_error** out_error
+);
+
 // Pushes the project's local branch to its configured remote. branch may be
 // NULL/empty to use the local HEAD's branch. Records the result into the
 // project's sync state (see holder_git_sync_status). Sets *out_json to

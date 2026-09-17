@@ -3174,6 +3174,70 @@ TEST_CASE("C API git_test_remote reports reachable for a local remote with commi
   holder_context_destroy(context);
 }
 
+TEST_CASE("C API git_probe_remote_url reports remote_unset for an empty URL", "[capi][git]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(holder_git_probe_remote_url(context, "", &json, &error) == HOLDER_OK);
+  const auto body = nlohmann::json::parse(json);
+  REQUIRE(body["status"] == "remote_unset");
+  REQUIRE(body["remote_has_head"] == false);
+  REQUIRE_FALSE(body["error_message"].is_null());
+
+  holder_string_free(json);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API git_probe_remote_url reports invalid_remote_url for a bad URL", "[capi][git]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_git_probe_remote_url(context, "not a valid url", &json, &error) == HOLDER_OK
+  );
+  const auto body = nlohmann::json::parse(json);
+  REQUIRE(body["status"] == "invalid_remote_url");
+  REQUIRE(body["remote_has_head"] == false);
+  REQUIRE_FALSE(body["error_message"].is_null());
+
+  holder_string_free(json);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API git_probe_remote_url reports reachable for a local bare remote", "[capi][git]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto remote_dir = data_dir / "remote";
+
+  holder::git::GitRepo remote_repo;
+  remote_repo.open_or_init(remote_dir);
+  remote_repo.write_file("cards/a.md", "seed");
+  remote_repo.stage_path("cards/a.md");
+  remote_repo.commit("seed");
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(holder_git_probe_remote_url(context, remote_dir.string().c_str(), &json, &error) == HOLDER_OK);
+  const auto body = nlohmann::json::parse(json);
+  REQUIRE(body["status"] == "reachable");
+  REQUIRE(body["remote_has_head"] == true);
+  REQUIRE(body["error_message"].is_null());
+
+  holder_string_free(json);
+  holder_context_destroy(context);
+}
+
 TEST_CASE("C API git_push reports remote_unset and records it in sync status", "[capi][git]") {
   const auto data_dir = holder::test::make_temp_dir();
   seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
@@ -5475,6 +5539,38 @@ TEST_CASE("C API reports remaining invalid git_test_remote arguments", "[capi]")
       holder_git_test_remote(context, "", nullptr, &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
   );
   REQUIRE(std::string(holder_error_message(error)).find("project_id") != std::string::npos);
+  holder_error_destroy(error);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API reports invalid git_probe_remote_url arguments", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  REQUIRE(
+      holder_git_probe_remote_url(context, "ssh://example", nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("out_json") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_git_probe_remote_url(nullptr, "ssh://example", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("context") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_git_probe_remote_url(context, nullptr, &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("url") != std::string::npos);
   holder_error_destroy(error);
   holder_context_destroy(context);
 }

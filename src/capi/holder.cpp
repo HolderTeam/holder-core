@@ -3434,6 +3434,52 @@ int holder_git_test_remote(
   }  // LCOV_EXCL_LINE
 }
 
+int holder_git_probe_remote_url(
+    holder_context* context,
+    const char* url,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (url == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "url must not be null");
+  }
+
+  try {
+    auto git = make_project_git(context);
+    const auto probe = git->probe_remote_url(url);
+
+    nlohmann::json body = {
+        {"url", url},
+        {"status", holder::git::remote_probe_status_name(probe.status)},
+        {"remote_has_head", probe.remote_has_head},
+        {"error_message", probe.error_message.empty() ? nlohmann::json(nullptr)
+                                                        : nlohmann::json(probe.error_message)},
+    };
+
+    auto* out = duplicate_string(body.dump());
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+    }
+    *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
+  }  // LCOV_EXCL_LINE
+}
+
 int holder_git_push(
     holder_context* context,
     const char* project_id,
