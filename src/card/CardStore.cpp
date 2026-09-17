@@ -592,6 +592,21 @@ void CardStore::trash(const std::string& card_id, long long deleted_at) {
   fs_->create_directories(dst_path.parent_path());
   fs_->rename(src_path, dst_path);
 
+  // Stamp the true deletion time into the durable file's own front matter before it's
+  // committed, not just into SQLite -- otherwise a later rebuild-from-source has nothing but
+  // the trash file's filesystem mtime to reconstruct deleted_at from, and mtime isn't preserved
+  // across git clone/checkout/backup-restore, so it silently drifts from the real trash time.
+  const auto raw = fs_->read_file(dst_path);
+  const auto plain = decode_card_blob(project, raw);
+  const auto parsed = holder::core::parse_card_file(plain);
+  auto trashed_card = card;
+  trashed_card.rel_path = trash_rel;
+  trashed_card.deleted_at = deleted_at;
+  trashed_card.updated_at = deleted_at;
+  const auto links = link_repo_.list_outgoing(card.project_id, card.card_id);
+  write_card_file(*git_, project, trashed_card, links, parsed.milestones, parsed.body);
+  assert_project_staged_blobs_safe(project, {trash_rel});
+
   card_repo_.soft_delete(card_id, deleted_at, deleted_at);
   if (fts_) {
     fts_->delete_card(card_id);
@@ -632,12 +647,18 @@ void CardStore::restore(const std::string& card_id, long long updated_at) {
   fs_->create_directories(dst_path.parent_path());
   fs_->rename(src_path, dst_path);
 
+  const auto raw = fs_->read_file(dst_path);
+  const auto parsed = holder::core::parse_card_file(decode_card_blob(project, raw));
+  auto restored_card = card;
+  restored_card.deleted_at.reset();
+  restored_card.updated_at = updated_at;
+  const auto links = link_repo_.list_outgoing(card.project_id, card.card_id);
+  write_card_file(*git_, project, restored_card, links, parsed.milestones, parsed.body);
+
   git_->stage_path(card.rel_path);
   assert_project_staged_blobs_safe(project, {card.rel_path});
 
   card_repo_.restore(card_id, updated_at);
-  const auto raw = fs_->read_file(dst_path);
-  const auto parsed = holder::core::parse_card_file(decode_card_blob(project, raw));
   if (fts_) {
     fts_->upsert_card(card.card_id, card.project_id, card.title, parsed.body);
   }

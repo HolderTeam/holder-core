@@ -1459,6 +1459,58 @@ TEST_CASE("CardStore trash/restore/hard_delete and get_content guards", "[cardst
   REQUIRE_THROWS((void)store.get_content(no_project));
 }
 
+TEST_CASE(
+    "CardStore stamps the real deleted_at into the durable file, not just SQLite",
+    "[cardstore]"
+) {
+  // Regression test: trash() used to only update the SQLite row, leaving the trash file's own
+  // front matter with deleted_at still unset. A later rebuild-from-source had nothing but the
+  // file's filesystem mtime to reconstruct deleted_at from -- and mtime isn't preserved across
+  // git clone/checkout/backup-restore, so the true trash time silently drifted or was lost.
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  const auto project_root = dir / "project_repo";
+  create_project(db, "proj-1", project_root.string());
+
+  holder::index::FtsIndexer fts(db);
+  holder::card::CardStore store(db, &fts);
+
+  holder::model::Card card;
+  card.card_id = "stampat1";
+  card.project_id = "proj-1";
+  card.title = "Stamped";
+  card.created_at = 1;
+  card.updated_at = 1;
+  store.create(card, "body");
+
+  store.trash(card.card_id, 999);
+
+  const auto trash_rel = holder::core::card_trash_rel_path(card.card_id);
+  std::ifstream trash_file(project_root / trash_rel, std::ios::binary);
+  const std::string trash_raw{
+      std::istreambuf_iterator<char>(trash_file), std::istreambuf_iterator<char>()
+  };
+  const auto trash_parsed = holder::core::parse_card_file(trash_raw);
+  REQUIRE(trash_parsed.card.deleted_at.has_value());
+  REQUIRE(trash_parsed.card.deleted_at.value() == 999);
+  REQUIRE(trash_parsed.card.updated_at == 999);
+  REQUIRE(trash_parsed.body == "body");
+
+  store.restore(card.card_id, 1000);
+
+  const auto live_rel = holder::core::card_rel_path(card.card_id);
+  std::ifstream live_file(project_root / live_rel, std::ios::binary);
+  const std::string live_raw{
+      std::istreambuf_iterator<char>(live_file), std::istreambuf_iterator<char>()
+  };
+  const auto live_parsed = holder::core::parse_card_file(live_raw);
+  REQUIRE_FALSE(live_parsed.card.deleted_at.has_value());
+  REQUIRE(live_parsed.card.updated_at == 1000);
+  REQUIRE(live_parsed.body == "body");
+}
+
 TEST_CASE("CardStore restores a historical card snapshot as a new commit", "[cardstore][history]") {
   const auto dir = make_temp_dir();
   holder::platform::Db db;
