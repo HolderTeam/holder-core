@@ -1088,6 +1088,168 @@ TEST_CASE("C API reports invalid card_reference_resolve arguments", "[capi]") {
   holder_context_destroy(context);
 }
 
+TEST_CASE("C API moves a card into another card", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* project_json = nullptr;
+  REQUIRE(holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
+  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>();
+  holder_string_free(project_json);
+
+  char* a_json = nullptr;
+  REQUIRE(holder_card_create(context, project_id.c_str(), "A", "body", nullptr, &a_json, &error) == HOLDER_OK);
+  const std::string a_id = nlohmann::json::parse(a_json)["card_id"].get<std::string>();
+  holder_string_free(a_json);
+
+  char* b_json = nullptr;
+  REQUIRE(holder_card_create(context, project_id.c_str(), "B", "body", nullptr, &b_json, &error) == HOLDER_OK);
+  const std::string b_id = nlohmann::json::parse(b_json)["card_id"].get<std::string>();
+  holder_string_free(b_json);
+
+  char* move_json = nullptr;
+  const std::string request = R"({"intent":"into","target_card_id":")" + b_id + "\"}";
+  REQUIRE(
+      holder_card_move_json(context, project_id.c_str(), a_id.c_str(), request.c_str(), &move_json, &error) ==
+      HOLDER_OK
+  );
+  REQUIRE(error == nullptr);
+  const auto result = nlohmann::json::parse(move_json);
+  REQUIRE(result.at("card_id") == a_id);
+  REQUIRE(result.at("parent_card_id") == b_id);
+  REQUIRE(result.at("moved_into_title") == "B");
+  REQUIRE(result.contains("sort_key"));
+  REQUIRE(result.contains("revision"));
+  holder_string_free(move_json);
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API move rejects a cycle, an unknown target, and an unknown intent", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* project_json = nullptr;
+  REQUIRE(holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
+  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>();
+  holder_string_free(project_json);
+
+  char* a_json = nullptr;
+  REQUIRE(holder_card_create(context, project_id.c_str(), "A", "body", nullptr, &a_json, &error) == HOLDER_OK);
+  const std::string a_id = nlohmann::json::parse(a_json)["card_id"].get<std::string>();
+  holder_string_free(a_json);
+
+  char* b_json = nullptr;
+  REQUIRE(
+      holder_card_create(context, project_id.c_str(), "B", "body", a_id.c_str(), &b_json, &error) == HOLDER_OK
+  );
+  const std::string b_id = nlohmann::json::parse(b_json)["card_id"].get<std::string>();
+  holder_string_free(b_json);
+
+  char* cycle_json = nullptr;
+  const std::string cycle_request = R"({"intent":"into","target_card_id":")" + b_id + "\"}";
+  REQUIRE(
+      holder_card_move_json(
+          context, project_id.c_str(), a_id.c_str(), cycle_request.c_str(), &cycle_json, &error
+      ) == HOLDER_ERROR_RUNTIME
+  );
+  REQUIRE(cycle_json == nullptr);
+  REQUIRE(error != nullptr);
+  REQUIRE(std::string(holder_error_message(error)) == "move_would_create_cycle");
+  holder_error_destroy(error);
+  error = nullptr;
+
+  char* missing_target_json = nullptr;
+  REQUIRE(
+      holder_card_move_json(
+          context,
+          project_id.c_str(),
+          a_id.c_str(),
+          R"({"intent":"into","target_card_id":"does-not-exist"})",
+          &missing_target_json,
+          &error
+      ) == HOLDER_ERROR_RUNTIME
+  );
+  REQUIRE(missing_target_json == nullptr);
+  REQUIRE(error != nullptr);
+  REQUIRE(std::string(holder_error_message(error)) == "target_not_found");
+  holder_error_destroy(error);
+  error = nullptr;
+
+  char* bad_intent_json = nullptr;
+  REQUIRE(
+      holder_card_move_json(
+          context,
+          project_id.c_str(),
+          a_id.c_str(),
+          R"({"intent":"teleport"})",
+          &bad_intent_json,
+          &error
+      ) == HOLDER_ERROR_RUNTIME
+  );
+  REQUIRE(bad_intent_json == nullptr);
+  REQUIRE(error != nullptr);
+  REQUIRE(std::string(holder_error_message(error)) == "invalid_move_intent");
+  holder_error_destroy(error);
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API reports invalid card move arguments", "[capi]") {
+  holder_error* error = nullptr;
+  char* json = nullptr;
+
+  REQUIRE(
+      holder_card_move_json(nullptr, "project-1", "card-1", R"({"intent":"up_level"})", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(json == nullptr);
+  REQUIRE(error != nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  REQUIRE(
+      holder_card_move_json(context, "", "card-1", R"({"intent":"up_level"})", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(error != nullptr);
+  REQUIRE(std::string(holder_error_message(error)).find("project_id") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_card_move_json(context, "project-1", "", R"({"intent":"up_level"})", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(error != nullptr);
+  REQUIRE(std::string(holder_error_message(error)).find("card_id") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_card_move_json(context, "project-1", "card-1", "", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(error != nullptr);
+  REQUIRE(std::string(holder_error_message(error)).find("request_json") != std::string::npos);
+  holder_error_destroy(error);
+
+  holder_context_destroy(context);
+}
+
 TEST_CASE("C API reports invalid card create arguments", "[capi]") {
   holder_error* error = nullptr;
   char* json = nullptr;

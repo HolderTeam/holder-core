@@ -1,5 +1,6 @@
 #include "holder/holder.h"
 
+#include "card/CardPlacementResolver.h"
 #include "card/CardReferenceResolver.h"
 #include "card/CardRepo.h"
 #include "card/CardStore.h"
@@ -742,6 +743,36 @@ holder::card::MilestoneUpdate milestone_update_from_json(const nlohmann::json& b
     }
   }
   return update;
+}
+
+holder::card::CardPlacementIntent card_placement_intent_from_string(const std::string& intent) {
+  if (intent == "into") return holder::card::CardPlacementIntent::Into;
+  if (intent == "before") return holder::card::CardPlacementIntent::Before;
+  if (intent == "after") return holder::card::CardPlacementIntent::After;
+  if (intent == "to_start") return holder::card::CardPlacementIntent::ToStart;
+  if (intent == "to_end") return holder::card::CardPlacementIntent::ToEnd;
+  if (intent == "left") return holder::card::CardPlacementIntent::Left;
+  if (intent == "right") return holder::card::CardPlacementIntent::Right;
+  if (intent == "up_level") return holder::card::CardPlacementIntent::UpLevel;
+  throw std::runtime_error("invalid_move_intent");
+}
+
+// Parses holder_card_move_json's request_json into a CardPlacementRequest. An unrecognized or
+// non-string "intent" throws "invalid_move_intent", matching CardPlacementResolver's own
+// vocabulary for that failure.
+holder::card::CardPlacementRequest card_placement_request_from_json(const nlohmann::json& body) {
+  if (!body.contains("intent") || !body.at("intent").is_string()) {
+    throw std::runtime_error("invalid_move_intent");
+  }
+  holder::card::CardPlacementRequest request;
+  request.intent = card_placement_intent_from_string(body.at("intent").get<std::string>());
+  if (body.contains("target_card_id") && !body.at("target_card_id").is_null()) {
+    request.target_card_id = body.at("target_card_id").get<std::string>();
+  }
+  if (body.contains("parent_card_id") && !body.at("parent_card_id").is_null()) {
+    request.parent_card_id = body.at("parent_card_id").get<std::string>();
+  }
+  return request;
 }
 
 // Adds card_title (null if unresolvable) for the project-wide range listing, where the caller
@@ -2054,6 +2085,60 @@ int holder_card_reference_resolve(
   } catch (...) {
     return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }  // LCOV_EXCL_LINE
+}
+
+int holder_card_move_json(
+    holder_context* context,
+    const char* project_id,
+    const char* card_id,
+    const char* request_json,
+    char** out_json,
+    holder_error** out_error
+) {
+  if (project_id == nullptr || project_id[0] == '\0') {
+    clear_error(out_error);
+    if (out_json != nullptr) *out_json = nullptr;
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "project_id must not be empty");
+  }
+  if (card_id == nullptr || card_id[0] == '\0') {
+    clear_error(out_error);
+    if (out_json != nullptr) *out_json = nullptr;
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "card_id must not be empty");
+  }
+  if (request_json == nullptr || request_json[0] == '\0') {
+    clear_error(out_error);
+    if (out_json != nullptr) *out_json = nullptr;
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "request_json must not be empty");
+  }
+
+  return with_json_output(context, out_json, out_error, [&]() {
+    const auto body = nlohmann::json::parse(request_json);
+    const auto request = card_placement_request_from_json(body);
+
+    holder::card::CardRepo card_repo(context->db);
+    holder::card::CardPlacementResolver resolver(card_repo);
+    const auto result = resolver.resolve(project_id, card_id, request);
+
+    holder::card::CardStore(context->db, &context->fts)
+        .move(card_id, true, result.parent_card_id, result.sort_key, now_epoch_seconds());
+
+    const auto moved = card_repo.get(card_id);
+    if (!moved.has_value()) {
+      throw std::runtime_error("card not found after move: " + std::string(card_id)); // LCOV_EXCL_LINE
+    }
+
+    nlohmann::json response;
+    response["card_id"] = moved->card_id;
+    response["parent_card_id"] = moved->parent_card_id.has_value()
+                                      ? nlohmann::json(moved->parent_card_id.value())
+                                      : nlohmann::json(nullptr);
+    response["sort_key"] = moved->sort_key;
+    response["revision"] = moved->updated_at;
+    response["moved_into_title"] = result.moved_into_title.has_value()
+                                        ? nlohmann::json(result.moved_into_title.value())
+                                        : nlohmann::json(nullptr);
+    return response;
+  });
 }
 
 int holder_project_create(

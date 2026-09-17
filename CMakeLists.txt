@@ -139,6 +139,7 @@ add_library(holder STATIC
   src/ai/AiThreadManifest.cpp
   src/card/CardFrontMatter.cpp
   src/card/CardPaths.cpp
+  src/card/CardPlacementResolver.cpp
   src/card/CardReferenceResolver.cpp
   src/card/CardRepo.cpp
   src/card/CardStore.cpp
