@@ -1135,7 +1135,9 @@ int holder_context_open(
             "not every project is under the managed project directory"
         );
       }
-      holder::platform::audit_core_durable_ownership(context->db);
+      holder::platform::audit_core_durable_ownership(
+          context->db, context->db_path.parent_path() / "quarantined-cards.json"
+      );
       holder::platform::mark_database_rebuild_ready(rebuild_readiness_path(context->data_dir));
     } catch (const std::exception&) {
       // A healthy legacy profile remains usable, but is deliberately not marked

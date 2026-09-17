@@ -14,6 +14,8 @@
 #include "project/ProjectManifest.h"
 #include "resource/ResourcePaths.h"
 
+#include <nlohmann/json.hpp>
+
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -222,7 +224,8 @@ TEST_CASE("Database durable ownership audit checks every Git-owned object kind",
       "'project-1234','Project','" + root.string() + "','plain',1,1);"
   );
 
-  REQUIRE_THROWS(holder::platform::audit_core_durable_ownership(db));
+  const auto quarantine_log = dir / "quarantined-cards.json";
+  REQUIRE_THROWS(holder::platform::audit_core_durable_ownership(db, quarantine_log));
   write_plain_project_manifest(root, "project-1234");
 
   db.exec(
@@ -231,25 +234,25 @@ TEST_CASE("Database durable ownership audit checks every Git-owned object kind",
       "INSERT INTO ai_messages(message_id,thread_id,role,source,content,created_at) VALUES("
       "'message-1234','thread-1234','user','local','Body',1);"
   );
-  REQUIRE_THROWS(holder::platform::audit_core_durable_ownership(db));
+  REQUIRE_THROWS(holder::platform::audit_core_durable_ownership(db, quarantine_log));
   write_file(root / holder::core::ai_message_rel_path("message-1234"));
-  REQUIRE_THROWS(holder::platform::audit_core_durable_ownership(db));
+  REQUIRE_THROWS(holder::platform::audit_core_durable_ownership(db, quarantine_log));
   write_file(root / holder::ai::ai_thread_manifest_rel_path("thread-1234"));
 
   db.exec(
       "INSERT INTO resources(resource_id,project_id,type,label,created_at,updated_at) VALUES("
       "'resource-1234','project-1234','thing','Resource',1,1);"
   );
-  REQUIRE_THROWS(holder::platform::audit_core_durable_ownership(db));
+  REQUIRE_THROWS(holder::platform::audit_core_durable_ownership(db, quarantine_log));
   write_file(root / holder::resource::resource_rel_path("resource-1234"));
 
   db.exec(
       "INSERT INTO storage_locations(location_id,project_id,name,provider,config_json,created_at,updated_at) "
       "VALUES('location-1234','project-1234','Location','local_directory','{}',1,1);"
   );
-  REQUIRE_THROWS(holder::platform::audit_core_durable_ownership(db));
+  REQUIRE_THROWS(holder::platform::audit_core_durable_ownership(db, quarantine_log));
   write_file(root / holder::resource::location_rel_path("location-1234"));
-  REQUIRE_NOTHROW(holder::platform::audit_core_durable_ownership(db));
+  REQUIRE(holder::platform::audit_core_durable_ownership(db, quarantine_log) == 0);
 }
 
 TEST_CASE(
@@ -262,9 +265,10 @@ TEST_CASE(
   // the same way every other soft-delete in this codebase leaves its rel_path/path column alone.
   // The audit must recompute the expected path from card_id + deleted_at (matching CardStore and
   // Rebuilder) rather than trusting the stored rel_path column, or every trashed card in every
-  // project would report as "missing" on every rebuild.
+  // project would report as quarantined on every rebuild.
   const auto dir = make_temp_dir();
   const auto root = dir / "project";
+  const auto quarantine_log = dir / "quarantined-cards.json";
   holder::platform::Db db;
   db.open(dir / "holder.db");
   db.exec(schema_sql());
@@ -275,46 +279,95 @@ TEST_CASE(
   write_plain_project_manifest(root, "project-1234");
 
   // rel_path stores the pre-trash location (as it would for a real trashed card); the file
-  // itself lives only at the trash path.
+  // itself lives only at the trash path. Write it *before* the card row exists, so the first
+  // audit call finds it at the correct (trash) path and never quarantines it.
+  write_file(root / holder::core::card_trash_rel_path("card-1234"));
   db.exec(
       "INSERT INTO cards(card_id, project_id, title, rel_path, sort_key, created_at, updated_at, "
       "deleted_at) VALUES('card-1234','project-1234','Card','" +
       holder::core::card_rel_path("card-1234") + "',0,1,1,2);"
   );
-  REQUIRE_THROWS(holder::platform::audit_core_durable_ownership(db));
-  write_file(root / holder::core::card_trash_rel_path("card-1234"));
-  REQUIRE_NOTHROW(holder::platform::audit_core_durable_ownership(db));
+  REQUIRE(holder::platform::audit_core_durable_ownership(db, quarantine_log) == 0);
+  {
+    sqlite3_stmt* stmt = nullptr;
+    REQUIRE(
+        sqlite3_prepare_v2(db.handle(), "SELECT COUNT(*) FROM cards WHERE card_id='card-1234';", -1, &stmt, nullptr) ==
+        SQLITE_OK
+    );
+    REQUIRE(sqlite3_step(stmt) == SQLITE_ROW);
+    CHECK(sqlite3_column_int(stmt, 0) == 1); // still present -- its file was found, nothing to quarantine
+    sqlite3_finalize(stmt);
+  }
+  REQUIRE_FALSE(std::filesystem::exists(quarantine_log));
 
-  // A trashed card whose file is missing from *both* locations is still a genuine problem and
-  // must still fail loudly, not be silently waved through.
+  // A trashed card whose file is missing from *both* locations is a genuine, real problem --
+  // but per this codebase's "1000 cards, one broken, the other 999 must still open" principle,
+  // that must quarantine the one card rather than block the whole store from opening.
   db.exec(
       "INSERT INTO cards(card_id, project_id, title, rel_path, sort_key, created_at, updated_at, "
       "deleted_at) VALUES('card-5678','project-1234','Card 2','" +
       holder::core::card_rel_path("card-5678") + "',1,1,1,2);"
   );
-  REQUIRE_THROWS(holder::platform::audit_core_durable_ownership(db));
+  REQUIRE(holder::platform::audit_core_durable_ownership(db, quarantine_log) == 1);
+  {
+    sqlite3_stmt* stmt = nullptr;
+    REQUIRE(
+        sqlite3_prepare_v2(db.handle(), "SELECT COUNT(*) FROM cards WHERE card_id='card-5678';", -1, &stmt, nullptr) ==
+        SQLITE_OK
+    );
+    REQUIRE(sqlite3_step(stmt) == SQLITE_ROW);
+    CHECK(sqlite3_column_int(stmt, 0) == 0); // quarantined: removed from the live projection
+    sqlite3_finalize(stmt);
+  }
+  REQUIRE(std::filesystem::is_regular_file(quarantine_log));
+  {
+    std::ifstream input(quarantine_log, std::ios::binary);
+    const auto logged = nlohmann::json::parse(input);
+    REQUIRE(logged.is_array());
+    REQUIRE(logged.size() == 1);
+    CHECK(logged[0].at("card_id") == "card-5678");
+    CHECK(logged[0].at("project_id") == "project-1234");
+    CHECK(logged[0].at("title") == "Card 2");
+    CHECK(logged[0].at("was_trashed") == true);
+  }
+
+  // A second, later quarantine event appends rather than overwrites the log.
+  db.exec(
+      "INSERT INTO cards(card_id, project_id, title, rel_path, sort_key, created_at, updated_at) "
+      "VALUES('card-9012','project-1234','Card 3','" + holder::core::card_rel_path("card-9012") +
+      "',2,1,1);"
+  );
+  REQUIRE(holder::platform::audit_core_durable_ownership(db, quarantine_log) == 1);
+  {
+    std::ifstream input(quarantine_log, std::ios::binary);
+    const auto logged = nlohmann::json::parse(input);
+    REQUIRE(logged.size() == 2);
+    CHECK(logged[1].at("card_id") == "card-9012");
+    CHECK(logged[1].at("was_trashed") == false); // a live card can be quarantined too
+  }
 }
 
 TEST_CASE("Database durable ownership audit reports prepare failures for every query",
           "[db][rebuild]") {
   const auto dir = make_temp_dir();
+  const auto quarantine_log = dir / "quarantined-cards.json";
   holder::platform::Db db;
   db.open(dir / "holder.db");
   db.exec(schema_sql());
 
   for (std::string table :
-       {"projects", "ai_messages", "ai_threads", "resources", "storage_locations"}) {
+       {"projects", "cards", "ai_messages", "ai_threads", "resources", "storage_locations"}) {
     REQUIRE(sqlite3_set_authorizer(db.handle(), deny_sqlite_read, &table) == SQLITE_OK);
-    REQUIRE_THROWS(holder::platform::audit_core_durable_ownership(db));
+    REQUIRE_THROWS(holder::platform::audit_core_durable_ownership(db, quarantine_log));
     REQUIRE(sqlite3_set_authorizer(db.handle(), nullptr, nullptr) == SQLITE_OK);
   }
 
   bool saw_thread_prepare = false;
-  for (int select = 1; select <= 12 && !saw_thread_prepare; ++select) {
+  for (int select = 1; select <= 20 && !saw_thread_prepare; ++select) {
     DenySelectAfter state{select};
     REQUIRE(sqlite3_set_authorizer(db.handle(), deny_nth_select, &state) == SQLITE_OK);
     try {
-      holder::platform::audit_core_durable_ownership(db);
+      holder::platform::audit_core_durable_ownership(db, quarantine_log);
     } catch (const std::exception& error) {
       saw_thread_prepare =
           std::string(error.what()).find("prepare AI thread ownership") !=

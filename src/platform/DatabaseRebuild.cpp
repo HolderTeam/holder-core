@@ -22,6 +22,7 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <vector>
 
 #ifndef _WIN32
 #include <fcntl.h>
@@ -241,6 +242,7 @@ std::string DatabaseRebuildReport::to_json() const {
       {"projects", projects}, {"cards", cards}, {"ai_threads", ai_threads},
       {"ai_messages", ai_messages}, {"resources", resources}, {"assets", assets},
       {"placements", placements}, {"locations", locations},
+      {"quarantined_cards", quarantined_cards},
       {"regenerated", {"card_tags", "full_text_search", "git_sync_status"}},
       {"reset", {"ai_run_history", "model_cooldowns", "transient_retry_state"}},
       {"warnings", nlohmann::json::array()},
@@ -355,42 +357,113 @@ void mark_database_rebuild_ready(const std::filesystem::path& readiness_path) {
   }
 }
 
-void audit_core_durable_ownership(Db& db) {
+// Reads quarantine_log_path's existing JSON array (best-effort -- a missing or unreadable log
+// starts fresh rather than blocking the rebuild that's trying to report into it) and atomically
+// rewrites it with new_entries appended. Entries accumulate across every rebuild that ever
+// quarantines something, so a device's full quarantine history stays inspectable in one place.
+void append_quarantine_log(const std::filesystem::path& quarantine_log_path, const nlohmann::json& new_entries) {
+  if (new_entries.empty()) return;
+  nlohmann::json existing = nlohmann::json::array();
+  if (std::filesystem::is_regular_file(quarantine_log_path)) {
+    try {
+      std::ifstream input(quarantine_log_path, std::ios::binary);
+      auto parsed = nlohmann::json::parse(input);
+      if (parsed.is_array()) existing = std::move(parsed);
+    } catch (const std::exception&) {
+      // A corrupt quarantine log must not itself block quarantining -- start a fresh one rather
+      // than throw. The old (unparseable) file is overwritten below.
+    }
+  }
+  for (const auto& entry : new_entries) existing.push_back(entry);
+
+  std::filesystem::create_directories(quarantine_log_path.parent_path());
+  auto temporary = quarantine_log_path;
+  temporary += ".tmp" + unique_temp_suffix();
+  {
+    std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+    if (!output) throw std::runtime_error("failed to write quarantine log");
+    output << existing.dump(2) << '\n';
+    output.flush();
+    if (!output) throw std::runtime_error("failed to flush quarantine log");
+  }
+  std::error_code ec;
+  std::filesystem::rename(temporary, quarantine_log_path, ec);
+  if (ec) {
+    std::filesystem::remove(temporary);
+    throw std::runtime_error("failed to replace quarantine log: " + ec.message());
+  }
+}
+
+// A card whose durable file is genuinely missing (not the trash-path case above, which is
+// resolved before this ever runs) is quarantined rather than treated as fatal: the row is
+// removed from the live projection and durably logged to quarantine_log_path, but every other
+// card -- a project can easily have hundreds -- still opens normally. One card that's actually
+// lost must never be a reason the other 999 become inaccessible. Returns the number quarantined,
+// for the caller's report.
+std::size_t quarantine_cards_with_missing_files(Db& db, const std::filesystem::path& quarantine_log_path) {
+  sqlite3_stmt* card_stmt = nullptr;
+  if (sqlite3_prepare_v2(
+          db.handle(),
+          "SELECT p.root_path, c.card_id, c.project_id, c.title, c.deleted_at FROM cards c "
+          "JOIN projects p USING(project_id);",
+          -1, &card_stmt, nullptr
+      ) != SQLITE_OK) {
+    throw std::runtime_error("prepare durable ownership audit failed for card");
+  }
+  std::vector<std::string> missing_ids;
+  nlohmann::json log_entries = nlohmann::json::array();
+  while (sqlite3_step(card_stmt) == SQLITE_ROW) {
+    const std::filesystem::path root =
+        reinterpret_cast<const char*>(sqlite3_column_text(card_stmt, 0));
+    const std::string id = reinterpret_cast<const char*>(sqlite3_column_text(card_stmt, 1));
+    const std::string project_id = reinterpret_cast<const char*>(sqlite3_column_text(card_stmt, 2));
+    const auto* title_text = reinterpret_cast<const char*>(sqlite3_column_text(card_stmt, 3));
+    const bool deleted = sqlite3_column_type(card_stmt, 4) != SQLITE_NULL;
+    const auto rel = deleted ? holder::core::card_trash_rel_path(id) : holder::core::card_rel_path(id);
+    if (!std::filesystem::is_regular_file(root / rel)) {
+      missing_ids.push_back(id);
+      log_entries.push_back({
+          {"card_id", id},
+          {"project_id", project_id},
+          {"title", title_text != nullptr ? std::string(title_text) : std::string()},
+          {"was_trashed", deleted},
+          {"quarantined_at",
+           std::chrono::duration_cast<std::chrono::seconds>(
+               std::chrono::system_clock::now().time_since_epoch()
+           ).count()},
+      });
+    }
+  }
+  sqlite3_finalize(card_stmt);
+
+  for (const auto& id : missing_ids) {
+    sqlite3_stmt* delete_stmt = nullptr;
+    if (sqlite3_prepare_v2(db.handle(), "DELETE FROM cards WHERE card_id = ?;", -1, &delete_stmt, nullptr) !=
+        SQLITE_OK) {
+      throw std::runtime_error("prepare card quarantine delete failed");
+    }
+    sqlite3_bind_text(delete_stmt, 1, id.c_str(), -1, SQLITE_TRANSIENT);
+    const int rc = sqlite3_step(delete_stmt);
+    sqlite3_finalize(delete_stmt);
+    if (rc != SQLITE_DONE) throw std::runtime_error("card quarantine delete failed");
+  }
+  append_quarantine_log(quarantine_log_path, log_entries);
+  return missing_ids.size();
+}
+
+std::size_t audit_core_durable_ownership(Db& db, const std::filesystem::path& quarantine_log_path) {
   require_file_rows(
       db, "project metadata",
       "SELECT root_path, '.holder/privacy.json' FROM projects "
       "UNION ALL SELECT root_path, '.holder/project.json' FROM projects;"
   );
-  // Not require_file_rows(db, "card", "... c.rel_path ..."): a trashed card's stored rel_path is
-  // never updated to its post-trash location -- CardStore::trash moves the file to
-  // card_trash_rel_path() and CardRepo::soft_delete only touches deleted_at/updated_at, exactly
-  // like every other soft-delete in this codebase (see the AI message audit just below, which
-  // already gets this right). Checking the stored rel_path as-is would report every trashed card
-  // as "missing" on every rebuild, which is not a rare edge case -- it fires for any project that
-  // has ever had a card trashed. Recompute the expected path from card_id + deleted_at instead of
-  // trusting the stored column, the same way CardStore and Rebuilder already do.
-  {
-    sqlite3_stmt* card_stmt = nullptr;
-    if (sqlite3_prepare_v2(
-            db.handle(),
-            "SELECT p.root_path, c.card_id, c.deleted_at FROM cards c JOIN projects p USING(project_id);",
-            -1, &card_stmt, nullptr
-        ) != SQLITE_OK) {
-      throw std::runtime_error("prepare durable ownership audit failed for card");
-    }
-    while (sqlite3_step(card_stmt) == SQLITE_ROW) {
-      const std::filesystem::path root =
-          reinterpret_cast<const char*>(sqlite3_column_text(card_stmt, 0));
-      const std::string id = reinterpret_cast<const char*>(sqlite3_column_text(card_stmt, 1));
-      const bool deleted = sqlite3_column_type(card_stmt, 2) != SQLITE_NULL;
-      const auto rel = deleted ? holder::core::card_trash_rel_path(id) : holder::core::card_rel_path(id);
-      if (!std::filesystem::is_regular_file(root / rel)) {
-        sqlite3_finalize(card_stmt);
-        throw std::runtime_error("card exists only in SQLite or has a missing durable file");
-      }
-    }
-    sqlite3_finalize(card_stmt);
-  }
+  // Cards are quarantined rather than audited-and-thrown -- see quarantine_cards_with_missing_files's
+  // doc comment. This also folds in the trash-path fix: a trashed card's stored rel_path is never
+  // updated to its post-trash location (CardStore::trash moves the file to card_trash_rel_path()
+  // and CardRepo::soft_delete only touches deleted_at/updated_at), so the expected path is always
+  // recomputed from card_id + deleted_at rather than trusting the stored column -- the same way
+  // CardStore, Rebuilder, and the AI message audit just below already do.
+  const std::size_t quarantined = quarantine_cards_with_missing_files(db, quarantine_log_path);
 
   sqlite3_stmt* stmt = nullptr;
   if (sqlite3_prepare_v2(
@@ -464,6 +537,7 @@ void audit_core_durable_ownership(Db& db) {
     }
   }
   sqlite3_finalize(stmt);
+  return quarantined;
 }
 
 DatabaseRebuildReport rebuild_database_projection(const DatabaseRebuildRequest& input) {
@@ -501,11 +575,13 @@ DatabaseRebuildReport rebuild_database_projection(const DatabaseRebuildRequest& 
     }
   }
 
+  const auto quarantine_log_path = request.database_path.parent_path() / "quarantined-cards.json";
   std::map<std::string, long long> old_counts;
+  std::size_t quarantined_cards = 0;
   if (health.health == DatabaseHealth::Healthy) {
     Db old_db;
     old_db.open(request.database_path);
-    audit_core_durable_ownership(old_db);
+    quarantined_cards = audit_core_durable_ownership(old_db, quarantine_log_path);
     if (request.hooks.audit_existing) request.hooks.audit_existing(old_db);
     old_counts = durable_counts(old_db);
     old_db.close();
@@ -514,6 +590,7 @@ DatabaseRebuildReport rebuild_database_projection(const DatabaseRebuildRequest& 
   DatabaseRebuildReport report;
   report.dry_run = request.dry_run;
   report.previous_health = health_name(health.health);
+  report.quarantined_cards = quarantined_cards;
   auto temporary = request.database_path;
   temporary += ".rebuild.tmp";
   for (const auto& artifact : {

@@ -47,6 +47,12 @@ struct DatabaseRebuildReport {
   std::size_t assets = 0;
   std::size_t placements = 0;
   std::size_t locations = 0;
+  // Cards whose durable file was genuinely missing (not the trashed-card path case, which is
+  // resolved automatically) and were removed from the projection rather than blocking the whole
+  // rebuild -- see quarantine_cards_with_missing_files. 0 in the overwhelmingly common case.
+  // Full detail (card_id, project_id, title, was it trashed, when) is durably logged separately;
+  // see quarantine_log_path in the request.
+  std::size_t quarantined_cards = 0;
   std::filesystem::path backup_path;
 
   std::string to_json() const;
@@ -55,7 +61,10 @@ struct DatabaseRebuildReport {
 DatabaseHealthResult inspect_database_health(const std::filesystem::path& path);
 bool database_rebuild_is_ready(const std::filesystem::path& readiness_path);
 void mark_database_rebuild_ready(const std::filesystem::path& readiness_path);
-void audit_core_durable_ownership(Db& db);
+// quarantine_log_path: where quarantined cards' details accumulate (see
+// DatabaseRebuildReport::quarantined_cards). Cards whose durable file cannot be found are removed
+// from db and logged here rather than causing this to throw. Returns the number quarantined.
+std::size_t audit_core_durable_ownership(Db& db, const std::filesystem::path& quarantine_log_path);
 DatabaseRebuildReport rebuild_database_projection(const DatabaseRebuildRequest& request);
 
 } // namespace holder::platform
