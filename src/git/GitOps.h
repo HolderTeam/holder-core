@@ -10,6 +10,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -70,6 +71,22 @@ class GitOps {
       const std::string& branch,
       bool set_upstream
   ) = 0;
+  // These operations are needed only when a pull reports divergence. Defaults keep
+  // lightweight adapters source-compatible while making pull orchestration reusable
+  // outside the C API's concrete RealGitOps path.
+  virtual GitRepo::DivergedMergeResult merge_remote_taking_theirs_for_conflicts(
+      const std::string&,
+      const std::string&,
+      const std::string&
+  ) {
+    throw std::runtime_error("Diverged pull resolution is not supported by this Git adapter.");
+  }
+  virtual std::optional<std::string> read_blob_at(
+      const std::string&,
+      const std::filesystem::path&
+  ) {
+    throw std::runtime_error("Historical blob reads are not supported by this Git adapter.");
+  }
   virtual std::filesystem::path repo_dir() const = 0;
 
  private:
@@ -94,18 +111,15 @@ class RealGitOps final : public GitOps {
       override;
   std::filesystem::path repo_dir() const override;
 
-  // Not part of the GitOps interface: only the C ABI's pull orchestration (which already holds
-  // a concrete RealGitOps, not a GitOps*) needs these, and every GitOps fake across the test
-  // suite would otherwise need a pointless stub override for methods it never exercises.
   GitRepo::DivergedMergeResult merge_remote_taking_theirs_for_conflicts(
       const std::string& name,
       const std::string& local_oid_hex,
       const std::string& remote_oid_hex
-  );
+  ) override;
   std::optional<std::string> read_blob_at(
       const std::string& commit_oid_hex,
       const std::filesystem::path& relative_path
-  );
+  ) override;
 
  private:
   GitRepo repo_;

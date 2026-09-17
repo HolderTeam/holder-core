@@ -50,6 +50,7 @@ add_executable(holder_core_tests
   ProjectRepo_test.cpp
   ProjectStore_test.cpp
   ProjectManifest_test.cpp
+  ProjectSyncOperation_test.cpp
   ProjectSyncPolicy_test.cpp
   ProjectSyncRepo_test.cpp
   PullConflictResolution_test.cpp
