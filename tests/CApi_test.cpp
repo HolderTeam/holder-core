@@ -3716,6 +3716,100 @@ TEST_CASE(
   holder_context_destroy(context);
 }
 
+TEST_CASE("C API git_sync_now is a no-op when no remote is configured", "[capi][git]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(holder_git_sync_now(context, "project-1", nullptr, 1, 1, &json, &error) == HOLDER_OK);
+  const auto body = nlohmann::json::parse(json);
+  REQUIRE(body["pull_attempted"] == false);
+  REQUIRE(body["push_attempted"] == false);
+
+  holder_string_free(json);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API git_sync_now reports project not found", "[capi][git]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_git_sync_now(context, "does-not-exist", nullptr, 1, 1, &json, &error) ==
+      HOLDER_ERROR_RUNTIME
+  );
+  holder_error_destroy(error);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API git_sync_now pulls and pushes as one forced operation", "[capi][git]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto remote_dir = data_dir / "remote";
+  init_bare_repo(remote_dir);
+
+  // Peer A seeds the remote with an initial commit.
+  const auto writer_data_dir = holder::test::make_temp_dir();
+  seed_git_project(writer_data_dir, "project-1", writer_data_dir / "repo", remote_dir.string());
+  holder_context* writer_context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(
+      holder_context_open(writer_data_dir.string().c_str(), schema.c_str(), &writer_context, &error) ==
+      HOLDER_OK
+  );
+  char* json = nullptr;
+  REQUIRE(
+      holder_card_create(writer_context, "project-1", "From peer A", "body", nullptr, &json, &error) ==
+      HOLDER_OK
+  );
+  holder_string_free(json);
+  json = nullptr;
+  REQUIRE(holder_git_push(writer_context, "project-1", nullptr, 1, &json, &error) == HOLDER_OK);
+  holder_string_free(json);
+  holder_context_destroy(writer_context);
+
+  // Peer B (under test): pulls peer A's commit first so it starts up to date, then creates its
+  // own card so it has something new to push, then a single holder_git_sync_now call must both
+  // pull (a trivial no-op fast-forward -- nothing new upstream) and push its new commit.
+  seed_git_project(data_dir, "project-1", data_dir / "repo", remote_dir.string());
+  holder_context* context = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  json = nullptr;
+  REQUIRE(holder_git_pull(context, "project-1", &json, &error) == HOLDER_OK);
+  REQUIRE(nlohmann::json::parse(json)["status"] == "succeeded");
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(
+      holder_card_create(context, "project-1", "From peer B", "body", nullptr, &json, &error) ==
+      HOLDER_OK
+  );
+  holder_string_free(json);
+
+  json = nullptr;
+  REQUIRE(holder_git_sync_now(context, "project-1", nullptr, 1, 1, &json, &error) == HOLDER_OK);
+  const auto body = nlohmann::json::parse(json);
+  REQUIRE(body["pull_attempted"] == true);
+  REQUIRE(body["pull_status"] == "succeeded");
+  REQUIRE(body["push_attempted"] == true);
+  REQUIRE(body["push_status"] == "pushed");
+  REQUIRE(body["push_ahead_count"] == 0);
+  REQUIRE_FALSE(body["push_local_head_commit"].is_null());
+  holder_string_free(json);
+
+  holder_context_destroy(context);
+}
+
 TEST_CASE("C API git_pull reports a real fetch failure as a failed status", "[capi][git]") {
   // A genuinely empty bare remote (no commits, no refs) fails pull_remote_ff_only with a plain
   // exception rather than NonFastForwardPullError -- there's nothing to diverge from.
@@ -5493,6 +5587,38 @@ TEST_CASE("C API reports invalid git_sync_if_due arguments", "[capi]") {
 
   REQUIRE(
       holder_git_sync_if_due(context, "", 0, 0, &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("project_id") != std::string::npos);
+  holder_error_destroy(error);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API reports invalid git_sync_now arguments", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  REQUIRE(
+      holder_git_sync_now(context, "project-1", nullptr, 1, 1, nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("out_json") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_git_sync_now(nullptr, "project-1", nullptr, 1, 1, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  REQUIRE(std::string(holder_error_message(error)).find("context") != std::string::npos);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_git_sync_now(context, "", nullptr, 1, 1, &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
   );
   REQUIRE(std::string(holder_error_message(error)).find("project_id") != std::string::npos);
   holder_error_destroy(error);

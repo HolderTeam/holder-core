@@ -689,6 +689,27 @@ int holder_git_sync_if_due(
     holder_error** out_error
 );
 
+// Runs pull-then-push as one serialized operation, unconditionally -- unlike
+// holder_git_sync_if_due, not gated by cadence. A failed pull always skips the push phase
+// (ProjectSyncRequest.push_after_failed_pull is fixed at false here; this is what makes it safe
+// to call pull and push "together" rather than as two independent operations). branch may be
+// NULL/empty to use the local HEAD's branch. push may be 0 for a pull-only forced sync. Records
+// both phases' results into the project's sync state, the same as calling pull/push separately
+// would.
+// Sets *out_json to {project_id, pull_attempted, pull_status, pull_error,
+// pull_conflicts_resolved, push_attempted, push_status, push_error, push_ahead_count,
+// push_behind_count, push_local_head_commit}, where each pull_*/push_* result field is only
+// meaningful when its own *_attempted is true.
+int holder_git_sync_now(
+    holder_context* context,
+    const char* project_id,
+    const char* branch,
+    int push,
+    int set_upstream,
+    char** out_json,
+    holder_error** out_error
+);
+
 // -- Platform keyring --
 //
 // Encrypted projects, and other secrets (e.g. AI provider credentials), are

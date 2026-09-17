@@ -3746,6 +3746,103 @@ int holder_git_sync_if_due(
   }  // LCOV_EXCL_LINE
 }
 
+int holder_git_sync_now(
+    holder_context* context,
+    const char* project_id,
+    const char* branch,
+    int push,
+    int set_upstream,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (project_id == nullptr || project_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "project_id must not be empty");
+  }
+
+  try {
+    holder::project::ProjectRepo repo(context->db);
+    const auto project_opt = repo.get(project_id);
+    if (!project_opt.has_value()) {
+      return set_error(out_error, HOLDER_ERROR_RUNTIME, "project not found: " + std::string(project_id));
+    }
+    const auto& project = project_opt.value();
+
+    nlohmann::json body = {
+        {"project_id", project_id},
+        {"pull_attempted", false},
+        {"pull_status", nullptr},
+        {"pull_error", nullptr},
+        {"pull_conflicts_resolved", 0},  // LCOV_EXCL_LINE
+        {"push_attempted", false},
+        {"push_status", nullptr},
+        {"push_error", nullptr},
+        {"push_ahead_count", 0},
+        {"push_behind_count", 0},
+        {"push_local_head_commit", nullptr},
+    };
+
+    if (!project.git_remote_url.has_value() || project.git_remote_url->empty()) {
+      auto* out = duplicate_string(body.dump());
+      if (out == nullptr) {
+        return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+      }
+      *out_json = out;
+      return HOLDER_OK;
+    }
+
+    auto git = make_project_git(context);
+    const auto result = holder::sync::run_project_sync(
+        context->db,
+        &context->fts,
+        *git,
+        project_id,
+        {.pull = true, .push = (push != 0), .push_after_failed_pull = false,
+         .branch = branch != nullptr ? branch : "",
+         .set_upstream = set_upstream != 0,
+         .now = now_epoch_seconds()}
+    );
+
+    body["pull_attempted"] = result.pull.attempted;
+    if (result.pull.attempted) {
+      body["pull_status"] = holder::sync::pull_phase_status_name(result.pull.status);
+      body["pull_conflicts_resolved"] = result.pull.conflicts_resolved;
+      if (result.pull.error_message.has_value()) body["pull_error"] = *result.pull.error_message;
+    }
+    body["push_attempted"] = result.push.attempted;
+    if (result.push.attempted) {
+      body["push_status"] = holder::git::push_status_name(result.push.status);
+      if (result.push.error_message.has_value()) body["push_error"] = *result.push.error_message;
+      body["push_ahead_count"] = result.push.ahead_count;
+      body["push_behind_count"] = result.push.behind_count;
+      if (result.push.local_head_commit.has_value()) {
+        body["push_local_head_commit"] = *result.push.local_head_commit;
+      }
+    }
+
+    auto* out = duplicate_string(body.dump());
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+    }
+    *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
+  }  // LCOV_EXCL_LINE
+}
+
 int holder_keyring_set_provider(
     holder_keyring_lookup_fn lookup_fn,
     holder_keyring_store_fn store_fn,
