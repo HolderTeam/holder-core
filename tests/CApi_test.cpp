@@ -1296,6 +1296,279 @@ TEST_CASE("C API reports invalid card list_trashed/restore/purge arguments", "[c
   holder_context_destroy(context);
 }
 
+TEST_CASE("C API card_query_json reports invalid arguments", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  char* json = nullptr;
+  const auto clear_expected_error = [&]() {
+    REQUIRE(error != nullptr);
+    holder_error_destroy(error);
+    error = nullptr;
+  };
+
+  REQUIRE(
+      holder_card_query_json(context, "project-1", R"({"view": "all"})", nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  clear_expected_error();
+  REQUIRE(
+      holder_card_query_json(nullptr, "project-1", R"({"view": "all"})", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  clear_expected_error();
+  REQUIRE(
+      holder_card_query_json(context, "", R"({"view": "all"})", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  clear_expected_error();
+  REQUIRE(
+      holder_card_query_json(context, "project-1", "", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  clear_expected_error();
+  REQUIRE(
+      holder_card_query_json(context, "project-1", nullptr, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  clear_expected_error();
+
+  // Unrecognized "view".
+  REQUIRE(
+      holder_card_query_json(context, "project-1", R"({"view": "sideways"})", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  clear_expected_error();
+
+  // "children" without a parent_card_id (missing, then empty).
+  REQUIRE(
+      holder_card_query_json(context, "project-1", R"({"view": "children"})", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  clear_expected_error();
+  REQUIRE(
+      holder_card_query_json(
+          context, "project-1", R"({"view": "children", "parent_card_id": ""})", &json, &error
+      ) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  clear_expected_error();
+
+  // "recent" without a limit (missing, then non-positive).
+  REQUIRE(
+      holder_card_query_json(context, "project-1", R"({"view": "recent"})", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  clear_expected_error();
+  REQUIRE(
+      holder_card_query_json(context, "project-1", R"({"view": "recent", "limit": 0})", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  clear_expected_error();
+  REQUIRE(
+      holder_card_query_json(context, "project-1", R"({"view": "recent", "limit": -1})", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  clear_expected_error();
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API card_query_json roots/children/all views return the expected cards", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  const auto create_card =
+      [&](const std::string& title, const char* parent_card_id) -> std::string {
+    char* json = nullptr;
+    REQUIRE(
+        holder_card_create(context, "project-1", title.c_str(), "body", parent_card_id, &json, &error) ==
+        HOLDER_OK
+    );
+    const auto card_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
+    holder_string_free(json);
+    return card_id;
+  };
+
+  const std::string root1 = create_card("Root 1", nullptr);
+  const std::string root2 = create_card("Root 2", nullptr);
+  const std::string child1 = create_card("Child 1", root1.c_str());
+  const std::string child2 = create_card("Child 2", root1.c_str());
+
+  const auto titles_of = [](const nlohmann::json& cards) {
+    std::set<std::string> titles;
+    for (const auto& card : cards) titles.insert(card["title"].get<std::string>());
+    return titles;
+  };
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_card_query_json(context, "project-1", R"({"view": "roots"})", &json, &error) == HOLDER_OK
+  );
+  auto roots = nlohmann::json::parse(json)["cards"];
+  holder_string_free(json);
+  REQUIRE(roots.size() == 2);
+  REQUIRE(titles_of(roots) == std::set<std::string>{"Root 1", "Root 2"});
+
+  json = nullptr;
+  const std::string children_request =
+      R"({"view": "children", "parent_card_id": ")" + root1 + "\"}";
+  REQUIRE(
+      holder_card_query_json(context, "project-1", children_request.c_str(), &json, &error) == HOLDER_OK
+  );
+  auto children = nlohmann::json::parse(json)["cards"];
+  holder_string_free(json);
+  REQUIRE(children.size() == 2);
+  REQUIRE(titles_of(children) == std::set<std::string>{"Child 1", "Child 2"});
+  for (const auto& card : children) REQUIRE(card["parent_card_id"] == root1);
+
+  json = nullptr;
+  REQUIRE(
+      holder_card_query_json(context, "project-1", R"({"view": "all"})", &json, &error) == HOLDER_OK
+  );
+  auto all = nlohmann::json::parse(json)["cards"];
+  holder_string_free(json);
+  REQUIRE(all.size() == 4);
+  REQUIRE(
+      titles_of(all) == std::set<std::string>{"Root 1", "Root 2", "Child 1", "Child 2"}
+  );
+
+  // A parent with no children (view="children") comes back empty rather than throwing --
+  // matches CardRepo::list_children's own behavior for a nonexistent/childless parent_card_id.
+  json = nullptr;
+  const std::string empty_children_request =
+      R"({"view": "children", "parent_card_id": ")" + child1 + "\"}";
+  REQUIRE(
+      holder_card_query_json(context, "project-1", empty_children_request.c_str(), &json, &error) ==
+      HOLDER_OK
+  );
+  REQUIRE(nlohmann::json::parse(json)["cards"].empty());
+  holder_string_free(json);
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API card_query_json recent view paginates by cursor with no overlap", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  std::vector<std::string> card_ids;
+  for (const std::string& title : {"Oldest", "Middle", "Newest"}) {
+    char* json = nullptr;
+    REQUIRE(
+        holder_card_create(context, "project-1", title.c_str(), "body", nullptr, &json, &error) ==
+        HOLDER_OK
+    );
+    card_ids.push_back(nlohmann::json::parse(json)["card_id"].get<std::string>());
+    holder_string_free(json);
+  }
+
+  {
+    holder::platform::Db db;
+    db.open(data_dir / "server" / "holder.db");
+    holder::card::CardRepo card_repo(db);
+    card_repo.touch_updated(card_ids[0], 100); // Oldest
+    card_repo.touch_updated(card_ids[1], 200); // Middle
+    card_repo.touch_updated(card_ids[2], 300); // Newest
+  }
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_card_query_json(context, "project-1", R"({"view": "recent", "limit": 2})", &json, &error) ==
+      HOLDER_OK
+  );
+  auto page1 = nlohmann::json::parse(json)["cards"];
+  holder_string_free(json);
+  REQUIRE(page1.size() == 2);
+  REQUIRE(page1[0]["title"] == "Newest");
+  REQUIRE(page1[1]["title"] == "Middle");
+
+  const long long cursor_updated_at = page1[1]["updated_at"].get<long long>();
+  const std::string cursor_card_id = page1[1]["card_id"].get<std::string>();
+
+  json = nullptr;
+  const std::string page2_request = R"({"view": "recent", "limit": 2, "before_updated_at": )" +
+                                     std::to_string(cursor_updated_at) + R"(, "before_card_id": ")" +
+                                     cursor_card_id + "\"}";
+  REQUIRE(
+      holder_card_query_json(context, "project-1", page2_request.c_str(), &json, &error) == HOLDER_OK
+  );
+  auto page2 = nlohmann::json::parse(json)["cards"];
+  holder_string_free(json);
+  REQUIRE(page2.size() == 1);
+  REQUIRE(page2[0]["title"] == "Oldest");
+
+  std::set<std::string> page1_ids;
+  for (const auto& card : page1) page1_ids.insert(card["card_id"].get<std::string>());
+  for (const auto& card : page2) REQUIRE(page1_ids.count(card["card_id"].get<std::string>()) == 0);
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API card_query_json include_child_counts adds child_count per card", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  const auto create_card =
+      [&](const std::string& title, const char* parent_card_id) -> std::string {
+    char* json = nullptr;
+    REQUIRE(
+        holder_card_create(context, "project-1", title.c_str(), "body", parent_card_id, &json, &error) ==
+        HOLDER_OK
+    );
+    const auto card_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
+    holder_string_free(json);
+    return card_id;
+  };
+
+  const std::string parent = create_card("Parent", nullptr);
+  create_card("Child A", parent.c_str());
+  create_card("Child B", parent.c_str());
+  const std::string leaf = create_card("Leaf", nullptr);
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_card_query_json(
+          context, "project-1", R"({"view": "roots", "include_child_counts": true})", &json, &error
+      ) == HOLDER_OK
+  );
+  auto roots = nlohmann::json::parse(json)["cards"];
+  holder_string_free(json);
+  REQUIRE(roots.size() == 2);
+  for (const auto& card : roots) {
+    if (card["card_id"] == parent) {
+      REQUIRE(card["child_count"] == 2);
+    } else {
+      REQUIRE(card["card_id"] == leaf);
+      REQUIRE(card["child_count"] == 0);
+    }
+  }
+
+  // Default (omitted include_child_counts) never adds the field.
+  json = nullptr;
+  REQUIRE(
+      holder_card_query_json(context, "project-1", R"({"view": "roots"})", &json, &error) == HOLDER_OK
+  );
+  auto roots_no_counts = nlohmann::json::parse(json)["cards"];
+  holder_string_free(json);
+  for (const auto& card : roots_no_counts) REQUIRE_FALSE(card.contains("child_count"));
+
+  holder_context_destroy(context);
+}
+
 TEST_CASE(
     "C API backup_snapshot_page returns cards most-recently-updated first, with links/"
     "milestones and project fields, paginated by cursor",

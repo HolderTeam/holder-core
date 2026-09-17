@@ -119,6 +119,27 @@ int holder_card_list(
     holder_error** out_error
 );
 
+// Queries project_id's cards for one hierarchy/recency view, replacing several one-off list
+// calls with a single flexible query. request_json fields:
+//   "view": "roots" | "children" | "all" | "recent"  (required)
+//   "parent_card_id": "..."  -- required when view is "children"; ignored otherwise
+//   "before_updated_at": <int>, "before_card_id": "..."  -- optional "recent"-view pagination
+//     cursor (both omitted for the first page); ignored for other views
+//   "limit": <int>  -- required and >0 when view is "recent" (list_recent_page's page size);
+//     ignored for other views, which are unbounded like their underlying CardRepo methods
+//   "include_child_counts": <bool>  -- optional, default false; when true, adds "child_count"
+//     (int) to each returned card via CardRepo::count_children_not_deleted
+// Sets *out_json to {"cards": [...]}, each entry the same shape as holder_card_list's entries,
+// plus "child_count" when requested. Never includes soft-deleted cards (matching every
+// underlying CardRepo method used).
+int holder_card_query_json(
+    holder_context* context,
+    const char* project_id,
+    const char* request_json,
+    char** out_json,
+    holder_error** out_error
+);
+
 // The Android backup snapshot's query: project_id's cards, most-recently-updated first,
 // cursor-paginated (pass cursor_card_id as null/empty for the first page; for later pages,
 // pass back the previous response's next_cursor fields). Each returned card carries its own
@@ -194,6 +215,24 @@ int holder_card_reference_resolve(
     const char* project_id,
     const char* reference,
     int scope,
+    char** out_json,
+    holder_error** out_error
+);
+
+// Resolves a placement intent for card_id within project_id (see CardPlacementResolver for the
+// full algorithm and error vocabulary), then applies it via the existing CardStore::move.
+// request_json: {"intent": "into"|"before"|"after"|"to_start"|"to_end"|"left"|"right"|"up_level",
+// "target_card_id": "..." (required for into/before/after), "parent_card_id": "..." (optional,
+// to_start/to_end/left/right only, defaults to card_id's current parent)}.
+// Sets *out_json to {"card_id": ..., "parent_card_id": ...|null, "sort_key": ..., "revision": ...,
+// "moved_into_title": ...|null} on success -- the same shape holder-daemon's /move route already
+// returns, for consistency. Runtime errors use the exact message vocabulary documented on
+// CardPlacementResolver::resolve above (e.g. "move_would_create_cycle").
+int holder_card_move_json(
+    holder_context* context,
+    const char* project_id,
+    const char* card_id,
+    const char* request_json,
     char** out_json,
     holder_error** out_error
 );

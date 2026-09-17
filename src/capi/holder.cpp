@@ -1610,6 +1610,117 @@ int holder_card_list(
   }  // LCOV_EXCL_LINE
 }
 
+// Flexible card-listing query bundling CardRepo::list_roots/list_children/list_all/
+// list_recent_page (plus, optionally, count_children_not_deleted) behind one request_json
+// shape, so callers pick a view instead of the C API growing a one-off function per listing
+// need. See holder.h for request_json's field documentation.
+int holder_card_query_json(
+    holder_context* context,
+    const char* project_id,
+    const char* request_json,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (project_id == nullptr || project_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "project_id must not be empty");
+  }
+  if (request_json == nullptr || request_json[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "request_json must not be empty");
+  }
+
+  // Field validation ahead of with_json_output, mirroring holder_card_milestone_update_json's
+  // convention, so a bad "view"/"parent_card_id"/"limit" reports as HOLDER_ERROR_INVALID_ARGUMENT
+  // rather than the HOLDER_ERROR_RUNTIME that with_json_output's catch-all maps every other
+  // std::exception to. Malformed JSON itself falls through this try (silently) and is reported
+  // as HOLDER_ERROR_RUNTIME below, same as every other *_json capi function.
+  try {
+    const auto parsed = nlohmann::json::parse(request_json);
+    if (!parsed.contains("view") || !parsed.at("view").is_string()) {
+      return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "view must be a string");
+    }
+    const std::string view = parsed.at("view").get<std::string>();
+    if (view != "roots" && view != "children" && view != "all" && view != "recent") {
+      return set_error(
+          out_error, HOLDER_ERROR_INVALID_ARGUMENT,
+          R"(view must be one of "roots", "children", "all", "recent")"
+      );
+    }
+    if (view == "children" &&
+        (!parsed.contains("parent_card_id") || !parsed.at("parent_card_id").is_string() ||
+         parsed.at("parent_card_id").get<std::string>().empty())) {
+      return set_error(
+          out_error, HOLDER_ERROR_INVALID_ARGUMENT,
+          "parent_card_id must not be empty when view is \"children\""
+      );
+    }
+    if (view == "recent" &&
+        (!parsed.contains("limit") || !parsed.at("limit").is_number_integer() ||
+         parsed.at("limit").get<int>() <= 0)) {
+      return set_error(
+          out_error, HOLDER_ERROR_INVALID_ARGUMENT,
+          "limit must be a positive integer when view is \"recent\""
+      );
+    }
+  } catch (const nlohmann::json::exception&) {
+    // Malformed JSON: fall through to with_json_output, which reports it as HOLDER_ERROR_RUNTIME.
+  }
+
+  return with_json_output(context, out_json, out_error, [&]() {
+    const auto parsed = nlohmann::json::parse(request_json);
+    const std::string view = parsed.at("view").get<std::string>();
+    holder::card::CardRepo repo(context->db);
+
+    std::vector<holder::model::Card> cards;
+    if (view == "roots") {
+      cards = repo.list_roots(project_id);
+    } else if (view == "children") {
+      cards = repo.list_children(project_id, parsed.at("parent_card_id").get<std::string>());
+    } else if (view == "all") {
+      cards = repo.list_all(project_id);
+    } else { // "recent"
+      std::optional<long long> before_updated_at;
+      std::optional<std::string> before_card_id;
+      if (parsed.contains("before_updated_at") && !parsed.at("before_updated_at").is_null()) {
+        before_updated_at = parsed.at("before_updated_at").get<long long>();
+      }
+      if (parsed.contains("before_card_id") && !parsed.at("before_card_id").is_null()) {
+        before_card_id = parsed.at("before_card_id").get<std::string>();
+      }
+      cards = repo.list_recent_page(project_id, before_updated_at, before_card_id, parsed.at("limit").get<int>());
+    }
+
+    const bool include_child_counts = parsed.contains("include_child_counts") &&
+                                       parsed.at("include_child_counts").is_boolean() &&
+                                       parsed.at("include_child_counts").get<bool>();
+
+    nlohmann::json out_cards = nlohmann::json::array();
+    for (const auto& card : cards) {
+      // list_roots/list_children/list_all don't filter deleted_at themselves (see their own
+      // implementations) -- every other *_json listing function filters it here at the capi
+      // layer instead, and this one does the same for consistency. list_recent_page already
+      // excludes soft-deleted cards in its own SQL, so this is a no-op for that view.
+      if (card.deleted_at.has_value()) {
+        continue;
+      }
+      auto card_json = card_to_json(card);
+      if (include_child_counts) {
+        card_json["child_count"] = repo.count_children_not_deleted(project_id, card.card_id);
+      }
+      out_cards.push_back(std::move(card_json));
+    }
+    return nlohmann::json{{"cards", out_cards}};
+  });
+}
+
 // The Android backup snapshot's query (BACKUP_RESTORE_IMPLEMENTATION_PLAN.md step 1):
 // project_id's cards, most-recently-updated first, cursor-paginated so the caller (Kotlin,
 // deciding based on accumulated JSON+gzip size, which holder-core knows nothing about) can
