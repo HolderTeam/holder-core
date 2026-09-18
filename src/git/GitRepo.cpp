@@ -334,7 +334,7 @@ struct PushCallbackPayload {
 static git_remote_callbacks make_push_callbacks(PushCallbackPayload& payload) {
   auto callbacks = make_remote_callbacks(payload.credentials);
   callbacks.payload = &payload;
-  callbacks.credentials = [](git_credential** out, // LCOV_EXCL_START - libgit2 invokes this only during authenticated push.
+  callbacks.credentials = [](git_credential** out, // LCOV_EXCL_START - thin adapter over the covered git_credential_acquire_cb; libgit2 only calls it when a push transport asks for credentials, which local file remotes never do.
                              const char* url,
                              const char* username,
                              unsigned int allowed_types,
@@ -1304,8 +1304,8 @@ std::vector<std::string> GitRepo::commit_parent_oids(const std::string& commit_o
     parent_oids.push_back(oid_to_hex(*git_commit_parent_id(commit, i)));
   }
   git_commit_free(commit);
-  return parent_oids; // LCOV_EXCL_LINE - GCC misses vector return after libgit2 cleanup.
-} // LCOV_EXCL_LINE - GCC misses cleanup closure.
+  return parent_oids;
+} // LCOV_EXCL_LINE - gcov artefact: function exit is executed but never counted.
 
 GitHistoryPage GitRepo::history_for_paths(
     const std::vector<fs::path>& relative_paths,

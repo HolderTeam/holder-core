@@ -289,6 +289,14 @@ TEST_CASE("CardPlacementResolver ToStart/ToEnd no-op when the target parent has 
   );
   REQUIRE_FALSE(result.parent_card_id.has_value());
   REQUIRE(result.sort_key == 42.0);
+
+  const auto to_end = resolver.resolve(
+      "proj-1",
+      "ffffffff-0000-4000-8000-000000000001",
+      simple_request(CardPlacementIntent::ToEnd)
+  );
+  REQUIRE_FALSE(to_end.parent_card_id.has_value());
+  REQUIRE(to_end.sort_key == 42.0);
 }
 
 TEST_CASE("CardPlacementResolver excludes deleted tied siblings", "[card][placement]") {

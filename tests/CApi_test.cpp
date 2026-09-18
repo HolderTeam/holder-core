@@ -6228,6 +6228,43 @@ TEST_CASE("C API JSON entry points report malformed input and unknown ids as run
   holder_context_destroy(context);
 }
 
+TEST_CASE("C API card_move_json applies an explicit parent_card_id", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  const auto create_card = [&](const char* title, const char* parent_card_id) {
+    char* json = nullptr;
+    REQUIRE(
+        holder_card_create(context, "project-1", title, "body", parent_card_id, &json, &error) ==
+        HOLDER_OK
+    );
+    auto card_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
+    holder_string_free(json);
+    return card_id;
+  };
+  const auto parent = create_card("Parent", nullptr);
+  // A ToEnd move into a parent with no other children is a documented no-op, so give it one.
+  create_card("Existing child", parent.c_str());
+  const auto child = create_card("Child", nullptr);
+
+  char* json = nullptr;
+  const auto request = nlohmann::json{{"intent", "to_end"}, {"parent_card_id", parent}}.dump();
+  REQUIRE(
+      holder_card_move_json(context, "project-1", child.c_str(), request.c_str(), &json, &error) ==
+      HOLDER_OK
+  );
+  const auto moved = nlohmann::json::parse(json);
+  holder_string_free(json);
+  REQUIRE(moved["card_id"] == child);
+  REQUIRE(moved["parent_card_id"] == parent);
+
+  holder_context_destroy(context);
+}
+
 TEST_CASE("C API move and milestone update reject a trashed card", "[capi]") {
   const auto data_dir = holder::test::make_temp_dir();
   seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);

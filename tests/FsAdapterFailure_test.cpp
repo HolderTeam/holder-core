@@ -1,5 +1,6 @@
 #if __has_include(<catch2/catch_test_macros.hpp>)
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #else
 #include <catch2/catch.hpp>
 #endif
@@ -698,7 +699,10 @@ TEST_CASE("Rebuilder rejects short derived card_id from filename", "[rebuild]") 
   project.created_at = 1;
   project.updated_at = 1;
 
-  REQUIRE_THROWS(rebuilder.rebuild_project(project));
+  REQUIRE_THROWS_WITH(
+      rebuilder.rebuild_project(project),
+      Catch::Matchers::ContainsSubstring("invalid card_id in file")
+  );
 }
 
 TEST_CASE("Rebuilder rejects short derived ai message id from filename", "[rebuild]") {
@@ -711,9 +715,6 @@ TEST_CASE("Rebuilder rejects short derived ai message id from filename", "[rebui
   const auto root = dir / "repo";
   std::filesystem::create_directories(root);
   create_project(db, project_id, root.string());
-
-  const auto card_rel = holder::core::card_rel_path("abcd1234");
-  write_file(root / card_rel, "# ok\n");
 
   const auto short_message_path = root / "ai_messages" / "xy.md";
   write_file(short_message_path, "body\n");
@@ -728,7 +729,10 @@ TEST_CASE("Rebuilder rejects short derived ai message id from filename", "[rebui
   project.created_at = 1;
   project.updated_at = 1;
 
-  REQUIRE_THROWS(rebuilder.rebuild_project(project));
+  REQUIRE_THROWS_WITH(
+      rebuilder.rebuild_project(project),
+      Catch::Matchers::ContainsSubstring("invalid message_id in file")
+  );
 }
 
 TEST_CASE("Rebuilder rejects invalid ai message front matter", "[rebuild]") {
@@ -761,7 +765,7 @@ TEST_CASE("Rebuilder rejects invalid ai message front matter", "[rebuild]") {
   REQUIRE_THROWS(rebuilder.rebuild_project(project));
 }
 
-TEST_CASE("Rebuilder rejects ai message path mismatch with message_id", "[rebuild]") {
+TEST_CASE("Rebuilder rejects a card file stored under the wrong path", "[rebuild]") {
   const auto dir = make_temp_dir();
   holder::platform::Db db;
   db.open(dir / "holder.db");
@@ -772,8 +776,36 @@ TEST_CASE("Rebuilder rejects ai message path mismatch with message_id", "[rebuil
   std::filesystem::create_directories(root);
   create_project(db, project_id, root.string());
 
-  const auto card_rel = holder::core::card_rel_path("abcd1234");
-  write_file(root / card_rel, "# ok\n");
+  // The stem is a valid UUID, so the card_id is derived and accepted; only the directory is wrong.
+  const std::string card_id = "12345678-1234-4234-8234-123456789abc";
+  write_file(root / "cards" / "misc" / (card_id + ".md"), "body\n");
+
+  holder::index::FtsIndexer fts(db);
+  holder::store::Rebuilder rebuilder(db, &fts);
+
+  holder::model::Project project;
+  project.project_id = project_id;
+  project.name = "Project";
+  project.root_path = root.string();
+  project.created_at = 1;
+  project.updated_at = 1;
+
+  REQUIRE_THROWS_WITH(
+      rebuilder.rebuild_project(project),
+      Catch::Matchers::ContainsSubstring("card path does not match card_id")
+  );
+}
+
+TEST_CASE("Rebuilder rejects ai message path mismatch with message_id", "[rebuild]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+
+  const std::string project_id = "proj-1";
+  const auto root = dir / "repo";
+  std::filesystem::create_directories(root);
+  create_project(db, project_id, root.string());
 
   holder::model::AiMessage msg;
   msg.message_id = "other5678";
@@ -797,7 +829,10 @@ TEST_CASE("Rebuilder rejects ai message path mismatch with message_id", "[rebuil
   project.created_at = 1;
   project.updated_at = 1;
 
-  REQUIRE_THROWS(rebuilder.rebuild_project(project));
+  REQUIRE_THROWS_WITH(
+      rebuilder.rebuild_project(project),
+      Catch::Matchers::ContainsSubstring("ai message path does not match message_id")
+  );
 }
 
 TEST_CASE("Rebuilder rejects cards with unresolved parent graph", "[rebuild]") {

@@ -189,8 +189,8 @@ std::vector<CardDiffLine> line_diff(
       }
       append_diff_line(out, '+', line, -1, new_no++, truncated);
     }
-    return out; // LCOV_EXCL_LINE - GCC misses early-return branch after loop completion.
-  } // LCOV_EXCL_LINE - GCC misses the covered branch closure.
+    return out;
+  }
 
   std::vector<std::vector<std::size_t>> lcs(
       old_lines.size() + 1, std::vector<std::size_t>(new_lines.size() + 1, 0)

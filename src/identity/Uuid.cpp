@@ -35,8 +35,8 @@ std::string format_uuid(const unsigned char bytes[16]) {
     }
   }
 
-  return out; // LCOV_EXCL_LINE - GCC misses formatter return.
-} // LCOV_EXCL_LINE - GCC misses formatter closure.
+  return out;
+}
 
 }  // namespace
 

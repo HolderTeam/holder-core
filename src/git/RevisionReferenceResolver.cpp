@@ -14,8 +14,8 @@ RevisionReferenceResult resolved(const git_oid& oid) {
   RevisionReferenceResult result;
   result.status = RevisionReferenceStatus::Resolved;
   result.oid = std::string(git_oid_tostr_s(&oid));
-  return result; // LCOV_EXCL_LINE - GCC misses helper return after git_oid_tostr_s.
-} // LCOV_EXCL_LINE - GCC misses helper closure after covered libgit conversion.
+  return result;
+} // LCOV_EXCL_LINE - gcov artefact: function exit is executed but never counted.
 
 std::runtime_error git_lookup_error(int rc) { // LCOV_EXCL_START - libgit2 lookup failure is injected only by its private backend.
   const git_error* error = git_error_last();

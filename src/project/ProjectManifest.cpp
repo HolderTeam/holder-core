@@ -83,7 +83,7 @@ std::string render_project_manifest(const holder::model::Project& project) {
       {"version", 1}, // LCOV_EXCL_LINE - GCC assigns no counter to this executed initializer.
       {"project_id", project.project_id},
       {"name", project.name},
-      {"id_scheme", holder::model::to_string(project.id_scheme)}, // LCOV_EXCL_LINE - serializer field is covered by manifest round trips; GCC misses this initializer.
+      {"id_scheme", holder::model::to_string(project.id_scheme)}, // LCOV_EXCL_LINE - gcov artefact: multi-line initializer is executed but never counted.
       {"created_at", project.created_at},
       {"updated_at", project.updated_at},
   };

@@ -122,8 +122,8 @@ CardPlacementResult CardPlacementResolver::resolve(
       }
     }
     std::sort(siblings.begin(), siblings.end(), sibling_less);
-    return siblings; // LCOV_EXCL_LINE - GCC attributes the lambda return to its synthetic body.
-  }; // LCOV_EXCL_LINE - GCC attributes this synthetic lambda closure separately.
+    return siblings;
+  }; // LCOV_EXCL_LINE - gcov artefact: lambda closer is executed but never counted.
 
   // The card's real, unmodified parent -- restored verbatim by the ToStart/ToEnd/Left/Right
   // no-op escapes below, since those report "nothing moved" even when a parent_card_id
@@ -186,18 +186,18 @@ CardPlacementResult CardPlacementResolver::resolve(
 
       const auto siblings_without_source = siblings_for_parent(next_parent, source.card_id);
       if (request.intent == CardPlacementIntent::ToStart) {
-        if (siblings_without_source.empty()) { // LCOV_EXCL_START - equivalent ToStart no-op is exercised; GCC omits duplicate ToEnd block.
+        if (siblings_without_source.empty()) {
           next_parent = original_parent;
           next_sort_key = source.sort_key;
           break;
-        } // LCOV_EXCL_STOP
+        }
         next_sort_key = siblings_without_source.front().sort_key - 1.0;
       } else if (request.intent == CardPlacementIntent::ToEnd) {
-        if (siblings_without_source.empty()) { // LCOV_EXCL_START - duplicate no-op path.
+        if (siblings_without_source.empty()) {
           next_parent = original_parent;
           next_sort_key = source.sort_key;
           break;
-        } // LCOV_EXCL_STOP
+        }
         next_sort_key = siblings_without_source.back().sort_key + 1.0;
       } else {
         auto siblings_with_source = siblings_for_parent(next_parent, "");

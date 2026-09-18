@@ -369,11 +369,10 @@ void append_quarantine_log(const std::filesystem::path& quarantine_log_path, con
       std::ifstream input(quarantine_log_path, std::ios::binary);
       auto parsed = nlohmann::json::parse(input);
       if (parsed.is_array()) existing = std::move(parsed);
-    } catch (const std::exception&) { // LCOV_EXCL_START - corrupt-log recovery is covered; GCC omits empty handler.
+    } catch (const std::exception&) {
       // A corrupt quarantine log must not itself block quarantining -- start a fresh one rather
       // than throw. The old (unparseable) file is overwritten below.
-    }
-    // LCOV_EXCL_STOP
+    } // LCOV_EXCL_LINE - gcov artefact: function exit is executed but never counted.
   }
   for (const auto& entry : new_entries) existing.push_back(entry);
 

@@ -103,6 +103,33 @@ TEST_CASE("ProjectSyncOperation reports and records an unset remote", "[sync][op
   REQUIRE(state->last_sync_error == "Remote URL is not configured.");
 }
 
+TEST_CASE("ProjectSyncOperation records an unset remote for a push-only request", "[sync][operation]") {
+  const auto dir = holder::test::make_temp_dir();
+  auto db = holder::test::open_db_with_schema(dir / "holder.db");
+  holder::index::FtsIndexer fts(db);
+  create_project(db, "proj-1", dir / "project", std::nullopt);
+  RecordingGitOps git;
+
+  const auto result = holder::sync::run_project_sync(
+      db,
+      &fts,
+      git,
+      "proj-1",
+      {.pull = false, .push = true, .push_after_failed_pull = false, .branch = "",
+       .set_upstream = true, .now = 100}
+  );
+
+  REQUIRE_FALSE(result.succeeded());
+  REQUIRE_FALSE(result.pull.attempted);
+  REQUIRE(result.push.attempted);
+  REQUIRE(result.push.status == holder::git::PushStatus::RemoteUnset);
+  REQUIRE(result.push.error_message == "Remote URL is not configured.");
+  REQUIRE(git.calls.empty());
+  const auto state = holder::project::ProjectSyncRepo(db).get("proj-1");
+  REQUIRE(state.has_value());
+  REQUIRE(state->last_push_status == holder::git::push_status_name(holder::git::PushStatus::RemoteUnset));
+}
+
 TEST_CASE("ProjectSyncOperation stops before push when pull fails", "[sync][operation]") {
   const auto dir = holder::test::make_temp_dir();
   auto db = holder::test::open_db_with_schema(dir / "holder.db");

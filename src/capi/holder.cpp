@@ -159,7 +159,7 @@ nlohmann::json project_to_json(const holder::model::Project& project) {
       {"name", project.name},
       {"root_path", project.root_path},
       {"privacy_mode", project.privacy_mode},
-      {"id_scheme", holder::model::to_string(project.id_scheme)}, // LCOV_EXCL_LINE - GCC misses this exercised initializer.
+      {"id_scheme", holder::model::to_string(project.id_scheme)}, // LCOV_EXCL_LINE - gcov artefact: multi-line initializer is executed but never counted.
       {"created_at", project.created_at},
       {"updated_at", project.updated_at},
   };
@@ -754,7 +754,7 @@ holder::card::MilestoneUpdate milestone_update_from_json(const nlohmann::json& b
     }
   }
   return update;
-} // LCOV_EXCL_LINE - GCC assigns the parser's closing counter to an uninstrumentable synthetic edge.
+} // LCOV_EXCL_LINE - gcov artefact: function exit is executed but never counted.
 
 holder::card::CardPlacementIntent card_placement_intent_from_string(const std::string& intent) {
   if (intent == "into") return holder::card::CardPlacementIntent::Into;
@@ -781,7 +781,7 @@ holder::card::CardPlacementRequest card_placement_request_from_json(const nlohma
     request.target_card_id = body.at("target_card_id").get<std::string>();
   }
   if (body.contains("parent_card_id") && !body.at("parent_card_id").is_null()) {
-    request.parent_card_id = body.at("parent_card_id").get<std::string>(); // LCOV_EXCL_LINE - covered by route tests; GCC misses inline JSON conversion.
+    request.parent_card_id = body.at("parent_card_id").get<std::string>();
   }
   return request;
 }
@@ -3867,7 +3867,7 @@ int holder_git_probe_remote_url(
 
     nlohmann::json body = {
         {"url", url},
-        {"status", holder::git::remote_probe_status_name(probe.status)}, // LCOV_EXCL_LINE - GCC misses this exercised initializer.
+        {"status", holder::git::remote_probe_status_name(probe.status)}, // LCOV_EXCL_LINE - gcov artefact: multi-line initializer is executed but never counted.
         {"remote_has_head", probe.remote_has_head},
         {"error_message", probe.error_message.empty() ? nlohmann::json(nullptr)
                                                         : nlohmann::json(probe.error_message)},
@@ -4169,7 +4169,7 @@ int holder_git_sync_if_due(
           &context->fts,
           *git,
           project_id,
-          {.pull = pull_due, .push = push_due, .push_after_failed_pull = true, .branch = "", // LCOV_EXCL_LINE - GCC misses aggregate initializer.
+          {.pull = pull_due, .push = push_due, .push_after_failed_pull = true, .branch = "", // LCOV_EXCL_LINE - gcov artefact: designated initializer is executed but never counted.
            .set_upstream = true, .now = now}
       );
       body["pull_attempted"] = result.pull.attempted;
@@ -4239,8 +4239,8 @@ int holder_git_sync_now(
         {"push_attempted", false},
         {"push_status", nullptr},
         {"push_error", nullptr},
-        {"push_ahead_count", 0}, // LCOV_EXCL_LINE - GCC misses aggregate initializer.
-        {"push_behind_count", 0}, // LCOV_EXCL_LINE
+        {"push_ahead_count", 0}, // LCOV_EXCL_LINE - gcov artefact: multi-line initializer is executed but never counted.
+        {"push_behind_count", 0}, // LCOV_EXCL_LINE - gcov artefact: multi-line initializer is executed but never counted.
         {"push_local_head_commit", nullptr},
     };
 
@@ -4260,7 +4260,7 @@ int holder_git_sync_now(
         *git,
         project_id,
         {.pull = true, .push = (push != 0), .push_after_failed_pull = false,
-         .branch = branch != nullptr ? branch : "", // LCOV_EXCL_LINE - GCC misses aggregate initializer.
+         .branch = branch != nullptr ? branch : "", // LCOV_EXCL_LINE - gcov artefact: designated initializer is executed but never counted.
          .set_upstream = set_upstream != 0,
          .now = now_epoch_seconds()}
     );

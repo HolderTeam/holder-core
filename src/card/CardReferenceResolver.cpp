@@ -43,8 +43,8 @@ std::string lowercase_uuid(std::string_view value) {
   for (const char character : value) {
     normalized.push_back(lowercase_hex(character));
   }
-  return normalized; // LCOV_EXCL_LINE - exercised through reference resolution; GCC misses helper return.
-} // LCOV_EXCL_LINE - GCC misses the helper's covered closing line.
+  return normalized;
+} // LCOV_EXCL_LINE - gcov artefact: function exit is executed but never counted.
 
 std::optional<std::string> normalize_uuid_prefix(std::string_view reference) {
   constexpr std::size_t kUuidLength = 36;

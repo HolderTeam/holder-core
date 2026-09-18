@@ -42,8 +42,8 @@ void refresh_activity_best_effort(
 
 const char* pull_phase_status_name(PullPhaseStatus status) {
   switch (status) {
-  case PullPhaseStatus::NotAttempted: // LCOV_EXCL_START - persisted phases are always attempted before naming.
-    return "not_attempted"; // LCOV_EXCL_STOP
+  case PullPhaseStatus::NotAttempted:
+    return "not_attempted";
   case PullPhaseStatus::Succeeded:
     return "succeeded";
   case PullPhaseStatus::RemoteUnset:
@@ -102,7 +102,7 @@ ProjectSyncResult run_project_sync(
           result.pull.error_message,
           request.now
       );
-    } else { // LCOV_EXCL_START - push-only remote-unset is represented by the returned result.
+    } else {
       result.push.attempted = true;
       result.push.status = holder::git::PushStatus::RemoteUnset;
       result.push.error_message = remote_error;
@@ -113,7 +113,7 @@ ProjectSyncResult run_project_sync(
           result.push.error_message,
           request.now
       );
-    } // LCOV_EXCL_STOP
+    }
     return result;
   }
 
