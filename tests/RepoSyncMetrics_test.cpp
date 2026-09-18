@@ -132,13 +132,9 @@ TEST_CASE("RepoSyncMetrics throws when repo open hits filesystem error", "[git][
   const auto dir = make_temp_dir();
   const auto loop_path = dir / "loop";
   std::filesystem::create_symlink("loop", loop_path);
-  // inspect_repo_sync_metrics shuts libgit2 down before it reads the error, so when it holds the
-  // only reference the real cause is replaced by "library has not been initialized". Keep a
-  // reference alive here so the message describes what actually went wrong.
-  struct Libgit2Reference {
-    Libgit2Reference() { git_libgit2_init(); }
-    ~Libgit2Reference() { git_libgit2_shutdown(); }
-  } libgit2;
+  // Deliberately no GitRepo (which holds libgit2 open for the life of the process) before the
+  // call: with inspect_repo_sync_metrics as the only libgit2 user, the error it reports must be
+  // the real cause, not "library has not been initialized" left behind by an early shutdown.
   REQUIRE_THROWS_WITH(
       holder::git::inspect_repo_sync_metrics(loop_path),
       Catch::Matchers::ContainsSubstring("git_repository_open failed") &&
