@@ -71,7 +71,7 @@ prepare_ccache() {
     exit 1
   fi
   echo "ccache: not found; building without a compiler cache." >&2
-  echo "Install it with: sudo apt install ccache" >&2
+  echo "Install ccache with your package manager (see README.md for dependencies)." >&2
 }
 
 cmake_configure() {
