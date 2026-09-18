@@ -209,3 +209,10 @@ TEST_CASE("ProjectSyncOperation fast-forward pull rebuilds the project index", "
   REQUIRE(result.pull.conflicts_resolved == 0);
   REQUIRE(holder::card::CardRepo(local_db).list_all("proj-1").size() == 2);
 }
+
+TEST_CASE("Project sync names every persisted pull phase", "[sync]") {
+  REQUIRE(
+      std::string(holder::sync::pull_phase_status_name(holder::sync::PullPhaseStatus::NotAttempted)) ==
+      "not_attempted"
+  );
+}

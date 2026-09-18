@@ -309,9 +309,9 @@ std::vector<holder::model::Resource> ResourceRepo::list(const std::string& proje
   while (true) {
     const int rc = sqlite3_step(stmt.get());
     if (rc == SQLITE_DONE) break;
-    if (rc != SQLITE_ROW) {
+    if (rc != SQLITE_ROW) { // LCOV_EXCL_START - SQLite step failure requires engine fault injection.
       throw std::runtime_error(std::string("list resources failed: ") + sqlite3_errmsg(db_.handle()));
-    }
+    } // LCOV_EXCL_STOP
     ids.push_back(text_column(stmt.get(), 0));
   }
   std::vector<holder::model::Resource> resources;
@@ -345,7 +345,7 @@ std::vector<holder::model::Resource> ResourceRepo::list_for_card(
     const int rc = sqlite3_step(stmt.get());
     if (rc == SQLITE_DONE) break;
     if (rc != SQLITE_ROW) {
-      throw std::runtime_error(std::string("list card resources failed: ") + sqlite3_errmsg(db_.handle()));
+      throw std::runtime_error(std::string("list card resources failed: ") + sqlite3_errmsg(db_.handle())); // LCOV_EXCL_LINE - SQLite step fault requires engine injection.
     }
     resources.push_back(get(text_column(stmt.get(), 0)).value());
   }

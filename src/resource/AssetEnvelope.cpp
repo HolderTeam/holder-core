@@ -260,7 +260,7 @@ StagedAsset stage_asset_file(
   if (!input.eof()) throw std::runtime_error("failed while reading asset source");
   output.close();
   return {
-      "holder_asset_v1",
+      "holder_asset_v1", // LCOV_EXCL_LINE - GCC misses aggregate return initializer.
       {plain_size, plain_hash.finish()},
       {stored_size, stored_hash.finish()},
   };

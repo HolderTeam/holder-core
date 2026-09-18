@@ -186,12 +186,12 @@ UPDATE schema_version SET version = 4 WHERE version = 3;
 
 bool projects_has_id_scheme(Db& db) {
   sqlite3_stmt* stmt = nullptr;
-  if (sqlite3_prepare_v2(db.handle(), "PRAGMA table_info(projects);", -1, &stmt, nullptr) !=
+  if (sqlite3_prepare_v2(db.handle(), "PRAGMA table_info(projects);", -1, &stmt, nullptr) != // LCOV_EXCL_START - SQLite prepare failure requires engine fault injection.
       SQLITE_OK) {
     throw std::runtime_error(
         std::string("failed to inspect projects schema: ") + sqlite3_errmsg(db.handle())
     );
-  }
+  } // LCOV_EXCL_STOP
 
   while (true) {
     const int rc = sqlite3_step(stmt);
@@ -204,11 +204,11 @@ bool projects_has_id_scheme(Db& db) {
       continue;
     }
     sqlite3_finalize(stmt);
-    if (rc != SQLITE_DONE) {
+    if (rc != SQLITE_DONE) { // LCOV_EXCL_START - SQLite step failure requires engine fault injection.
       throw std::runtime_error(
           std::string("failed to inspect projects schema: ") + sqlite3_errmsg(db.handle())
       );
-    }
+    } // LCOV_EXCL_STOP
     return false;
   }
 }

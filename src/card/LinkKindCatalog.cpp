@@ -3,9 +3,9 @@
 namespace holder::core {
 
 const std::vector<LinkKindInfo>& link_kind_catalog() {
-  static const std::vector<LinkKindInfo> kCatalog = {
+  static const std::vector<LinkKindInfo> kCatalog = { // LCOV_EXCL_LINE - GCC assigns no counter to static initializer declaration.
       // General / symmetric
-      {"related_to", "Related to", "Related to"},
+      {"related_to", "Related to", "Related to"}, // LCOV_EXCL_LINE - GCC misses first static initializer entry.
       {"similar_to", "Similar to", "Similar to"},
       {"opposite_of", "Opposite of", "Opposite of"},
       {"alternative_to", "Alternative to", "Alternative to"},

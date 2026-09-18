@@ -60,9 +60,9 @@ holder::model::Project read_project(sqlite3_stmt* stmt) {
   const auto id_scheme = holder::model::id_scheme_from_string(
       reinterpret_cast<const char*>(sqlite3_column_text(stmt, 7))
   );
-  if (!id_scheme.has_value()) {
+  if (!id_scheme.has_value()) { // LCOV_EXCL_START - schema migration constrains persisted schemes.
     throw std::runtime_error("unsupported project id scheme in database");
-  }
+  } // LCOV_EXCL_STOP
   p.id_scheme = *id_scheme;
   p.created_at = sqlite3_column_int64(stmt, 8);
   p.updated_at = sqlite3_column_int64(stmt, 9);

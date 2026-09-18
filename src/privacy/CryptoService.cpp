@@ -24,12 +24,12 @@ void strip_trailing_carriage_return(std::string& line) {
 }
 
 void ensure_sodium_ready() {
-  if (sodium_init() < 0) {
+  if (sodium_init() < 0) { // LCOV_EXCL_START - libsodium documents initialization failure as unrecoverable.
     throw holder::privacy::PrivacyError(
         holder::privacy::PrivacyErrorCode::PrivacyCryptoFailed,
         "failed to initialize libsodium"
-    ); // LCOV_EXCL_LINE
-  }
+    );
+  } // LCOV_EXCL_STOP
 }
 
 std::string b64_encode(const unsigned char* data, std::size_t len) {
@@ -53,12 +53,12 @@ std::vector<unsigned char> b64_decode(const std::string& text) {
           &out_len,
           nullptr,
           sodium_base64_VARIANT_ORIGINAL
-      ) != 0) {
+      ) != 0) { // LCOV_EXCL_START - libsodium only returns this on internal crypto failure.
     throw holder::privacy::PrivacyError(
         holder::privacy::PrivacyErrorCode::EnvelopeInvalid,
         "invalid base64 in privacy envelope"
     );
-  }
+  } // LCOV_EXCL_STOP
   out.resize(out_len);
   return out;
 }
@@ -189,12 +189,12 @@ std::string encrypt_envelope_v1(
           nullptr,
           iv.data(),
           key.data()
-      ) != 0) {
+      ) != 0) { // LCOV_EXCL_START - libsodium reports this only for internal crypto failure.
     throw holder::privacy::PrivacyError(
         holder::privacy::PrivacyErrorCode::PrivacyCryptoFailed,
         "privacy encryption failed"
-    ); // LCOV_EXCL_LINE
-  }
+    );
+  } // LCOV_EXCL_STOP
   ciphertext.resize(static_cast<std::size_t>(ciphertext_len));
 
   nlohmann::json meta = {

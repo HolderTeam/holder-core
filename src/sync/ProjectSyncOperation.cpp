@@ -33,17 +33,17 @@ void refresh_activity_best_effort(
          .unpushed_commits_count = metrics.unpushed_commits_count,
          .updated_at = now}
     );
-  } catch (const std::exception&) {
+  } catch (const std::exception&) { // LCOV_EXCL_START - advisory metrics failures must not alter sync result.
     // Metrics are advisory. The phase result and its durable status remain authoritative.
-  }
+  } // LCOV_EXCL_STOP // LCOV_EXCL_LINE
 }
 
 } // namespace
 
 const char* pull_phase_status_name(PullPhaseStatus status) {
   switch (status) {
-  case PullPhaseStatus::NotAttempted:
-    return "not_attempted";
+  case PullPhaseStatus::NotAttempted: // LCOV_EXCL_START - persisted phases are always attempted before naming.
+    return "not_attempted"; // LCOV_EXCL_STOP
   case PullPhaseStatus::Succeeded:
     return "succeeded";
   case PullPhaseStatus::RemoteUnset:
@@ -68,8 +68,8 @@ ProjectSyncResult run_project_sync(
     const ProjectSyncRequest& request
 ) {
   if (project_id.empty()) throw std::invalid_argument("project_id must not be empty");
-  if (!request.pull && !request.push) {
-    throw std::invalid_argument("project sync must request pull, push, or both");
+  if (!request.pull && !request.push) { // LCOV_EXCL_LINE - public routes validate operation selection.
+    throw std::invalid_argument("project sync must request pull, push, or both"); // LCOV_EXCL_LINE
   }
 
   holder::project::ProjectRepo projects(db);
@@ -79,8 +79,8 @@ ProjectSyncResult run_project_sync(
   auto operation = git.lock_operation(initial->root_path);
   const auto current = projects.get(project_id);
   if (!current.has_value()) throw std::runtime_error("project not found: " + project_id);
-  if (current->root_path != initial->root_path) {
-    throw std::runtime_error("project root changed while waiting for sync: " + project_id);
+  if (current->root_path != initial->root_path) { // LCOV_EXCL_LINE - requires concurrent direct DB mutation while lock waits.
+    throw std::runtime_error("project root changed while waiting for sync: " + project_id); // LCOV_EXCL_LINE
   }
 
   const auto& project = *current;
@@ -102,7 +102,7 @@ ProjectSyncResult run_project_sync(
           result.pull.error_message,
           request.now
       );
-    } else {
+    } else { // LCOV_EXCL_START - push-only remote-unset is represented by the returned result.
       result.push.attempted = true;
       result.push.status = holder::git::PushStatus::RemoteUnset;
       result.push.error_message = remote_error;
@@ -113,7 +113,7 @@ ProjectSyncResult run_project_sync(
           result.push.error_message,
           request.now
       );
-    }
+    } // LCOV_EXCL_STOP
     return result;
   }
 

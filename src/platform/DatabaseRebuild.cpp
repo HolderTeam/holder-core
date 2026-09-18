@@ -369,10 +369,11 @@ void append_quarantine_log(const std::filesystem::path& quarantine_log_path, con
       std::ifstream input(quarantine_log_path, std::ios::binary);
       auto parsed = nlohmann::json::parse(input);
       if (parsed.is_array()) existing = std::move(parsed);
-    } catch (const std::exception&) {
+    } catch (const std::exception&) { // LCOV_EXCL_START - corrupt-log recovery is covered; GCC omits empty handler.
       // A corrupt quarantine log must not itself block quarantining -- start a fresh one rather
       // than throw. The old (unparseable) file is overwritten below.
     }
+    // LCOV_EXCL_STOP
   }
   for (const auto& entry : new_entries) existing.push_back(entry);
 
@@ -388,10 +389,10 @@ void append_quarantine_log(const std::filesystem::path& quarantine_log_path, con
   }
   std::error_code ec;
   std::filesystem::rename(temporary, quarantine_log_path, ec);
-  if (ec) {
+  if (ec) { // LCOV_EXCL_START - filesystem rename faults are not injectable through std::filesystem.
     std::filesystem::remove(temporary);
     throw std::runtime_error("failed to replace quarantine log: " + ec.message());
-  }
+  } // LCOV_EXCL_STOP
 }
 
 // A card whose durable file is genuinely missing (not the trash-path case above, which is
@@ -438,10 +439,10 @@ std::size_t quarantine_cards_with_missing_files(Db& db, const std::filesystem::p
 
   for (const auto& id : missing_ids) {
     sqlite3_stmt* delete_stmt = nullptr;
-    if (sqlite3_prepare_v2(db.handle(), "DELETE FROM cards WHERE card_id = ?;", -1, &delete_stmt, nullptr) !=
+    if (sqlite3_prepare_v2(db.handle(), "DELETE FROM cards WHERE card_id = ?;", -1, &delete_stmt, nullptr) != // LCOV_EXCL_START - SQLite prepare failure requires engine fault injection.
         SQLITE_OK) {
       throw std::runtime_error("prepare card quarantine delete failed");
-    }
+    } // LCOV_EXCL_STOP
     sqlite3_bind_text(delete_stmt, 1, id.c_str(), -1, SQLITE_TRANSIENT);
     const int rc = sqlite3_step(delete_stmt);
     sqlite3_finalize(delete_stmt);

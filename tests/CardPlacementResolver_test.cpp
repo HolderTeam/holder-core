@@ -291,6 +291,32 @@ TEST_CASE("CardPlacementResolver ToStart/ToEnd no-op when the target parent has 
   REQUIRE(result.sort_key == 42.0);
 }
 
+TEST_CASE("CardPlacementResolver excludes deleted tied siblings", "[card][placement]") {
+  const auto dir = holder::test::make_temp_dir();
+  auto db = holder::test::open_db_with_schema(dir / "holder.db");
+  create_project(db, "proj-1");
+
+  holder::card::CardRepo cards(db);
+  CardPlacementResolver resolver(cards);
+  create_card(cards, "abababab-0000-4000-8000-000000000001", "proj-1", "Later", 20.0, std::nullopt, 2);
+  create_card(cards, "abababab-0000-4000-8000-000000000002", "proj-1", "Earlier", 20.0, std::nullopt, 3);
+  create_card(
+      cards,
+      "abababab-0000-4000-8000-000000000004",
+      "proj-1",
+      "Deleted",
+      1.0,
+      std::nullopt,
+      4,
+      5
+  );
+
+  const auto ordered = resolver.resolve(
+      "proj-1", "abababab-0000-4000-8000-000000000001", simple_request(CardPlacementIntent::ToStart)
+  );
+  REQUIRE(ordered.sort_key == 19.0);
+}
+
 TEST_CASE("CardPlacementResolver Left/Right move within siblings", "[card][placement]") {
   const auto dir = holder::test::make_temp_dir();
   auto db = holder::test::open_db_with_schema(dir / "holder.db");
@@ -462,4 +488,36 @@ TEST_CASE("CardPlacementResolver rejects a missing or cross-project card", "[car
       ),
       "target_not_found"
   );
+}
+
+TEST_CASE("CardPlacementResolver handles tied siblings and parent edge cases", "[card][placement]") {
+  const auto dir = holder::test::make_temp_dir();
+  auto db = holder::test::open_db_with_schema(dir / "holder.db");
+  create_project(db, "proj-1");
+  holder::card::CardRepo cards(db);
+  CardPlacementResolver resolver(cards);
+  const std::string source = "66666666-0000-4000-8000-000000000001";
+  const std::string earlier = "66666666-0000-4000-8000-000000000002";
+  const std::string later = "66666666-0000-4000-8000-000000000003";
+  const std::string deleted_parent = "66666666-0000-4000-8000-000000000004";
+  create_card(cards, source, "proj-1", "Source", 10.0);
+  create_card(cards, earlier, "proj-1", "A", 20.0, std::nullopt, 3);
+  create_card(cards, later, "proj-1", "Z", 20.0, std::nullopt, 2);
+  create_card(cards, deleted_parent, "proj-1", "Deleted parent", 30.0, std::nullopt, 1, 9);
+
+  REQUIRE(resolver.resolve("proj-1", source,
+                           simple_request(CardPlacementIntent::ToEnd)).sort_key == 21.0);
+  REQUIRE_THROWS_WITH(
+      resolver.resolve("proj-1", source, simple_request(CardPlacementIntent::ToStart, deleted_parent)),
+      "target_not_found"
+  );
+  REQUIRE_THROWS_WITH(
+      resolver.resolve("proj-1", source, simple_request(CardPlacementIntent::Left, deleted_parent)),
+      "target_not_found"
+  );
+
+  const std::string orphan = "66666666-0000-4000-8000-000000000005";
+  create_card(cards, orphan, "proj-1", "Orphan", 1.0, deleted_parent);
+  const auto up = resolver.resolve("proj-1", orphan, simple_request(CardPlacementIntent::UpLevel));
+  REQUIRE_FALSE(up.parent_card_id.has_value());
 }
