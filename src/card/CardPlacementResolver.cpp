@@ -17,7 +17,7 @@ std::optional<std::string> normalize_parent_id(const std::optional<std::string>&
   const std::string& raw = parent_card_id.value();
   const auto start = raw.find_first_not_of(" \t\r\n");
   if (start == std::string::npos) {
-    return std::nullopt; // LCOV_EXCL_LINE - cards.parent_card_id is a nonblank foreign key.
+    return std::nullopt;
   }
   const auto end = raw.find_last_not_of(" \t\r\n");
   return raw.substr(start, end - start + 1);
@@ -35,7 +35,7 @@ bool is_descendant_of(
     }
     const auto it = cards_by_id.find(candidate_parent_card_id.value());
     if (it == cards_by_id.end()) {
-      return false; // LCOV_EXCL_LINE - the parent foreign key keeps durable rows resolvable.
+      return false;
     }
     candidate_parent_card_id = normalize_parent_id(it->second.parent_card_id);
     guard++;
@@ -147,12 +147,6 @@ CardPlacementResult CardPlacementResolver::resolve(
         throw std::runtime_error("target_not_found");
       }
       const auto& target = it->second;
-      // cards_by_id is populated from list_all(project_id), so this branch is unreachable
-      // in practice -- kept for parity with the daemon route this was ported from.
-      if (target.project_id != project_id) {
-        throw std::runtime_error("cross_project_move_forbidden"); // LCOV_EXCL_LINE
-      }
-
       if (request.intent == CardPlacementIntent::Into) {
         next_parent = target.card_id;
         if (is_descendant_of(cards_by_id, next_parent, source.card_id)) {
@@ -209,11 +203,13 @@ CardPlacementResult CardPlacementResolver::resolve(
             break;
           }
         }
-        if (source_index < 0) { // LCOV_EXCL_START - source comes from the sibling list unless an invalid override bypasses it.
+        // A parent_card_id override naming some other parent leaves the source out of that
+        // parent's sibling list, so there is nothing to move left or right of.
+        if (source_index < 0) {
           next_parent = original_parent;
           next_sort_key = source.sort_key;
           break;
-        } // LCOV_EXCL_STOP
+        }
         if (request.intent == CardPlacementIntent::Left) {
           if (source_index == 0) {
             next_parent = original_parent;
@@ -256,20 +252,10 @@ CardPlacementResult CardPlacementResolver::resolve(
       }
       break;
     }
-    default: // LCOV_EXCL_LINE
-      // LCOV_EXCL_START -- every CardPlacementIntent value is handled above; this only
-      // guards against a corrupted/out-of-range enum value crossing some future boundary.
+    default:
+      // Every CardPlacementIntent value is handled above; this guards against an out-of-range
+      // enum value crossing some future boundary.
       throw std::runtime_error("invalid_move_intent");
-      // LCOV_EXCL_STOP
-  }
-
-  if (!next_sort_key.has_value()) {
-    // LCOV_EXCL_START -- every branch above either sets next_sort_key or returns early via
-    // one of the "break" no-op paths, which themselves set next_sort_key to the card's
-    // current value; this is unreachable, kept for parity with the daemon route's own
-    // defensive fallback.
-    next_sort_key = cards_.next_sort_key(project_id, next_parent);
-    // LCOV_EXCL_STOP
   }
 
   CardPlacementResult result;

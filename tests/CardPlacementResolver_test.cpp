@@ -538,3 +538,86 @@ TEST_CASE("CardPlacementResolver handles tied siblings and parent edge cases", "
   const auto up = resolver.resolve("proj-1", orphan, simple_request(CardPlacementIntent::UpLevel));
   REQUIRE_FALSE(up.parent_card_id.has_value());
 }
+
+TEST_CASE("CardPlacementResolver treats a blank parent_card_id override as the project root", "[card][placement]") {
+  const auto dir = holder::test::make_temp_dir();
+  auto db = holder::test::open_db_with_schema(dir / "holder.db");
+  create_project(db, "proj-1");
+  holder::card::CardRepo cards(db);
+  CardPlacementResolver resolver(cards);
+  const std::string parent = "77777777-0000-4000-8000-000000000001";
+  const std::string root_sibling = "77777777-0000-4000-8000-000000000002";
+  const std::string child = "77777777-0000-4000-8000-000000000003";
+  create_card(cards, parent, "proj-1", "Parent", 10.0);
+  create_card(cards, root_sibling, "proj-1", "Root sibling", 20.0);
+  create_card(cards, child, "proj-1", "Child", 5.0, parent);
+
+  // Whitespace-only is not an id: it must normalise to "no parent", moving the child out to the
+  // root after the last root card, not fail with target_not_found.
+  const auto result =
+      resolver.resolve("proj-1", child, simple_request(CardPlacementIntent::ToEnd, "  \t\n"));
+  REQUIRE_FALSE(result.parent_card_id.has_value());
+  REQUIRE(result.sort_key == 21.0);
+}
+
+TEST_CASE("CardPlacementResolver Into tolerates a target whose ancestor is in another project",
+          "[card][placement]") {
+  const auto dir = holder::test::make_temp_dir();
+  auto db = holder::test::open_db_with_schema(dir / "holder.db");
+  create_project(db, "proj-1");
+  create_project(db, "proj-2");
+  holder::card::CardRepo cards(db);
+  CardPlacementResolver resolver(cards);
+  const std::string foreign_parent = "88888888-0000-4000-8000-000000000001";
+  const std::string target = "88888888-0000-4000-8000-000000000002";
+  const std::string source = "88888888-0000-4000-8000-000000000003";
+  // The parent foreign key does not constrain project, and the resolver only loads one project's
+  // cards, so the cycle walk can run into an ancestor it cannot see. That is not a cycle.
+  create_card(cards, foreign_parent, "proj-2", "Foreign parent", 1.0);
+  create_card(cards, target, "proj-1", "Target", 10.0, foreign_parent);
+  create_card(cards, source, "proj-1", "Source", 20.0);
+
+  const auto result = resolver.resolve("proj-1", source, into_request(target));
+  REQUIRE(result.parent_card_id == target);
+  REQUIRE(result.moved_into_title == "Target");
+}
+
+TEST_CASE("CardPlacementResolver Left/Right are no-ops under a parent override that isn't the card's own",
+          "[card][placement]") {
+  const auto dir = holder::test::make_temp_dir();
+  auto db = holder::test::open_db_with_schema(dir / "holder.db");
+  create_project(db, "proj-1");
+  holder::card::CardRepo cards(db);
+  CardPlacementResolver resolver(cards);
+  const std::string own_parent = "99999999-0000-4000-8000-000000000001";
+  const std::string other_parent = "99999999-0000-4000-8000-000000000002";
+  const std::string source = "99999999-0000-4000-8000-000000000003";
+  const std::string other_child = "99999999-0000-4000-8000-000000000004";
+  create_card(cards, own_parent, "proj-1", "Own parent", 10.0);
+  create_card(cards, other_parent, "proj-1", "Other parent", 20.0);
+  create_card(cards, source, "proj-1", "Source", 5.0, own_parent);
+  create_card(cards, other_child, "proj-1", "Other child", 7.0, other_parent);
+
+  // The source is not among other_parent's children, so there is no neighbour to move past:
+  // report "nothing moved" with the card's real parent and sort key.
+  for (const auto intent : {CardPlacementIntent::Left, CardPlacementIntent::Right}) {
+    const auto result = resolver.resolve("proj-1", source, simple_request(intent, other_parent));
+    REQUIRE(result.parent_card_id == own_parent);
+    REQUIRE(result.sort_key == 5.0);
+  }
+}
+
+TEST_CASE("CardPlacementResolver rejects an out-of-range intent", "[card][placement]") {
+  const auto dir = holder::test::make_temp_dir();
+  auto db = holder::test::open_db_with_schema(dir / "holder.db");
+  create_project(db, "proj-1");
+  holder::card::CardRepo cards(db);
+  CardPlacementResolver resolver(cards);
+  create_card(cards, "aaaaaaaa-1111-4000-8000-000000000001", "proj-1", "Only", 1.0);
+
+  CardPlacementRequest request;
+  request.intent = static_cast<CardPlacementIntent>(99);
+  REQUIRE_THROWS_WITH(
+      resolver.resolve("proj-1", "aaaaaaaa-1111-4000-8000-000000000001", request), "invalid_move_intent"
+  );
+}
