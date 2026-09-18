@@ -1,5 +1,6 @@
 #if __has_include(<catch2/catch_test_macros.hpp>)
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #else
 #include <catch2/catch.hpp>
 #endif
@@ -283,4 +284,90 @@ TEST_CASE("resolve_pull_conflicts creates UUIDv4 copies for UUIDv4 projects", "[
   REQUIRE(duplicate != cards.end());
   REQUIRE(duplicate->card_id.size() == 36);
   REQUIRE(duplicate->card_id[14] == '4');
+}
+
+TEST_CASE("resolve_pull_conflicts rejects a project that no longer exists", "[sync]") {
+  const auto dir = make_temp_dir();
+  auto db = open_db_with_schema(dir / "holder.db");
+  holder::index::FtsIndexer fts(db);
+
+  // The caller holds a Project value, but the DB row is gone (for example deleted by another
+  // process while the pull was running), so there is no id scheme to mint copies with.
+  holder::model::Project project;
+  project.project_id = "proj-gone";
+  project.name = "Gone";
+  project.root_path = (dir / "repo").string();
+  project.privacy_mode = "plain";
+  holder::git::RealGitOps git;
+
+  REQUIRE_THROWS_WITH(
+      holder::sync::resolve_pull_conflicts(
+          db, &fts, project, git, holder::git::NonFastForwardPullError("", "", ""), 3
+      ),
+      "project not found: proj-gone"
+  );
+}
+
+TEST_CASE("resolve_pull_conflicts skips a conflict it cannot copy into the index", "[sync]") {
+  // Same divergence as the UUIDv4 test above, but the project's recorded root is then pointed at
+  // a regular file, so CardStore::create cannot open a repository there. One unwritable copy must
+  // not fail the whole pull: the conflict is skipped and nothing is reported as resolved.
+  const auto dir = make_temp_dir();
+  const std::string project_id = "proj-1";
+  const auto remote_dir = dir / "remote";
+  const auto local_dir = dir / "local";
+
+  auto remote_db = open_db_with_schema(dir / "remote.db");
+  holder::index::FtsIndexer remote_fts(remote_db);
+  holder::project::ProjectRepo remote_projects(remote_db);
+  holder::git::RealGitOps remote_git;
+  create_plain_project(remote_projects, project_id, remote_dir);
+
+  holder::model::Card card;
+  card.card_id = kSharedCardId;
+  card.project_id = project_id;
+  card.title = "Shared";
+  holder::card::CardStore(remote_db, &remote_fts, nullptr, &remote_git).create(card, "base");
+
+  holder::git::RealGitOps local_git;
+  local_git.open_or_init(local_dir);
+  local_git.set_remote("origin", remote_dir.string());
+  local_git.pull_remote_ff_only("origin");
+
+  holder::card::CardStore(remote_db, &remote_fts, nullptr, &remote_git)
+      .update_content(kSharedCardId, "remote edit", std::nullopt, 2);
+
+  auto local_db = open_db_with_schema(dir / "local.db");
+  holder::index::FtsIndexer local_fts(local_db);
+  holder::project::ProjectRepo local_projects(local_db);
+  create_plain_project(local_projects, project_id, local_dir);
+  const auto local_project = local_projects.get(project_id).value();
+  holder::store::Rebuilder(local_db, &local_fts).rebuild_project(local_project);
+  holder::card::CardStore(local_db, &local_fts, nullptr, &local_git)
+      .update_content(kSharedCardId, "local edit", std::nullopt, 2);
+
+  bool diverged_seen = false;
+  holder::git::NonFastForwardPullError diverged("", "", "");
+  try {
+    local_git.pull_remote_ff_only("origin");
+  } catch (const holder::git::NonFastForwardPullError& e) {
+    diverged_seen = true;
+    diverged = e;
+  }
+  REQUIRE(diverged_seen);
+
+  const auto not_a_directory = dir / "not-a-directory";
+  std::ofstream(not_a_directory) << "plain file";
+  holder::project::ProjectRepo(local_db).update_root_path(project_id, not_a_directory.string(), 3);
+
+  int resolved = -1;
+  REQUIRE_NOTHROW(
+      resolved = holder::sync::resolve_pull_conflicts(
+          local_db, &local_fts, local_project, local_git, diverged, 3
+      )
+  );
+  REQUIRE(resolved == 0);
+  const auto cards = holder::card::CardRepo(local_db).list_all(project_id);
+  REQUIRE(cards.size() == 1);
+  REQUIRE(cards.front().card_id == kSharedCardId);
 }

@@ -1,5 +1,6 @@
 #if __has_include(<catch2/catch_test_macros.hpp>)
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #else
 #include <catch2/catch.hpp>
 #endif
@@ -17,8 +18,11 @@
 #include "project/ProjectSyncRepo.h"
 #include "project/Rebuilder.h"
 
+#include <sqlite3.h>
+
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -130,6 +134,82 @@ TEST_CASE("ProjectSyncOperation records an unset remote for a push-only request"
   REQUIRE(state->last_push_status == holder::git::push_status_name(holder::git::PushStatus::RemoteUnset));
 }
 
+TEST_CASE("ProjectSyncOperation rejects a request that selects neither pull nor push", "[sync][operation]") {
+  const auto dir = holder::test::make_temp_dir();
+  auto db = holder::test::open_db_with_schema(dir / "holder.db");
+  holder::index::FtsIndexer fts(db);
+  create_project(db, "proj-1", dir / "project", std::nullopt);
+  RecordingGitOps git;
+
+  REQUIRE_THROWS_WITH(
+      holder::sync::run_project_sync(
+          db,
+          &fts,
+          git,
+          "proj-1",
+          {.pull = false, .push = false, .push_after_failed_pull = false, .branch = "",
+           .set_upstream = true, .now = 100}
+      ),
+      "project sync must request pull, push, or both"
+  );
+  REQUIRE(git.calls.empty());
+}
+
+namespace {
+
+// Changes a project's root_path through a second connection at a precise moment: when the
+// sync connection prepares its second SELECT. run_project_sync reads the project, waits for the
+// repository lock, then reads it again, so the second read is exactly the point at which another
+// process could have moved the project while the lock was contended. Doing it from the
+// authorizer keeps the test single-threaded and deterministic.
+struct RootChangeInjector {
+  sqlite3* other = nullptr;
+  std::string project_id;
+  std::string new_root;
+  int selects = 0;
+};
+
+int change_root_on_second_select(void* data, int action, const char*, const char*, const char*, const char*) {
+  auto* injector = static_cast<RootChangeInjector*>(data);
+  if (action == SQLITE_SELECT && ++injector->selects == 2) {
+    const std::string sql = "UPDATE projects SET root_path = '" + injector->new_root +
+                            "' WHERE project_id = '" + injector->project_id + "';";
+    sqlite3_exec(injector->other, sql.c_str(), nullptr, nullptr, nullptr);
+  }
+  return SQLITE_OK;
+}
+
+} // namespace
+
+TEST_CASE("ProjectSyncOperation aborts when the project root changes while waiting for the lock",
+          "[sync][operation]") {
+  const auto dir = holder::test::make_temp_dir();
+  auto db = holder::test::open_db_with_schema(dir / "holder.db");
+  holder::index::FtsIndexer fts(db);
+  create_project(db, "proj-1", dir / "project", "https://example.invalid/repo.git");
+  RecordingGitOps git;
+
+  holder::platform::Db other;
+  other.open(dir / "holder.db");
+  RootChangeInjector injector{other.handle(), "proj-1", (dir / "moved").string(), 0};
+  REQUIRE(sqlite3_set_authorizer(db.handle(), change_root_on_second_select, &injector) == SQLITE_OK);
+
+  REQUIRE_THROWS_WITH(
+      holder::sync::run_project_sync(
+          db,
+          &fts,
+          git,
+          "proj-1",
+          {.pull = true, .push = false, .push_after_failed_pull = false, .branch = "",
+           .set_upstream = true, .now = 100}
+      ),
+      "project root changed while waiting for sync: proj-1"
+  );
+  sqlite3_set_authorizer(db.handle(), nullptr, nullptr);
+  // Nothing may run against the repository once the root is known to have moved.
+  REQUIRE(git.calls.empty());
+}
+
 TEST_CASE("ProjectSyncOperation stops before push when pull fails", "[sync][operation]") {
   const auto dir = holder::test::make_temp_dir();
   auto db = holder::test::open_db_with_schema(dir / "holder.db");
@@ -187,6 +267,35 @@ TEST_CASE("ProjectSyncOperation pulls before a successful push", "[sync][operati
   REQUIRE(state.has_value());
   REQUIRE(state->last_pull_status == "succeeded");
   REQUIRE(state->last_push_status == "pushed");
+}
+
+TEST_CASE("ProjectSyncOperation ignores a failing activity-metrics refresh after a successful pull",
+          "[sync][operation]") {
+  const auto dir = holder::test::make_temp_dir();
+  auto db = holder::test::open_db_with_schema(dir / "holder.db");
+  holder::index::FtsIndexer fts(db);
+  create_project(db, "proj-1", dir / "project", "https://example.invalid/repo.git");
+  // A .git entry that is not a valid gitfile makes the post-sync repository inspection throw,
+  // while the stubbed git operations report a clean pull.
+  {
+    std::ofstream(dir / "project" / ".git") << "this is not a gitfile";
+  }
+  RecordingGitOps git;
+
+  const auto result = holder::sync::run_project_sync(
+      db,
+      &fts,
+      git,
+      "proj-1",
+      {.pull = true, .push = false, .push_after_failed_pull = false, .branch = "",
+       .set_upstream = true, .now = 100}
+  );
+
+  REQUIRE(result.succeeded());
+  REQUIRE(result.pull.status == holder::sync::PullPhaseStatus::Succeeded);
+  const auto state = holder::project::ProjectSyncRepo(db).get("proj-1");
+  REQUIRE(state.has_value());
+  REQUIRE(state->last_pull_status == "succeeded");
 }
 
 TEST_CASE("ProjectSyncOperation fast-forward pull rebuilds the project index", "[sync][operation]") {

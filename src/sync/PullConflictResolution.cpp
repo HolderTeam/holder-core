@@ -29,8 +29,8 @@ int resolve_pull_conflicts(
     long long now
 ) {
   const auto current_project = holder::project::ProjectRepo(db).get(project.project_id);
-  if (!current_project.has_value()) { // LCOV_EXCL_LINE - requires concurrent direct DB deletion during a locked pull.
-    throw std::runtime_error("project not found: " + project.project_id); // LCOV_EXCL_LINE
+  if (!current_project.has_value()) {
+    throw std::runtime_error("project not found: " + project.project_id);
   }
 
   const auto merge_result = git.merge_remote_taking_theirs_for_conflicts(
@@ -54,9 +54,9 @@ int resolve_pull_conflicts(
                         *blob
                     )
                   : *blob;
-    } catch (const std::exception&) { // LCOV_EXCL_START - duplicate creation failure intentionally leaves remaining conflicts usable.
+    } catch (const std::exception&) {
       continue;
-    } // LCOV_EXCL_STOP // LCOV_EXCL_LINE
+    }
 
     const auto parsed = holder::core::parse_card_file(plain);
     if (!parsed.has_front_matter) continue;
@@ -72,10 +72,9 @@ int resolve_pull_conflicts(
     try {
       store.create(duplicate, parsed.body);
       resolved++;
-    } catch (const std::exception&) { // LCOV_EXCL_START - duplicate creation failure intentionally leaves remaining conflicts usable.
+    } catch (const std::exception&) {
       // e.g. id collision (vanishingly unlikely) -- skip rather than fail the whole pull.
     }
-    // LCOV_EXCL_STOP
   }
   return resolved;
 }

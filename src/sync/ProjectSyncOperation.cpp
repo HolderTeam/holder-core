@@ -33,9 +33,9 @@ void refresh_activity_best_effort(
          .unpushed_commits_count = metrics.unpushed_commits_count,
          .updated_at = now}
     );
-  } catch (const std::exception&) { // LCOV_EXCL_START - advisory metrics failures must not alter sync result.
+  } catch (const std::exception&) {
     // Metrics are advisory. The phase result and its durable status remain authoritative.
-  } // LCOV_EXCL_STOP // LCOV_EXCL_LINE
+  }
 }
 
 } // namespace
@@ -68,8 +68,8 @@ ProjectSyncResult run_project_sync(
     const ProjectSyncRequest& request
 ) {
   if (project_id.empty()) throw std::invalid_argument("project_id must not be empty");
-  if (!request.pull && !request.push) { // LCOV_EXCL_LINE - public routes validate operation selection.
-    throw std::invalid_argument("project sync must request pull, push, or both"); // LCOV_EXCL_LINE
+  if (!request.pull && !request.push) {
+    throw std::invalid_argument("project sync must request pull, push, or both");
   }
 
   holder::project::ProjectRepo projects(db);
@@ -79,8 +79,8 @@ ProjectSyncResult run_project_sync(
   auto operation = git.lock_operation(initial->root_path);
   const auto current = projects.get(project_id);
   if (!current.has_value()) throw std::runtime_error("project not found: " + project_id);
-  if (current->root_path != initial->root_path) { // LCOV_EXCL_LINE - requires concurrent direct DB mutation while lock waits.
-    throw std::runtime_error("project root changed while waiting for sync: " + project_id); // LCOV_EXCL_LINE
+  if (current->root_path != initial->root_path) {
+    throw std::runtime_error("project root changed while waiting for sync: " + project_id);
   }
 
   const auto& project = *current;
