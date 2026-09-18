@@ -182,6 +182,7 @@ coverage_all() {
   if command -v gcovr >/dev/null 2>&1; then
     gcovr \
       --root . \
+      --object-directory "${build_dir}" \
       --filter 'src/' \
       --exclude 'tests/' \
       --gcov-executable "${gcov_executable}" \
