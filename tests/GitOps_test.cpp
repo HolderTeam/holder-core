@@ -1,5 +1,6 @@
 #if __has_include(<catch2/catch_test_macros.hpp>)
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #else
 #include <catch2/catch.hpp>
 #endif
@@ -35,7 +36,7 @@ TEST_CASE("canonical_repo_key tolerates an empty unresolved path", "[git]") {
 
 TEST_CASE("RealGitOps probe_remote throws when repo is not opened", "[git]") {
   holder::git::RealGitOps ops;
-  REQUIRE_THROWS(ops.probe_remote("origin"));
+  REQUIRE_THROWS_WITH(ops.probe_remote("origin"), Catch::Matchers::ContainsSubstring("GitRepo not opened"));
 }
 
 TEST_CASE("URL probes use detached remotes and preserve repository configuration", "[git][probe-url]") {
@@ -90,7 +91,10 @@ TEST_CASE("URL probes leave absent origins absent", "[git][probe-url]") {
 
 TEST_CASE("RealGitOps push_branch throws when repo is not opened", "[git]") {
   holder::git::RealGitOps ops;
-  REQUIRE_THROWS(ops.push_branch("origin", "cards", true));
+  REQUIRE_THROWS_WITH(
+      ops.push_branch("origin", "cards", true),
+      Catch::Matchers::ContainsSubstring("GitRepo not opened")
+  );
 }
 
 TEST_CASE("RealGitOps probe_remote delegates to repo after open", "[git]") {
@@ -112,7 +116,10 @@ TEST_CASE("RealGitOps delegates remote mutation and pull methods", "[git]") {
   const auto configured = ops.probe_remote("origin");
   REQUIRE(configured.status != holder::git::RemoteProbeStatus::RemoteUnset);
 
-  REQUIRE_THROWS(ops.pull_remote_ff_only("origin"));
+  REQUIRE_THROWS_WITH(
+      ops.pull_remote_ff_only("origin"),
+      Catch::Matchers::ContainsSubstring("git_remote_fetch failed")
+  );
 
   ops.remove_remote("origin");
   const auto removed = ops.probe_remote("origin");

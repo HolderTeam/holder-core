@@ -1,5 +1,6 @@
 #if __has_include(<catch2/catch_test_macros.hpp>)
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #else
 #include <catch2/catch.hpp>
 #endif
@@ -256,7 +257,10 @@ TEST_CASE("AiMessageRepo append throws when thread is missing", "[aimessagerepo]
   msg.content = "Hello";
   msg.created_at = 10;
 
-  REQUIRE_THROWS(repo.append(msg));
+  REQUIRE_THROWS_WITH(
+      repo.append(msg),
+      Catch::Matchers::ContainsSubstring("thread not found for ai message")
+  );
 }
 
 TEST_CASE("AiMessageRepo append throws when thread project is missing", "[aimessagerepo]") {
@@ -279,7 +283,10 @@ TEST_CASE("AiMessageRepo append throws when thread project is missing", "[aimess
   msg.content = "Hello";
   msg.created_at = 10;
 
-  REQUIRE_THROWS(repo.append(msg));
+  REQUIRE_THROWS_WITH(
+      repo.append(msg),
+      Catch::Matchers::ContainsSubstring("project not found for ai message thread")
+  );
 }
 
 TEST_CASE("AiMessageRepo append throws on existing file conflict", "[aimessagerepo]") {
@@ -308,7 +315,10 @@ TEST_CASE("AiMessageRepo append throws on existing file conflict", "[aimessagere
   msg.content = "Hello";
   msg.created_at = 10;
 
-  REQUIRE_THROWS(repo.append(msg));
+  REQUIRE_THROWS_WITH(
+      repo.append(msg),
+      Catch::Matchers::ContainsSubstring("conflict: ai message file already exists")
+  );
 }
 
 TEST_CASE("AiMessageRepo uses project remote and deleted_at paths", "[aimessagerepo]") {
@@ -363,7 +373,10 @@ TEST_CASE("AiMessageRepo trash restore and remove live file", "[aimessagerepo]")
   repo.trash(msg.message_id, 100);
   auto deleted = repo.list_deleted_by_project("proj-1");
   REQUIRE(deleted.size() == 1);
-  REQUIRE_THROWS(repo.trash(msg.message_id, 101));
+  REQUIRE_THROWS_WITH(
+      repo.trash(msg.message_id, 101),
+      Catch::Matchers::ContainsSubstring("ai message already deleted")
+  );
 
   repo.restore(msg.message_id);
   deleted = repo.list_deleted_by_project("proj-1");
@@ -413,7 +426,10 @@ TEST_CASE("AiMessageRepo trash throws for missing message and missing content", 
   create_thread(db, "thread-1", "proj-1");
 
   holder::ai::AiMessageRepo repo(db, nullptr);
-  REQUIRE_THROWS(repo.trash("missing-message", 1));
+  REQUIRE_THROWS_WITH(
+      repo.trash("missing-message", 1),
+      Catch::Matchers::ContainsSubstring("ai message not found: missing-message")
+  );
 
   holder::model::AiMessage msg;
   msg.message_id = "msg-trash-missing-content";
@@ -426,7 +442,10 @@ TEST_CASE("AiMessageRepo trash throws for missing message and missing content", 
 
   const auto rel_path = holder::core::ai_message_rel_path(msg.message_id);
   std::filesystem::remove(project_root / rel_path);
-  REQUIRE_THROWS(repo.trash(msg.message_id, 2));
+  REQUIRE_THROWS_WITH(
+      repo.trash(msg.message_id, 2),
+      Catch::Matchers::ContainsSubstring("ai message content missing")
+  );
 }
 
 TEST_CASE("AiMessageRepo remove falls back to deleting the row when its thread is absent", "[aimessagerepo]") {
@@ -463,7 +482,10 @@ TEST_CASE("AiMessageRepo update_links guards and missing file path", "[aimessage
   create_thread(db, "thread-1", "proj-1");
 
   holder::ai::AiMessageRepo repo(db, nullptr);
-  REQUIRE_THROWS(repo.update_links("missing-id"));
+  REQUIRE_THROWS_WITH(
+      repo.update_links("missing-id"),
+      Catch::Matchers::ContainsSubstring("ai message not found: missing-id")
+  );
 
   holder::model::AiMessage msg;
   msg.message_id = "msg-links";
@@ -476,7 +498,10 @@ TEST_CASE("AiMessageRepo update_links guards and missing file path", "[aimessage
 
   const auto rel_path = holder::core::ai_message_rel_path(msg.message_id);
   std::filesystem::remove(project_root / rel_path);
-  REQUIRE_THROWS(repo.update_links(msg.message_id));
+  REQUIRE_THROWS_WITH(
+      repo.update_links(msg.message_id),
+      Catch::Matchers::ContainsSubstring("ai message file missing")
+  );
 }
 
 TEST_CASE("AiMessageRepo restore throws when message is not deleted", "[aimessagerepo]") {
@@ -489,7 +514,10 @@ TEST_CASE("AiMessageRepo restore throws when message is not deleted", "[aimessag
   create_thread(db, "thread-1", "proj-1");
 
   holder::ai::AiMessageRepo repo(db, nullptr);
-  REQUIRE_THROWS(repo.restore("missing-message"));
+  REQUIRE_THROWS_WITH(
+      repo.restore("missing-message"),
+      Catch::Matchers::ContainsSubstring("ai message not found: missing-message")
+  );
 
   holder::model::AiMessage msg;
   msg.message_id = "msg-restore";
@@ -500,7 +528,10 @@ TEST_CASE("AiMessageRepo restore throws when message is not deleted", "[aimessag
   msg.created_at = 14;
   repo.append(msg);
 
-  REQUIRE_THROWS(repo.restore(msg.message_id));
+  REQUIRE_THROWS_WITH(
+      repo.restore(msg.message_id),
+      Catch::Matchers::ContainsSubstring("ai message is not deleted")
+  );
 }
 
 TEST_CASE(
@@ -531,7 +562,10 @@ TEST_CASE(
       "UPDATE ai_messages SET thread_id = 'missing-thread' WHERE message_id = 'msg-restore-guards';"
   );
   db.exec("PRAGMA foreign_keys=ON;");
-  REQUIRE_THROWS(repo.restore(msg.message_id));
+  REQUIRE_THROWS_WITH(
+      repo.restore(msg.message_id),
+      Catch::Matchers::ContainsSubstring("thread not found for ai message")
+  );
 
   db.exec("PRAGMA foreign_keys=OFF;");
   db.exec("INSERT INTO ai_threads(thread_id, project_id, title, created_at, updated_at) "
@@ -540,7 +574,10 @@ TEST_CASE(
       "UPDATE ai_messages SET thread_id = 'thread-bad-restore' WHERE message_id = 'msg-restore-guards';"
   );
   db.exec("PRAGMA foreign_keys=ON;");
-  REQUIRE_THROWS(repo.restore(msg.message_id));
+  REQUIRE_THROWS_WITH(
+      repo.restore(msg.message_id),
+      Catch::Matchers::ContainsSubstring("project not found for ai message thread")
+  );
 }
 
 TEST_CASE("AiMessageRepo sqlite prepare failures throw", "[aimessagerepo]") {
@@ -562,10 +599,22 @@ TEST_CASE("AiMessageRepo sqlite prepare failures throw", "[aimessagerepo]") {
   msg.content = "prepare";
   msg.created_at = 15;
 
-  REQUIRE_THROWS(repo.append(msg));
-  REQUIRE_THROWS(repo.get("anything"));
-  REQUIRE_THROWS(repo.list_by_thread("thread-1"));
-  REQUIRE_THROWS(repo.list_deleted_by_project("proj-1"));
+  REQUIRE_THROWS_WITH(
+      repo.append(msg),
+      Catch::Matchers::ContainsSubstring("prepare insert ai message failed: no such table: ai_messages")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.get("anything"),
+      Catch::Matchers::ContainsSubstring("prepare get ai message failed: no such table: ai_messages")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.list_by_thread("thread-1"),
+      Catch::Matchers::ContainsSubstring("prepare list ai messages failed: no such table: ai_messages")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.list_deleted_by_project("proj-1"),
+      Catch::Matchers::ContainsSubstring("prepare list deleted ai messages failed: no such table: ai_messages")
+  );
 
   holder::model::AiMessage update_msg;
   update_msg.message_id = "msg-update-prepare";
@@ -574,7 +623,10 @@ TEST_CASE("AiMessageRepo sqlite prepare failures throw", "[aimessagerepo]") {
   update_msg.source = "manual";
   update_msg.content = "u";
   update_msg.created_at = 99;
-  REQUIRE_THROWS(repo.update(update_msg));
+  REQUIRE_THROWS_WITH(
+      repo.update(update_msg),
+      Catch::Matchers::ContainsSubstring("prepare update ai message failed: no such table: ai_messages")
+  );
 }
 
 TEST_CASE("AiMessageRepo append cleans file when DB insert fails", "[aimessagerepo]") {
@@ -598,7 +650,10 @@ TEST_CASE("AiMessageRepo append cleans file when DB insert fails", "[aimessagere
   msg.content = "insert fail";
   msg.created_at = 20;
 
-  REQUIRE_THROWS(repo.append(msg));
+  REQUIRE_THROWS_WITH(
+      repo.append(msg),
+      Catch::Matchers::ContainsSubstring("insert ai message failed: no insert")
+  );
   const auto full_path = project_root / holder::core::ai_message_rel_path(msg.message_id);
   REQUIRE_FALSE(std::filesystem::exists(full_path));
 }
@@ -624,7 +679,10 @@ TEST_CASE("AiMessageRepo update throws when thread or project is missing", "[aim
 
   auto no_thread = msg;
   no_thread.thread_id = "missing-thread";
-  REQUIRE_THROWS(repo.update(no_thread));
+  REQUIRE_THROWS_WITH(
+      repo.update(no_thread),
+      Catch::Matchers::ContainsSubstring("thread not found for ai message")
+  );
 
   db.exec("PRAGMA foreign_keys=OFF;");
   db.exec("INSERT INTO ai_threads(thread_id, project_id, title, created_at, updated_at) "
@@ -632,7 +690,10 @@ TEST_CASE("AiMessageRepo update throws when thread or project is missing", "[aim
   db.exec("PRAGMA foreign_keys=ON;");
   auto bad_project = msg;
   bad_project.thread_id = "thread-bad-project";
-  REQUIRE_THROWS(repo.update(bad_project));
+  REQUIRE_THROWS_WITH(
+      repo.update(bad_project),
+      Catch::Matchers::ContainsSubstring("project not found for ai message thread")
+  );
 }
 
 TEST_CASE("AiMessageRepo update/trash/restore/remove SQL step failures throw", "[aimessagerepo]") {
@@ -654,16 +715,35 @@ TEST_CASE("AiMessageRepo update/trash/restore/remove SQL step failures throw", "
   msg.created_at = 22;
   repo.append(msg);
 
+  // restore only reaches its UPDATE for a message that is already in the trash, so trash a
+  // second message before the failing trigger exists.
+  holder::model::AiMessage trashed = msg;
+  trashed.message_id = "msg-step-fail-trashed";
+  repo.append(trashed);
+  repo.trash(trashed.message_id, 50);
+
   db.exec("CREATE TRIGGER fail_ai_messages_update BEFORE UPDATE ON ai_messages "
           "BEGIN SELECT RAISE(ABORT, 'no update'); END;");
-  REQUIRE_THROWS(repo.update(msg));
-  REQUIRE_THROWS(repo.trash(msg.message_id, 100));
-  REQUIRE_THROWS(repo.restore(msg.message_id));
+  REQUIRE_THROWS_WITH(
+      repo.update(msg),
+      Catch::Matchers::ContainsSubstring("update ai message failed: no update")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.trash(msg.message_id, 100),
+      Catch::Matchers::ContainsSubstring("trash ai message failed: no update")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.restore(trashed.message_id),
+      Catch::Matchers::ContainsSubstring("restore ai message failed: no update")
+  );
   db.exec("DROP TRIGGER fail_ai_messages_update;");
 
   db.exec("CREATE TRIGGER fail_ai_messages_delete BEFORE DELETE ON ai_messages "
           "BEGIN SELECT RAISE(ABORT, 'no delete'); END;");
-  REQUIRE_THROWS(repo.remove(msg.message_id));
+  REQUIRE_THROWS_WITH(
+      repo.remove(msg.message_id),
+      Catch::Matchers::ContainsSubstring("delete ai message failed: no delete")
+  );
 }
 
 TEST_CASE(
@@ -697,9 +777,18 @@ TEST_CASE(
       },
       nullptr
   );
-  REQUIRE_THROWS(repo.get(msg.message_id));
-  REQUIRE_THROWS(repo.list_by_thread("thread-1"));
-  REQUIRE_THROWS(repo.list_deleted_by_project("proj-1"));
+  REQUIRE_THROWS_WITH(
+      repo.get(msg.message_id),
+      Catch::Matchers::ContainsSubstring("get ai message failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.list_by_thread("thread-1"),
+      Catch::Matchers::ContainsSubstring("prepare list ai messages failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.list_deleted_by_project("proj-1"),
+      Catch::Matchers::ContainsSubstring("prepare list deleted ai messages failed: interrupted")
+  );
   sqlite3_progress_handler(db.handle(), 0, nullptr, nullptr);
 }
 
@@ -724,22 +813,48 @@ TEST_CASE(
   msg.content = "x";
   msg.created_at = 24;
   repo.append(msg);
+  // restore only reaches its thread/project checks for a message that is already deleted, so
+  // trash a second message while its thread is still valid.
+  holder::model::AiMessage deleted = msg;
+  deleted.message_id = "msg-guard-3";
+  repo.append(deleted);
+  repo.trash(deleted.message_id, 40);
 
   db.exec("PRAGMA foreign_keys=OFF;");
-  db.exec("UPDATE ai_messages SET thread_id = 'missing-thread' WHERE message_id = 'msg-guard-2';");
+  db.exec("UPDATE ai_messages SET thread_id = 'missing-thread' "
+          "WHERE message_id IN ('msg-guard-2', 'msg-guard-3');");
   db.exec("PRAGMA foreign_keys=ON;");
-  REQUIRE_THROWS(repo.trash(msg.message_id, 50));
-  REQUIRE_THROWS(repo.restore(msg.message_id));
-  REQUIRE_THROWS(repo.update_links(msg.message_id));
+  REQUIRE_THROWS_WITH(
+      repo.trash(msg.message_id, 50),
+      Catch::Matchers::ContainsSubstring("thread not found for ai message")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.restore(deleted.message_id),
+      Catch::Matchers::ContainsSubstring("thread not found for ai message")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.update_links(msg.message_id),
+      Catch::Matchers::ContainsSubstring("thread not found for ai message")
+  );
 
   db.exec("PRAGMA foreign_keys=OFF;");
   db.exec("INSERT INTO ai_threads(thread_id, project_id, title, created_at, updated_at) "
           "VALUES('thread-bad-2', 'missing-proj', 'T', 1, 1);");
-  db.exec("UPDATE ai_messages SET thread_id = 'thread-bad-2' WHERE message_id = 'msg-guard-2';");
+  db.exec("UPDATE ai_messages SET thread_id = 'thread-bad-2' "
+          "WHERE message_id IN ('msg-guard-2', 'msg-guard-3');");
   db.exec("PRAGMA foreign_keys=ON;");
-  REQUIRE_THROWS(repo.trash(msg.message_id, 51));
-  REQUIRE_THROWS(repo.restore(msg.message_id));
-  REQUIRE_THROWS(repo.update_links(msg.message_id));
+  REQUIRE_THROWS_WITH(
+      repo.trash(msg.message_id, 51),
+      Catch::Matchers::ContainsSubstring("project not found for ai message thread")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.restore(deleted.message_id),
+      Catch::Matchers::ContainsSubstring("project not found for ai message thread")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.update_links(msg.message_id),
+      Catch::Matchers::ContainsSubstring("project not found for ai message thread")
+  );
 }
 
 TEST_CASE("AiMessageRepo methods honor project remote set_remote path", "[aimessagerepo]") {
@@ -825,10 +940,22 @@ TEST_CASE(
   REQUIRE(
       sqlite3_set_authorizer(db.handle(), deny_ai_messages_update_delete, nullptr) == SQLITE_OK
   );
-  REQUIRE_THROWS(repo.update(msg_update));
-  REQUIRE_THROWS(repo.trash(msg_trash.message_id, 200));
-  REQUIRE_THROWS(repo.restore(msg_restore.message_id));
-  REQUIRE_THROWS(repo.remove(msg_remove.message_id));
+  REQUIRE_THROWS_WITH(
+      repo.update(msg_update),
+      Catch::Matchers::ContainsSubstring("prepare update ai message failed: not authorized")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.trash(msg_trash.message_id, 200),
+      Catch::Matchers::ContainsSubstring("prepare trash ai message failed: not authorized")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.restore(msg_restore.message_id),
+      Catch::Matchers::ContainsSubstring("prepare restore ai message failed: not authorized")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.remove(msg_remove.message_id),
+      Catch::Matchers::ContainsSubstring("prepare delete ai message failed: not authorized")
+  );
   REQUIRE(sqlite3_set_authorizer(db.handle(), nullptr, nullptr) == SQLITE_OK);
 }
 
@@ -871,7 +998,10 @@ TEST_CASE(
       },
       &cb_count
   );
-  REQUIRE_THROWS(repo.list_by_thread("thread-1"));
+  REQUIRE_THROWS_WITH(
+      repo.list_by_thread("thread-1"),
+      Catch::Matchers::ContainsSubstring("list ai messages failed: interrupted")
+  );
   sqlite3_progress_handler(db.handle(), 0, nullptr, nullptr);
 
   cb_count = 0;
@@ -885,7 +1015,10 @@ TEST_CASE(
       },
       &cb_count
   );
-  REQUIRE_THROWS(repo.list_deleted_by_project("proj-1"));
+  REQUIRE_THROWS_WITH(
+      repo.list_deleted_by_project("proj-1"),
+      Catch::Matchers::ContainsSubstring("list deleted ai messages failed: interrupted")
+  );
   sqlite3_progress_handler(db.handle(), 0, nullptr, nullptr);
 }
 
@@ -914,7 +1047,10 @@ TEST_CASE(
   const auto missing_trash_rel = holder::core::ai_message_trash_rel_path(missing_file_msg.message_id
   );
   std::filesystem::remove(project_root / missing_trash_rel);
-  REQUIRE_THROWS(repo.restore(missing_file_msg.message_id));
+  REQUIRE_THROWS_WITH(
+      repo.restore(missing_file_msg.message_id),
+      Catch::Matchers::ContainsSubstring("ai message content missing")
+  );
 
   holder::model::AiMessage step_fail_msg;
   step_fail_msg.message_id = "msg-restore-step-fail";
@@ -928,6 +1064,9 @@ TEST_CASE(
 
   db.exec("CREATE TRIGGER fail_ai_messages_restore_update BEFORE UPDATE ON ai_messages "
           "BEGIN SELECT RAISE(ABORT, 'no restore update'); END;");
-  REQUIRE_THROWS(repo.restore(step_fail_msg.message_id));
+  REQUIRE_THROWS_WITH(
+      repo.restore(step_fail_msg.message_id),
+      Catch::Matchers::ContainsSubstring("restore ai message failed: no restore update")
+  );
   db.exec("DROP TRIGGER fail_ai_messages_restore_update;");
 }

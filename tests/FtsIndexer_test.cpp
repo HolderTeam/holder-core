@@ -1,5 +1,6 @@
 #if __has_include(<catch2/catch_test_macros.hpp>)
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #else
 #include <catch2/catch.hpp>
 #endif
@@ -252,8 +253,14 @@ TEST_CASE("FtsIndexer throws when sqlite handle is closed", "[fts]") {
   holder::index::FtsIndexer fts(db);
   db.close();
 
-  REQUIRE_THROWS(fts.upsert_card("card-1", "proj-1", "Title", "Body"));
-  REQUIRE_THROWS(fts.get_body("card-1"));
+  REQUIRE_THROWS_WITH(
+      fts.upsert_card("card-1", "proj-1", "Title", "Body"),
+      Catch::Matchers::ContainsSubstring("prepare delete cards_fts failed: unknown sqlite error")
+  );
+  REQUIRE_THROWS_WITH(
+      fts.get_body("card-1"),
+      Catch::Matchers::ContainsSubstring("prepare get body failed: unknown sqlite error")
+  );
 }
 
 namespace {
@@ -287,10 +294,22 @@ TEST_CASE("FtsIndexer delete/upsert throw on interrupted sqlite step", "[fts]") 
 
   int interrupt_on = 1;
   sqlite3_progress_handler(db.handle(), 1, sqlite_interrupt_cb, &interrupt_on);
-  REQUIRE_THROWS(fts.delete_card("card-1"));
-  REQUIRE_THROWS(fts.delete_message("msg-1"));
-  REQUIRE_THROWS(fts.upsert_card("card-1", "proj-1", "Title", "Body"));
-  REQUIRE_THROWS(fts.upsert_message("msg-2", "thread-2", "proj-1", "gamma"));
+  REQUIRE_THROWS_WITH(
+      fts.delete_card("card-1"),
+      Catch::Matchers::ContainsSubstring("delete cards_fts failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      fts.delete_message("msg-1"),
+      Catch::Matchers::ContainsSubstring("delete ai_fts failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      fts.upsert_card("card-1", "proj-1", "Title", "Body"),
+      Catch::Matchers::ContainsSubstring("delete cards_fts failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      fts.upsert_message("msg-2", "thread-2", "proj-1", "gamma"),
+      Catch::Matchers::ContainsSubstring("delete ai_fts failed: interrupted")
+  );
   sqlite3_progress_handler(db.handle(), 0, nullptr, nullptr);
 }
 
@@ -326,9 +345,18 @@ TEST_CASE("FtsIndexer search throws on interrupted sqlite step", "[fts]") {
 
   int interrupt_on = 1;
   sqlite3_progress_handler(db.handle(), 1, sqlite_interrupt_cb, &interrupt_on);
-  REQUIRE_THROWS(fts.search_cards("proj-1", "alpha", 10, 0));
-  REQUIRE_THROWS(fts.search_messages("proj-1", "alpha", 10, 0));
-  REQUIRE_THROWS(fts.get_body("card-1"));
+  REQUIRE_THROWS_WITH(
+      fts.search_cards("proj-1", "alpha", 10, 0),
+      Catch::Matchers::ContainsSubstring("search cards_fts failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      fts.search_messages("proj-1", "alpha", 10, 0),
+      Catch::Matchers::ContainsSubstring("search ai_fts failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      fts.get_body("card-1"),
+      Catch::Matchers::ContainsSubstring("get body failed: interrupted")
+  );
   sqlite3_progress_handler(db.handle(), 0, nullptr, nullptr);
 }
 
@@ -344,8 +372,14 @@ TEST_CASE("FtsIndexer search throws when join tables are missing", "[fts]") {
   db.exec("DROP TABLE cards;");
   db.exec("DROP TABLE ai_messages;");
 
-  REQUIRE_THROWS(fts.search_cards("proj-1", "alpha", 10, 0));
-  REQUIRE_THROWS(fts.search_messages("proj-1", "alpha", 10, 0));
+  REQUIRE_THROWS_WITH(
+      fts.search_cards("proj-1", "alpha", 10, 0),
+      Catch::Matchers::ContainsSubstring("prepare search cards_fts failed: no such table: cards")
+  );
+  REQUIRE_THROWS_WITH(
+      fts.search_messages("proj-1", "alpha", 10, 0),
+      Catch::Matchers::ContainsSubstring("prepare search ai_fts failed: no such table: ai_messages")
+  );
 }
 
 TEST_CASE("FtsIndexer upsert throws when insert prepare is denied by authorizer", "[fts]") {
@@ -359,11 +393,17 @@ TEST_CASE("FtsIndexer upsert throws when insert prepare is denied by authorizer"
   holder::index::FtsIndexer fts(db);
   const char* deny_cards = "cards_fts";
   sqlite3_set_authorizer(db.handle(), sqlite_deny_insert_into_table, const_cast<char*>(deny_cards));
-  REQUIRE_THROWS(fts.upsert_card("card-1", "proj-1", "Title", "Body"));
+  REQUIRE_THROWS_WITH(
+      fts.upsert_card("card-1", "proj-1", "Title", "Body"),
+      Catch::Matchers::ContainsSubstring("prepare insert cards_fts failed: not authorized")
+  );
 
   const char* deny_ai = "ai_fts";
   sqlite3_set_authorizer(db.handle(), sqlite_deny_insert_into_table, const_cast<char*>(deny_ai));
-  REQUIRE_THROWS(fts.upsert_message("msg-1", "thread-1", "proj-1", "alpha beta"));
+  REQUIRE_THROWS_WITH(
+      fts.upsert_message("msg-1", "thread-1", "proj-1", "alpha beta"),
+      Catch::Matchers::ContainsSubstring("prepare insert ai_fts failed: not authorized")
+  );
 
   sqlite3_set_authorizer(db.handle(), nullptr, nullptr);
 }
@@ -379,8 +419,14 @@ TEST_CASE("FtsIndexer delete throws when sqlite handle is closed", "[fts]") {
   holder::index::FtsIndexer fts(db);
   db.close();
 
-  REQUIRE_THROWS(fts.delete_card("card-1"));
-  REQUIRE_THROWS(fts.delete_message("msg-1"));
+  REQUIRE_THROWS_WITH(
+      fts.delete_card("card-1"),
+      Catch::Matchers::ContainsSubstring("prepare delete cards_fts failed: unknown sqlite error")
+  );
+  REQUIRE_THROWS_WITH(
+      fts.delete_message("msg-1"),
+      Catch::Matchers::ContainsSubstring("prepare delete ai_fts failed: unknown sqlite error")
+  );
 }
 
 TEST_CASE("FtsIndexer upsert_message throws when sqlite handle is closed", "[fts]") {
@@ -394,5 +440,8 @@ TEST_CASE("FtsIndexer upsert_message throws when sqlite handle is closed", "[fts
   holder::index::FtsIndexer fts(db);
   db.close();
 
-  REQUIRE_THROWS(fts.upsert_message("msg-1", "thread-1", "proj-1", "alpha beta"));
+  REQUIRE_THROWS_WITH(
+      fts.upsert_message("msg-1", "thread-1", "proj-1", "alpha beta"),
+      Catch::Matchers::ContainsSubstring("prepare delete ai_fts failed: unknown sqlite error")
+  );
 }

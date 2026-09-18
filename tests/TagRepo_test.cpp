@@ -267,6 +267,9 @@ TEST_CASE("TagRepo set_tags_for_card rejects a duplicate tag in the same call", 
   // Direct callers (unlike TagExtractor, which already de-dupes) can violate the primary key.
   // set_tags_for_card isn't wrapped in its own transaction (see the header comment for why), so
   // this throws after the first "todo" insert already landed, not as an all-or-nothing rollback.
-  REQUIRE_THROWS(repo.set_tags_for_card("proj-1", "card-a", {"todo", "todo"}, 10));
+  REQUIRE_THROWS_WITH(
+      repo.set_tags_for_card("proj-1", "card-a", {"todo", "todo"}, 10),
+      Catch::Matchers::ContainsSubstring("insert tag failed: UNIQUE constraint failed: card_tags.project_id, card_tags.card_id, card_tags.tag")
+  );
   REQUIRE(repo.list_tags_for_card("proj-1", "card-a") == std::vector<std::string>{"todo"});
 }

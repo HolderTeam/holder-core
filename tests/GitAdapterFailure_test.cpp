@@ -1,5 +1,6 @@
 #if __has_include(<catch2/catch_test_macros.hpp>)
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #else
 #include <catch2/catch.hpp>
 #endif
@@ -138,7 +139,7 @@ TEST_CASE("CardStore create propagates git commit failure after DB write", "[git
   card.created_at = 1;
   card.updated_at = 1;
 
-  REQUIRE_THROWS(store.create(card, "body"));
+  REQUIRE_THROWS_WITH(store.create(card, "body"), Catch::Matchers::ContainsSubstring("commit failed"));
 
   holder::card::CardRepo repo(db);
   REQUIRE(repo.get("card-1").has_value());
@@ -175,7 +176,7 @@ TEST_CASE("AiMessageRepo append propagates git commit failure", "[git]") {
   msg.content = "hello";
   msg.created_at = 2;
 
-  REQUIRE_THROWS(repo.append(msg));
+  REQUIRE_THROWS_WITH(repo.append(msg), Catch::Matchers::ContainsSubstring("commit failed"));
 }
 
 TEST_CASE("CardStore create propagates set_remote failure", "[git]") {
@@ -202,7 +203,7 @@ TEST_CASE("CardStore create propagates set_remote failure", "[git]") {
   card.created_at = 1;
   card.updated_at = 1;
 
-  REQUIRE_THROWS(store.create(card, "body"));
+  REQUIRE_THROWS_WITH(store.create(card, "body"), Catch::Matchers::ContainsSubstring("set remote failed"));
 }
 
 TEST_CASE("CardStore update propagates git stage failure", "[git]") {
@@ -227,7 +228,10 @@ TEST_CASE("CardStore update propagates git stage failure", "[git]") {
   store.create(card, "body");
 
   git.fail_stage = true;
-  REQUIRE_THROWS(store.update_content(card.card_id, "updated", std::nullopt, 2));
+  REQUIRE_THROWS_WITH(
+      store.update_content(card.card_id, "updated", std::nullopt, 2),
+      Catch::Matchers::ContainsSubstring("stage failed")
+  );
 }
 
 TEST_CASE("AiMessageRepo update propagates git stage failure", "[git]") {
@@ -263,7 +267,7 @@ TEST_CASE("AiMessageRepo update propagates git stage failure", "[git]") {
 
   msg.content = "changed";
   git.fail_stage = true;
-  REQUIRE_THROWS(repo.update(msg));
+  REQUIRE_THROWS_WITH(repo.update(msg), Catch::Matchers::ContainsSubstring("stage failed"));
 }
 
 // NOTE: Project git remote updates use the real GitRepo directly in Session,

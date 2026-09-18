@@ -1,5 +1,6 @@
 #if __has_include(<catch2/catch_test_macros.hpp>)
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #else
 #include <catch2/catch.hpp>
 #endif
@@ -232,31 +233,37 @@ TEST_CASE("Encrypted assets reject changed identity and bytes", "[asset]") {
       source, dir / "stored.bin", project, "resource-1234", "asset-1234"
   );
 
-  REQUIRE_THROWS(holder::resource::recover_asset_file(
-      dir / "stored.bin",
-      dir / "wrong.bin",
-      project,
-      "resource-1234",
-      "different-asset",
-      staged.encoding,
-      staged.stored,
-      staged.plaintext
-  ));
+  REQUIRE_THROWS_WITH(
+      holder::resource::recover_asset_file(
+          dir / "stored.bin",
+          dir / "wrong.bin",
+          project,
+          "resource-1234",
+          "different-asset",
+          staged.encoding,
+          staged.stored,
+          staged.plaintext
+      ),
+      Catch::Matchers::ContainsSubstring("HolderAsset1 identity mismatch")
+  );
 
   auto tampered = read_binary(dir / "stored.bin");
   REQUIRE_FALSE(tampered.empty());
   tampered.back() = static_cast<char>(static_cast<unsigned char>(tampered.back()) ^ 0x01U);
   write_binary(dir / "stored.bin", tampered);
-  REQUIRE_THROWS(holder::resource::recover_asset_file(
-      dir / "stored.bin",
-      dir / "tampered.bin",
-      project,
-      "resource-1234",
-      "asset-1234",
-      staged.encoding,
-      staged.stored,
-      staged.plaintext
-  ));
+  REQUIRE_THROWS_WITH(
+      holder::resource::recover_asset_file(
+          dir / "stored.bin",
+          dir / "tampered.bin",
+          project,
+          "resource-1234",
+          "asset-1234",
+          staged.encoding,
+          staged.stored,
+          staged.plaintext
+      ),
+      Catch::Matchers::ContainsSubstring("stored asset integrity check failed")
+  );
 }
 
 TEST_CASE("Asset envelopes reject malformed structure and invalid file targets", "[asset]") {
@@ -267,20 +274,32 @@ TEST_CASE("Asset envelopes reject malformed structure and invalid file targets",
   holder::model::Project plain;
   plain.project_id = "project-plain";
   plain.privacy_mode = "plain";
-  REQUIRE_THROWS(holder::resource::digest_file(dir / "missing.bin"));
-  REQUIRE_THROWS(holder::resource::stage_asset_file(
-      dir / "missing.bin", dir / "missing.staged", plain, "resource-1234", "asset-1234"
-  ));
+  REQUIRE_THROWS_WITH(
+      holder::resource::digest_file(dir / "missing.bin"),
+      Catch::Matchers::ContainsSubstring("failed to open asset file")
+  );
+  REQUIRE_THROWS_WITH(
+      holder::resource::stage_asset_file(
+          dir / "missing.bin", dir / "missing.staged", plain, "resource-1234", "asset-1234"
+      ),
+      Catch::Matchers::ContainsSubstring("failed to open asset source")
+  );
   std::filesystem::create_directory(dir / "staging-is-directory");
-  REQUIRE_THROWS(holder::resource::stage_asset_file(
-      source, dir / "staging-is-directory", plain, "resource-1234", "asset-1234"
-  ));
+  REQUIRE_THROWS_WITH(
+      holder::resource::stage_asset_file(
+          source, dir / "staging-is-directory", plain, "resource-1234", "asset-1234"
+      ),
+      Catch::Matchers::ContainsSubstring("failed to open asset staging file")
+  );
 
   auto missing_key = plain;
   missing_key.privacy_mode = "encrypted_git";
-  REQUIRE_THROWS(holder::resource::stage_asset_file(
-      source, dir / "missing-key.staged", missing_key, "resource-1234", "asset-1234"
-  ));
+  REQUIRE_THROWS_WITH(
+      holder::resource::stage_asset_file(
+          source, dir / "missing-key.staged", missing_key, "resource-1234", "asset-1234"
+      ),
+      Catch::Matchers::ContainsSubstring("encrypted project missing project_key_id")
+  );
 
   const auto project = encrypted_project(dir);
   const auto stored_path = dir / "valid.stored";
@@ -298,10 +317,20 @@ TEST_CASE("Asset envelopes reject malformed structure and invalid file targets",
     const auto malformed = dir / name;
     write_binary(malformed, bytes);
     const auto digest = holder::resource::digest_file(malformed);
-    REQUIRE_THROWS(holder::resource::recover_asset_file(
-        malformed, dir / (name + ".out"), project, "resource-1234", "asset-1234",
-        "holder_asset_v1", digest, staged.plaintext
-    ));
+    REQUIRE_THROWS_WITH(
+        holder::resource::recover_asset_file(
+            malformed, dir / (name + ".out"), project, "resource-1234", "asset-1234",
+            "holder_asset_v1", digest, staged.plaintext
+        ),
+        Catch::Matchers::ContainsSubstring("HolderAsset1 authentication failed") ||
+            Catch::Matchers::ContainsSubstring("invalid HolderAsset1 chunk size") ||
+            Catch::Matchers::ContainsSubstring("invalid HolderAsset1 metadata size") ||
+            Catch::Matchers::ContainsSubstring("trailing data after HolderAsset1 final chunk") ||
+            Catch::Matchers::ContainsSubstring("truncated HolderAsset1 chunk") ||
+            Catch::Matchers::ContainsSubstring("truncated HolderAsset1 length") ||
+            Catch::Matchers::ContainsSubstring("truncated HolderAsset1 metadata") ||
+            Catch::Matchers::ContainsSubstring("truncated HolderAsset1 stream header")
+    );
   };
 
   expect_malformed("truncated-length", std::string("HolderAsset1\n\0\0", magic_size + 2));
@@ -331,21 +360,30 @@ TEST_CASE("Asset envelopes reject malformed structure and invalid file targets",
   trailing.push_back('x');
   expect_malformed("trailing-data", trailing);
 
-  REQUIRE_THROWS(holder::resource::recover_asset_file(
-      stored_path, dir / "unsupported.out", project, "resource-1234", "asset-1234",
-      "future-encoding", staged.stored, staged.plaintext
-  ));
+  REQUIRE_THROWS_WITH(
+      holder::resource::recover_asset_file(
+          stored_path, dir / "unsupported.out", project, "resource-1234", "asset-1234",
+          "future-encoding", staged.stored, staged.plaintext
+      ),
+      Catch::Matchers::ContainsSubstring("unsupported asset encoding: future-encoding")
+  );
   auto wrong_plaintext = staged.plaintext;
   ++wrong_plaintext.byte_size;
-  REQUIRE_THROWS(holder::resource::recover_asset_file(
-      stored_path, dir / "wrong-plaintext.out", project, "resource-1234", "asset-1234",
-      staged.encoding, staged.stored, wrong_plaintext
-  ));
+  REQUIRE_THROWS_WITH(
+      holder::resource::recover_asset_file(
+          stored_path, dir / "wrong-plaintext.out", project, "resource-1234", "asset-1234",
+          staged.encoding, staged.stored, wrong_plaintext
+      ),
+      Catch::Matchers::ContainsSubstring("plaintext asset integrity check failed")
+  );
   std::filesystem::create_directory(dir / "recovered-is-directory");
-  REQUIRE_THROWS(holder::resource::recover_asset_file(
-      stored_path, dir / "recovered-is-directory", project, "resource-1234", "asset-1234",
-      staged.encoding, staged.stored, staged.plaintext
-  ));
+  REQUIRE_THROWS_WITH(
+      holder::resource::recover_asset_file(
+          stored_path, dir / "recovered-is-directory", project, "resource-1234", "asset-1234",
+          staged.encoding, staged.stored, staged.plaintext
+      ),
+      Catch::Matchers::ContainsSubstring("failed to open recovered asset")
+  );
 }
 
 TEST_CASE("Local directory provider is atomic and idempotent", "[asset]") {
@@ -355,11 +393,23 @@ TEST_CASE("Local directory provider is atomic and idempotent", "[asset]") {
   const auto digest = holder::resource::digest_file(source);
   holder::resource::LocalDirectoryProvider provider(dir / "objects");
 
-  REQUIRE_THROWS(provider.exists(""));
-  REQUIRE_THROWS(provider.exists("/absolute/path"));
-  REQUIRE_THROWS(provider.exists("./relative"));
-  REQUIRE_THROWS(provider.put("project/bad-size", source, digest.byte_size + 1, digest.sha256));
-  REQUIRE_THROWS(provider.get("project/missing", dir / "missing.bin"));
+  REQUIRE_THROWS_WITH(provider.exists(""), Catch::Matchers::ContainsSubstring("invalid storage object key"));
+  REQUIRE_THROWS_WITH(
+      provider.exists("/absolute/path"),
+      Catch::Matchers::ContainsSubstring("invalid storage object key")
+  );
+  REQUIRE_THROWS_WITH(
+      provider.exists("./relative"),
+      Catch::Matchers::ContainsSubstring("unsafe storage object key")
+  );
+  REQUIRE_THROWS_WITH(
+      provider.put("project/bad-size", source, digest.byte_size + 1, digest.sha256),
+      Catch::Matchers::ContainsSubstring("staged object integrity mismatch")
+  );
+  REQUIRE_THROWS_WITH(
+      provider.get("project/missing", dir / "missing.bin"),
+      Catch::Matchers::ContainsSubstring("storage object not found")
+  );
 
   provider.put("project/asset.holderasset", source, digest.byte_size, digest.sha256);
   REQUIRE(provider.exists("project/asset.holderasset"));
@@ -370,22 +420,26 @@ TEST_CASE("Local directory provider is atomic and idempotent", "[asset]") {
   const auto conflicting_source = dir / "conflicting.bin";
   write_pattern(conflicting_source, 8193);
   const auto conflicting_digest = holder::resource::digest_file(conflicting_source);
-  REQUIRE_THROWS(
+  REQUIRE_THROWS_WITH(
       provider.put(
           "project/asset.holderasset",
           conflicting_source,
           conflicting_digest.byte_size,
           conflicting_digest.sha256
       )
-  );
+  , Catch::Matchers::ContainsSubstring("object key already contains different bytes"));
   provider.get("project/asset.holderasset", dir / "download.bin");
   REQUIRE(holder::resource::digest_file(dir / "download.bin").sha256 ==
           digest.sha256);
   const auto directory_destination = dir / "directory-destination";
   std::filesystem::create_directory(directory_destination);
-  REQUIRE_THROWS(
-      provider.get("project/asset.holderasset", directory_destination));
-  REQUIRE_THROWS(provider.exists("../escape"));
+  REQUIRE_THROWS_AS(
+      provider.get("project/asset.holderasset", directory_destination), std::filesystem::filesystem_error
+  );
+  REQUIRE_THROWS_WITH(
+      provider.exists("../escape"),
+      Catch::Matchers::ContainsSubstring("unsafe storage object key")
+  );
   provider.remove("project/asset.holderasset");
   REQUIRE_FALSE(provider.exists("project/asset.holderasset"));
 }
@@ -408,7 +462,10 @@ TEST_CASE("Location bindings and preferences survive independently of SQLite", "
   secrets->set("org.holder.StorageLocation", "project-1:unsupported-location",
                R"({"version":2,"provider":"s3_compatible","values":{}})",
                "unsupported", 10, 10);
-  REQUIRE_THROWS(bindings.get("project-1", "unsupported-location"));
+  REQUIRE_THROWS_WITH(
+      bindings.get("project-1", "unsupported-location"),
+      Catch::Matchers::ContainsSubstring("unsupported location binding")
+  );
 
   auto reopened = holder::privacy::make_encrypted_file_secret_store_for_tests(
       dir / "server");
@@ -422,9 +479,18 @@ TEST_CASE("Location bindings and preferences survive independently of SQLite", "
   REQUIRE_FALSE(recovered.preferred("project-1").has_value());
 
   holder::resource::LocationBinding invalid;
-  REQUIRE_THROWS(bindings.bind("project-1", "location-1", invalid, "", 20));
-  REQUIRE_THROWS(bindings.bind("", "location-1", binding, "", 20));
-  REQUIRE_THROWS(bindings.set_preferred("project-1", "", 20));
+  REQUIRE_THROWS_WITH(
+      bindings.bind("project-1", "location-1", invalid, "", 20),
+      Catch::Matchers::ContainsSubstring("invalid location binding")
+  );
+  REQUIRE_THROWS_WITH(
+      bindings.bind("", "location-1", binding, "", 20),
+      Catch::Matchers::ContainsSubstring("binding ids required")
+  );
+  REQUIRE_THROWS_WITH(
+      bindings.set_preferred("project-1", "", 20),
+      Catch::Matchers::ContainsSubstring("preferred ids required")
+  );
 }
 
 TEST_CASE("Asset import stores, links, deduplicates and retrieves", "[asset]") {
@@ -522,9 +588,12 @@ TEST_CASE("Asset import stores, links, deduplicates and retrieves", "[asset]") {
   write_binary(dir / "objects" / placement.object_key,
                "corrupt provider object");
   const auto failed_destination = dir / "failed-retrieval.jpg";
-  REQUIRE_THROWS(importer.retrieve(first.resource_id, first.asset_id,
-                                   placement.placement_id, provider,
-                                   failed_destination));
+  REQUIRE_THROWS_WITH(
+      importer.retrieve(first.resource_id, first.asset_id,
+                                       placement.placement_id, provider,
+                                       failed_destination),
+      Catch::Matchers::ContainsSubstring("stored asset integrity check failed")
+  );
   REQUIRE_FALSE(std::filesystem::exists(failed_destination));
   REQUIRE_FALSE(std::filesystem::exists(
       dir / "staging" / (placement.placement_id + ".download")));
@@ -564,38 +633,59 @@ TEST_CASE("Asset import stores, links, deduplicates and retrieves", "[asset]") {
 
   auto invalid_request = request;
   invalid_request.source_file = dir / "missing.bin";
-  REQUIRE_THROWS(importer.import_file(invalid_request, provider));
+  REQUIRE_THROWS_WITH(
+      importer.import_file(invalid_request, provider),
+      Catch::Matchers::ContainsSubstring("asset source must be a readable regular file")
+  );
 
   invalid_request = request;
   invalid_request.project_id = "missing-project";
-  REQUIRE_THROWS(importer.import_file(invalid_request, provider));
+  REQUIRE_THROWS_WITH(
+      importer.import_file(invalid_request, provider),
+      Catch::Matchers::ContainsSubstring("project not found: missing-project")
+  );
 
   invalid_request = request;
   invalid_request.card_id = "missing-card";
-  REQUIRE_THROWS(importer.import_file(invalid_request, provider));
+  REQUIRE_THROWS_WITH(
+      importer.import_file(invalid_request, provider),
+      Catch::Matchers::ContainsSubstring("live card not found in project")
+  );
 
   invalid_request = request;
   invalid_request.location_id = "missing-location";
-  REQUIRE_THROWS(importer.import_file(invalid_request, provider));
+  REQUIRE_THROWS_WITH(
+      importer.import_file(invalid_request, provider),
+      Catch::Matchers::ContainsSubstring("storage location not found in project")
+  );
 
   request.source_file = dir / "invisible-object.bin";
   write_pattern(request.source_file, 333);
   InvisibleAfterPutProvider unavailable;
   unavailable.available = false;
-  REQUIRE_THROWS(importer.import_file(request, unavailable));
+  REQUIRE_THROWS_WITH(
+      importer.import_file(request, unavailable),
+      Catch::Matchers::ContainsSubstring("stored object did not become available")
+  );
   REQUIRE(unavailable.put_called);
   REQUIRE_FALSE(unavailable.remove_called);
 
   InvisibleAfterPutProvider invisible;
   git.fail_writes = true;
-  REQUIRE_THROWS(importer.import_file(request, invisible));
+  REQUIRE_THROWS_WITH(
+      importer.import_file(request, invisible),
+      Catch::Matchers::ContainsSubstring("injected Git write failure")
+  );
   git.fail_writes = false;
   REQUIRE(invisible.put_called);
   REQUIRE(invisible.remove_called);
 
   db.exec("UPDATE cards SET rel_path = 'cards/wrong.md' WHERE card_id = "
           "'card-1234';");
-  REQUIRE_THROWS(importer.import_file(request, provider));
+  REQUIRE_THROWS_WITH(
+      importer.import_file(request, provider),
+      Catch::Matchers::ContainsSubstring("card rel_path does not match card_id")
+  );
 
   db.exec("UPDATE cards SET rel_path = '" + card.rel_path +
           "' WHERE card_id = 'card-1234';");
@@ -603,7 +693,10 @@ TEST_CASE("Asset import stores, links, deduplicates and retrieves", "[asset]") {
           "BEGIN SELECT RAISE(ABORT, 'blocked import projection'); END;");
   request.source_file = dir / "post-commit-projection-failure.bin";
   write_pattern(request.source_file, 337);
-  REQUIRE_THROWS(importer.import_file(request, provider));
+  REQUIRE_THROWS_WITH(
+      importer.import_file(request, provider),
+      Catch::Matchers::ContainsSubstring("placement refers to unknown location location-")
+  );
 }
 
 TEST_CASE("Asset import encrypts durable manifests and card updates",

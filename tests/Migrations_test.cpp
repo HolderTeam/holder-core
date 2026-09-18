@@ -137,7 +137,10 @@ TEST_CASE("migrate_to_latest upgrades v2 databases with milestones and drops ale
           "created_at, updated_at FROM milestones;"
       )
   );
-  REQUIRE_THROWS(db.exec("SELECT 1 FROM alerts;"));
+  REQUIRE_THROWS_WITH(
+      db.exec("SELECT 1 FROM alerts;"),
+      Catch::Matchers::ContainsSubstring("sqlite exec failed: no such table: alerts")
+  );
   REQUIRE_FALSE(holder::platform::Migrations::migrate_to_latest(db));
 }
 
@@ -190,9 +193,12 @@ TEST_CASE("migrate_to_latest adds UUID4 ID scheme to v4 projects", "[migrations]
   const auto project = holder::project::ProjectRepo(db).get("legacy");
   REQUIRE(project.has_value());
   REQUIRE(project->id_scheme == holder::model::IdScheme::Uuid4);
-  REQUIRE_THROWS(db.exec(
-      "UPDATE projects SET id_scheme = 'uuid8' WHERE project_id = 'legacy';"
-  ));
+  REQUIRE_THROWS_WITH(
+      db.exec(
+          "UPDATE projects SET id_scheme = 'uuid8' WHERE project_id = 'legacy';"
+      ),
+      Catch::Matchers::ContainsSubstring("sqlite exec failed: CHECK constraint failed: id_scheme IN ('uuid4', 'uuid7')")
+  );
 }
 
 TEST_CASE("migrate_to_latest adds the project card ID lookup index to v5", "[migrations]") {

@@ -1,5 +1,6 @@
 #if __has_include(<catch2/catch_test_macros.hpp>)
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #else
 #include <catch2/catch.hpp>
 #endif
@@ -133,26 +134,44 @@ TEST_CASE("project manifest rejects bootstrap and payload identity mismatch", "[
       R"({"version":1,"project_id":"project-two","mode":"plain"})"
   );
 
-  REQUIRE_THROWS(holder::project::read_project_manifest(project.root_path));
+  REQUIRE_THROWS_WITH(
+      holder::project::read_project_manifest(project.root_path),
+      Catch::Matchers::ContainsSubstring("project manifest id does not match bootstrap")
+  );
 }
 
 TEST_CASE("project manifest validates render inputs", "[project][manifest]") {
   holder::model::Project project;
   project.name = "Project";
   project.privacy_mode = "plain";
-  REQUIRE_THROWS(holder::project::render_project_bootstrap(project));
+  REQUIRE_THROWS_WITH(
+      holder::project::render_project_bootstrap(project),
+      Catch::Matchers::ContainsSubstring("project_id must not be empty")
+  );
 
   project.project_id = "project-1";
   project.privacy_mode = "unknown";
-  REQUIRE_THROWS(holder::project::render_project_bootstrap(project));
+  REQUIRE_THROWS_WITH(
+      holder::project::render_project_bootstrap(project),
+      Catch::Matchers::ContainsSubstring("unsupported project privacy mode: unknown")
+  );
 
   project.privacy_mode = "encrypted_git";
-  REQUIRE_THROWS(holder::project::render_project_bootstrap(project));
-  REQUIRE_THROWS(holder::project::render_project_manifest(project));
+  REQUIRE_THROWS_WITH(
+      holder::project::render_project_bootstrap(project),
+      Catch::Matchers::ContainsSubstring("encrypted project must have project_key_id")
+  );
+  REQUIRE_THROWS_WITH(
+      holder::project::render_project_manifest(project),
+      Catch::Matchers::ContainsSubstring("encrypted project must have project_key_id")
+  );
 
   project.privacy_mode = "plain";
   project.name.clear();
-  REQUIRE_THROWS(holder::project::render_project_manifest(project));
+  REQUIRE_THROWS_WITH(
+      holder::project::render_project_manifest(project),
+      Catch::Matchers::ContainsSubstring("project manifest requires project_id and name")
+  );
 }
 
 TEST_CASE("project manifest rejects malformed durable metadata", "[project][manifest]") {
@@ -170,47 +189,80 @@ TEST_CASE("project manifest rejects malformed durable metadata", "[project][mani
   const std::string valid_manifest =
       R"({"version":1,"project_id":"project-1","name":"Project","created_at":1,"updated_at":2})";
 
-  REQUIRE_THROWS(holder::project::read_project_manifest(root / "missing"));
+  REQUIRE_THROWS_WITH(
+      holder::project::read_project_manifest(root / "missing"),
+      Catch::Matchers::ContainsSubstring("failed to open project metadata")
+  );
 
   write_metadata(R"({"version":2})", valid_manifest);
-  REQUIRE_THROWS(holder::project::read_project_manifest(root));
+  REQUIRE_THROWS_WITH(
+      holder::project::read_project_manifest(root),
+      Catch::Matchers::ContainsSubstring("unsupported project metadata version")
+  );
 
   write_metadata(R"({"version":1,"mode":"plain"})", valid_manifest);
-  REQUIRE_THROWS(holder::project::read_project_manifest(root));
+  REQUIRE_THROWS_WITH(
+      holder::project::read_project_manifest(root),
+      Catch::Matchers::ContainsSubstring("project metadata field 'project_id' is missing")
+  );
 
   write_metadata(R"({"version":1,"project_id":"","mode":"plain"})", valid_manifest);
-  REQUIRE_THROWS(holder::project::read_project_manifest(root));
+  REQUIRE_THROWS_WITH(
+      holder::project::read_project_manifest(root),
+      Catch::Matchers::ContainsSubstring("project metadata field 'project_id' is empty")
+  );
 
   write_metadata(R"({"version":1,"project_id":"project-1","mode":"unknown"})", valid_manifest);
-  REQUIRE_THROWS(holder::project::read_project_manifest(root));
+  REQUIRE_THROWS_WITH(
+      holder::project::read_project_manifest(root),
+      Catch::Matchers::ContainsSubstring("unsupported project privacy mode 'unknown")
+  );
 
   write_metadata(R"({"version":1,"project_id":"project-1","mode":"encrypted_git"})", valid_manifest);
-  REQUIRE_THROWS(holder::project::read_project_manifest(root));
+  REQUIRE_THROWS_WITH(
+      holder::project::read_project_manifest(root),
+      Catch::Matchers::ContainsSubstring("encrypted project bootstrap has no key_id")
+  );
 
   write_metadata(valid_bootstrap, R"({"version":2})");
-  REQUIRE_THROWS(holder::project::read_project_manifest(root));
+  REQUIRE_THROWS_WITH(
+      holder::project::read_project_manifest(root),
+      Catch::Matchers::ContainsSubstring("unsupported project metadata version")
+  );
 
   write_metadata(
       valid_bootstrap,
       R"({"version":1,"project_id":"project-1","created_at":1,"updated_at":2})"
   );
-  REQUIRE_THROWS(holder::project::read_project_manifest(root));
+  REQUIRE_THROWS_WITH(
+      holder::project::read_project_manifest(root),
+      Catch::Matchers::ContainsSubstring("project metadata field 'name' is missing")
+  );
 
   write_metadata(
       valid_bootstrap,
       R"({"version":1,"project_id":"project-1","name":"","created_at":1,"updated_at":2})"
   );
-  REQUIRE_THROWS(holder::project::read_project_manifest(root));
+  REQUIRE_THROWS_WITH(
+      holder::project::read_project_manifest(root),
+      Catch::Matchers::ContainsSubstring("project metadata field 'name' is empty")
+  );
 
   write_metadata(
       valid_bootstrap,
       R"({"version":1,"project_id":"project-1","name":"Project","id_scheme":"uuid8","created_at":1,"updated_at":2})"
   );
-  REQUIRE_THROWS(holder::project::read_project_manifest(root));
+  REQUIRE_THROWS_WITH(
+      holder::project::read_project_manifest(root),
+      Catch::Matchers::ContainsSubstring("unsupported project id scheme 'uuid8")
+  );
 
   write_metadata(
       valid_bootstrap,
       R"({"version":1,"project_id":"project-1","name":"Project","id_scheme":7,"created_at":1,"updated_at":2})"
   );
-  REQUIRE_THROWS(holder::project::read_project_manifest(root));
+  REQUIRE_THROWS_WITH(
+      holder::project::read_project_manifest(root),
+      Catch::Matchers::ContainsSubstring("project metadata field 'id_scheme' is not a string")
+  );
 }

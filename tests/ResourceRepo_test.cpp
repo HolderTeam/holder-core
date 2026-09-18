@@ -253,41 +253,68 @@ TEST_CASE("Resource manifests reject malformed durable fields", "[resource]") {
 
   auto invalid_bundle = valid_bundle;
   invalid_bundle.resource.resource_id.clear();
-  REQUIRE_THROWS(holder::resource::render_resource_manifest(invalid_bundle));
+  REQUIRE_THROWS_WITH(
+      holder::resource::render_resource_manifest(invalid_bundle),
+      Catch::Matchers::ContainsSubstring("resource manifest missing resource_id")
+  );
 
   invalid_bundle = valid_bundle;
   invalid_bundle.assets[0].resource_id = "other-resource";
-  REQUIRE_THROWS(holder::resource::render_resource_manifest(invalid_bundle));
+  REQUIRE_THROWS_WITH(
+      holder::resource::render_resource_manifest(invalid_bundle),
+      Catch::Matchers::ContainsSubstring("asset resource_id mismatch")
+  );
 
   invalid_bundle = valid_bundle;
   invalid_bundle.assets[0].placements[0].asset_id = "other-asset";
-  REQUIRE_THROWS(holder::resource::render_resource_manifest(invalid_bundle));
+  REQUIRE_THROWS_WITH(
+      holder::resource::render_resource_manifest(invalid_bundle),
+      Catch::Matchers::ContainsSubstring("placement asset_id mismatch")
+  );
 
   auto body = nlohmann::json::parse(holder::resource::render_resource_manifest(valid_bundle));
   body["format_version"] = 2;
-  REQUIRE_THROWS(holder::resource::parse_resource_manifest(body.dump()));
+  REQUIRE_THROWS_WITH(
+      holder::resource::parse_resource_manifest(body.dump()),
+      Catch::Matchers::ContainsSubstring("unsupported resource manifest version")
+  );
 
   body = nlohmann::json::parse(holder::resource::render_resource_manifest(valid_bundle));
   body["assets"] = "not an array";
-  REQUIRE_THROWS(holder::resource::parse_resource_manifest(body.dump()));
+  REQUIRE_THROWS_WITH(
+      holder::resource::parse_resource_manifest(body.dump()),
+      Catch::Matchers::ContainsSubstring("resource manifest assets must be an array")
+  );
 
   body = nlohmann::json::parse(holder::resource::render_resource_manifest(valid_bundle));
   body["assets"][0]["byte_size"] = -1;
-  REQUIRE_THROWS(holder::resource::parse_resource_manifest(body.dump()));
+  REQUIRE_THROWS_WITH(
+      holder::resource::parse_resource_manifest(body.dump()),
+      Catch::Matchers::ContainsSubstring("resource manifest has negative byte_size")
+  );
 
   body = nlohmann::json::parse(holder::resource::render_resource_manifest(valid_bundle));
   body["assets"][0]["placements"] = "not an array";
-  REQUIRE_THROWS(holder::resource::parse_resource_manifest(body.dump()));
+  REQUIRE_THROWS_WITH(
+      holder::resource::parse_resource_manifest(body.dump()),
+      Catch::Matchers::ContainsSubstring("resource manifest placements must be an array")
+  );
 
   body = nlohmann::json::parse(holder::resource::render_resource_manifest(valid_bundle));
   body["assets"][0]["placements"][0]["stored_byte_size"] = -1;
-  REQUIRE_THROWS(holder::resource::parse_resource_manifest(body.dump()));
+  REQUIRE_THROWS_WITH(
+      holder::resource::parse_resource_manifest(body.dump()),
+      Catch::Matchers::ContainsSubstring("resource manifest has negative stored_byte_size")
+  );
 
   auto location_body = nlohmann::json::parse(
       holder::resource::render_location_manifest(sample_location())
   );
   location_body["format_version"] = 2;
-  REQUIRE_THROWS(holder::resource::parse_location_manifest(location_body.dump()));
+  REQUIRE_THROWS_WITH(
+      holder::resource::parse_location_manifest(location_body.dump()),
+      Catch::Matchers::ContainsSubstring("unsupported location manifest version")
+  );
 }
 
 TEST_CASE("Dublin Core mapping keeps Holder friendly and unknown terms lossless", "[resource]") {
@@ -309,7 +336,10 @@ TEST_CASE("Resource paths are sharded and reject short identifiers", "[resource]
       holder::resource::location_rel_path("123456") ==
       std::filesystem::path("locations/12/34/123456.json")
   );
-  REQUIRE_THROWS(holder::resource::resource_rel_path("abc"));
+  REQUIRE_THROWS_WITH(
+      holder::resource::resource_rel_path("abc"),
+      Catch::Matchers::ContainsSubstring("id too short for path sharding")
+  );
 }
 
 TEST_CASE("Resource and Location repositories preserve complete projection", "[resource]") {
@@ -341,7 +371,10 @@ TEST_CASE("Resource and Location repositories preserve complete projection", "[r
   REQUIRE(updated_bundle->resource.label == "Renamed boiler");
   REQUIRE(updated_bundle->resource.metadata.at("description") == std::vector<std::string>{"Recently serviced"});
   REQUIRE(updated_bundle->assets.size() == 1);
-  REQUIRE_THROWS(resources.update(holder::model::Resource{}));
+  REQUIRE_THROWS_WITH(
+      resources.update(holder::model::Resource{}),
+      Catch::Matchers::ContainsSubstring("resource not found")
+  );
 
   REQUIRE(locations.list("project-1234").size() == 1);
   REQUIRE(locations.is_in_use("location-1234"));
@@ -368,26 +401,44 @@ TEST_CASE("Resource repository validates ownership links", "[resource]") {
 
   auto invalid = sample_bundle();
   invalid.assets[0].resource_id = "another-resource";
-  REQUIRE_THROWS(resources.put_bundle(invalid));
+  REQUIRE_THROWS_WITH(
+      resources.put_bundle(invalid),
+      Catch::Matchers::ContainsSubstring("invalid asset in resource bundle")
+  );
 
   invalid = sample_bundle();
   invalid.assets[0].placements[0].asset_id = "another-asset";
-  REQUIRE_THROWS(resources.put_bundle(invalid));
+  REQUIRE_THROWS_WITH(
+      resources.put_bundle(invalid),
+      Catch::Matchers::ContainsSubstring("invalid placement in resource bundle")
+  );
 
   invalid = sample_bundle();
   invalid.resource.label.clear();
-  REQUIRE_THROWS(resources.put_bundle(invalid));
+  REQUIRE_THROWS_WITH(
+      resources.put_bundle(invalid),
+      Catch::Matchers::ContainsSubstring("resource identity, project, type and label are required")
+  );
 
   invalid = sample_bundle();
   invalid.resource.metadata[""] = {"invalid"};
-  REQUIRE_THROWS(resources.put_bundle(invalid));
+  REQUIRE_THROWS_WITH(
+      resources.put_bundle(invalid),
+      Catch::Matchers::ContainsSubstring("resource metadata property is empty")
+  );
 
   holder::resource::LocationRepo(db).put(sample_location());
   auto invalid_location = sample_location();
   invalid_location.location_id.clear();
-  REQUIRE_THROWS(holder::resource::LocationRepo(db).put(invalid_location));
+  REQUIRE_THROWS_WITH(
+      holder::resource::LocationRepo(db).put(invalid_location),
+      Catch::Matchers::ContainsSubstring("location identity, project, name and provider are required")
+  );
   resources.put_bundle(sample_bundle());
-  REQUIRE_THROWS(resources.add(sample_bundle().resource));
+  REQUIRE_THROWS_WITH(
+      resources.add(sample_bundle().resource),
+      Catch::Matchers::ContainsSubstring("conflict: resource_id already exists")
+  );
 }
 
 TEST_CASE("Resource and Location repositories surface sqlite prepare failures", "[resource]") {
@@ -395,20 +446,59 @@ TEST_CASE("Resource and Location repositories surface sqlite prepare failures", 
   holder::resource::ResourceRepo resources(unopened);
   holder::resource::LocationRepo locations(unopened);
 
-  REQUIRE_THROWS(resources.get("resource-1234"));
-  REQUIRE_THROWS(resources.get_bundle("resource-1234"));
-  REQUIRE_THROWS(resources.find_by_asset_hash("project-1234", "hash"));
-  REQUIRE_THROWS(resources.put_bundle(sample_bundle()));
-  REQUIRE_THROWS(resources.list("project-1234"));
-  REQUIRE_THROWS(resources.remove("resource-1234"));
-  REQUIRE_THROWS(resources.remove_project("project-1234"));
+  REQUIRE_THROWS_WITH(
+      resources.get("resource-1234"),
+      Catch::Matchers::ContainsSubstring("prepare get resource failed: out of memory")
+  );
+  REQUIRE_THROWS_WITH(
+      resources.get_bundle("resource-1234"),
+      Catch::Matchers::ContainsSubstring("prepare get resource failed: out of memory")
+  );
+  REQUIRE_THROWS_WITH(
+      resources.find_by_asset_hash("project-1234", "hash"),
+      Catch::Matchers::ContainsSubstring("prepare find asset hash failed: out of memory")
+  );
+  REQUIRE_THROWS_WITH(
+      resources.put_bundle(sample_bundle()),
+      Catch::Matchers::ContainsSubstring("prepare remove resource failed: out of memory")
+  );
+  REQUIRE_THROWS_WITH(
+      resources.list("project-1234"),
+      Catch::Matchers::ContainsSubstring("prepare list resources failed: out of memory")
+  );
+  REQUIRE_THROWS_WITH(
+      resources.remove("resource-1234"),
+      Catch::Matchers::ContainsSubstring("prepare remove resource failed: out of memory")
+  );
+  REQUIRE_THROWS_WITH(
+      resources.remove_project("project-1234"),
+      Catch::Matchers::ContainsSubstring("prepare remove project resources failed: out of memory")
+  );
 
-  REQUIRE_THROWS(locations.put(sample_location()));
-  REQUIRE_THROWS(locations.get("location-1234"));
-  REQUIRE_THROWS(locations.list("project-1234"));
-  REQUIRE_THROWS(locations.is_in_use("location-1234"));
-  REQUIRE_THROWS(locations.remove("location-1234"));
-  REQUIRE_THROWS(locations.remove_project("project-1234"));
+  REQUIRE_THROWS_WITH(
+      locations.put(sample_location()),
+      Catch::Matchers::ContainsSubstring("prepare put location failed")
+  );
+  REQUIRE_THROWS_WITH(
+      locations.get("location-1234"),
+      Catch::Matchers::ContainsSubstring("prepare get location failed")
+  );
+  REQUIRE_THROWS_WITH(
+      locations.list("project-1234"),
+      Catch::Matchers::ContainsSubstring("prepare list locations failed")
+  );
+  REQUIRE_THROWS_WITH(
+      locations.is_in_use("location-1234"),
+      Catch::Matchers::ContainsSubstring("prepare location use check failed")
+  );
+  REQUIRE_THROWS_WITH(
+      locations.remove("location-1234"),
+      Catch::Matchers::ContainsSubstring("prepare remove location failed")
+  );
+  REQUIRE_THROWS_WITH(
+      locations.remove_project("project-1234"),
+      Catch::Matchers::ContainsSubstring("prepare remove project locations failed")
+  );
 }
 
 TEST_CASE("Resource and Location repositories surface interrupted sqlite steps", "[resource]") {
@@ -423,18 +513,54 @@ TEST_CASE("Resource and Location repositories surface interrupted sqlite steps",
   resources.put_bundle(sample_bundle());
 
   sqlite3_progress_handler(db.handle(), 1, always_interrupt, nullptr);
-  REQUIRE_THROWS(locations.get("location-1234"));
-  REQUIRE_THROWS(locations.list("project-1234"));
-  REQUIRE_THROWS(locations.is_in_use("location-1234"));
-  REQUIRE_THROWS(locations.put(sample_location()));
-  REQUIRE_THROWS(locations.remove("location-1234"));
-  REQUIRE_THROWS(locations.remove_project("project-1234"));
-  REQUIRE_THROWS(resources.get("resource-1234"));
-  REQUIRE_THROWS(resources.get_bundle("resource-1234"));
-  REQUIRE_THROWS(resources.find_by_asset_hash("project-1234", std::string(64, 'a')));
-  REQUIRE_THROWS(resources.list("project-1234"));
-  REQUIRE_THROWS(resources.remove("resource-1234"));
-  REQUIRE_THROWS(resources.remove_project("project-1234"));
+  REQUIRE_THROWS_WITH(
+      locations.get("location-1234"),
+      Catch::Matchers::ContainsSubstring("get location failed")
+  );
+  REQUIRE_THROWS_WITH(
+      locations.list("project-1234"),
+      Catch::Matchers::ContainsSubstring("prepare list locations failed")
+  );
+  REQUIRE_THROWS_WITH(
+      locations.is_in_use("location-1234"),
+      Catch::Matchers::ContainsSubstring("prepare location use check failed")
+  );
+  REQUIRE_THROWS_WITH(
+      locations.put(sample_location()),
+      Catch::Matchers::ContainsSubstring("prepare put location failed")
+  );
+  REQUIRE_THROWS_WITH(
+      locations.remove("location-1234"),
+      Catch::Matchers::ContainsSubstring("prepare remove location failed")
+  );
+  REQUIRE_THROWS_WITH(
+      locations.remove_project("project-1234"),
+      Catch::Matchers::ContainsSubstring("prepare remove project locations failed")
+  );
+  REQUIRE_THROWS_WITH(
+      resources.get("resource-1234"),
+      Catch::Matchers::ContainsSubstring("get resource failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      resources.get_bundle("resource-1234"),
+      Catch::Matchers::ContainsSubstring("get resource failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      resources.find_by_asset_hash("project-1234", std::string(64, 'a')),
+      Catch::Matchers::ContainsSubstring("prepare find asset hash failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      resources.list("project-1234"),
+      Catch::Matchers::ContainsSubstring("prepare list resources failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      resources.remove("resource-1234"),
+      Catch::Matchers::ContainsSubstring("prepare remove resource failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      resources.remove_project("project-1234"),
+      Catch::Matchers::ContainsSubstring("prepare remove project resources failed: interrupted")
+  );
   sqlite3_progress_handler(db.handle(), 0, nullptr, nullptr);
 }
 
@@ -477,7 +603,10 @@ TEST_CASE("Resource and Location repositories report nested sqlite scan failures
 
   db.exec("CREATE TRIGGER block_resource_remove BEFORE DELETE ON resources "
           "BEGIN SELECT RAISE(ABORT, 'blocked resource removal'); END;");
-  REQUIRE_THROWS(resources.remove("resource-1234"));
+  REQUIRE_THROWS_WITH(
+      resources.remove("resource-1234"),
+      Catch::Matchers::ContainsSubstring("remove resource failed: blocked resource removal")
+  );
 }
 
 TEST_CASE("Project rebuild reconstructs resources assets placements and locations", "[resource]") {
@@ -557,15 +686,19 @@ TEST_CASE(
                    holder::resource::location_rel_path("location-1234"),
                "{not-json");
     REQUIRE_THROWS_WITH(
-        rebuild(), Catch::Matchers::ContainsSubstring("location-1234.json"));
+        rebuild(),
+        Catch::Matchers::ContainsSubstring("location-1234.json")
+    );
   }
 
   SECTION("location belongs to another project") {
     auto location = sample_location();
     location.project_id = "another-project";
     write_location(location);
-    REQUIRE_THROWS_WITH(rebuild(),
-                        Catch::Matchers::ContainsSubstring("another project"));
+    REQUIRE_THROWS_WITH(
+        rebuild(),
+        Catch::Matchers::ContainsSubstring("another project")
+    );
   }
 
   SECTION("malformed resource manifest") {
@@ -573,15 +706,19 @@ TEST_CASE(
                    holder::resource::resource_rel_path("resource-1234"),
                "{not-json");
     REQUIRE_THROWS_WITH(
-        rebuild(), Catch::Matchers::ContainsSubstring("resource-1234.json"));
+        rebuild(),
+        Catch::Matchers::ContainsSubstring("resource-1234.json")
+    );
   }
 
   SECTION("resource belongs to another project") {
     auto bundle = sample_bundle();
     bundle.resource.project_id = "another-project";
     write_resource(bundle);
-    REQUIRE_THROWS_WITH(rebuild(),
-                        Catch::Matchers::ContainsSubstring("another project"));
+    REQUIRE_THROWS_WITH(
+        rebuild(),
+        Catch::Matchers::ContainsSubstring("another project")
+    );
   }
 
   SECTION("duplicate asset id") {
@@ -593,15 +730,20 @@ TEST_CASE(
     write_resource(first);
     write_resource(second);
     REQUIRE_THROWS_WITH(
-        rebuild(), Catch::Matchers::ContainsSubstring("duplicate asset_id"));
+        rebuild(),
+        Catch::Matchers::ContainsSubstring("duplicate asset_id")
+    );
   }
 
   SECTION("invalid plaintext digest") {
     auto bundle = sample_bundle();
     bundle.assets[0].plaintext_sha256 = "not-a-sha256";
     write_resource(bundle);
-    REQUIRE_THROWS_WITH(rebuild(), Catch::Matchers::ContainsSubstring(
-                                       "invalid plaintext_sha256"));
+    REQUIRE_THROWS_WITH(
+        rebuild(),
+        Catch::Matchers::ContainsSubstring(
+                                       "invalid plaintext_sha256")
+    );
   }
 
   SECTION("duplicate placement id") {
@@ -612,8 +754,11 @@ TEST_CASE(
     second_asset.placements[0].asset_id = second_asset.asset_id;
     bundle.assets.push_back(second_asset);
     write_resource(bundle);
-    REQUIRE_THROWS_WITH(rebuild(), Catch::Matchers::ContainsSubstring(
-                                       "duplicate placement_id"));
+    REQUIRE_THROWS_WITH(
+        rebuild(),
+        Catch::Matchers::ContainsSubstring(
+                                       "duplicate placement_id")
+    );
   }
 
   SECTION("invalid stored digest") {
@@ -621,13 +766,17 @@ TEST_CASE(
     bundle.assets[0].placements[0].stored_sha256 = "not-a-sha256";
     write_resource(bundle);
     REQUIRE_THROWS_WITH(
-        rebuild(), Catch::Matchers::ContainsSubstring("invalid stored_sha256"));
+        rebuild(),
+        Catch::Matchers::ContainsSubstring("invalid stored_sha256")
+    );
   }
 
   SECTION("placement refers to unknown location") {
     write_resource(sample_bundle());
-    REQUIRE_THROWS_WITH(rebuild(),
-                        Catch::Matchers::ContainsSubstring("unknown location"));
+    REQUIRE_THROWS_WITH(
+        rebuild(),
+        Catch::Matchers::ContainsSubstring("unknown location")
+    );
   }
 }
 
@@ -699,8 +848,11 @@ TEST_CASE("Encrypted Resource and Location manifests rebuild after projection "
   REQUIRE(holder::resource::ResourceRepo(db).get_bundle("resource-1234")->resource.label == "Boiler фото");
   REQUIRE(holder::resource::LocationRepo(db).get("location-1234")->name == "Family Assets");
 
-  REQUIRE_THROWS(holder::resource::LocationStore(db, nullptr, &git)
-                     .remove("location-1234"));
+  REQUIRE_THROWS_WITH(
+      holder::resource::LocationStore(db, nullptr, &git)
+                         .remove("location-1234"),
+      Catch::Matchers::ContainsSubstring("storage location is in use by an asset placement")
+  );
   holder::resource::ResourceStore(db, nullptr, &git).remove("resource-1234");
   REQUIRE_FALSE(holder::resource::ResourceRepo(db).get("resource-1234").has_value());
   holder::resource::LocationStore(db, nullptr, &git).remove("location-1234");
@@ -724,10 +876,15 @@ TEST_CASE("Encrypted resource stores reject projects without key identities",
   holder::project::ProjectRepo(db).create(project);
 
   holder::git::RealGitOps git;
-  REQUIRE_THROWS(holder::resource::LocationStore(db, nullptr, &git)
-                     .put(sample_location()));
-  REQUIRE_THROWS(
-      holder::resource::ResourceStore(db, nullptr, &git).put(sample_bundle()));
+  REQUIRE_THROWS_WITH(
+      holder::resource::LocationStore(db, nullptr, &git)
+                         .put(sample_location()),
+      Catch::Matchers::ContainsSubstring("encrypted project missing project_key_id")
+  );
+  REQUIRE_THROWS_WITH(
+      holder::resource::ResourceStore(db, nullptr, &git).put(sample_bundle()),
+      Catch::Matchers::ContainsSubstring("encrypted project missing project_key_id")
+  );
 
   holder::resource::LocationRepo(db).put(sample_location());
   holder::resource::ResourceRepo(db).put_bundle(sample_bundle());
@@ -751,8 +908,11 @@ TEST_CASE("Encrypted resource stores reject projects without key identities",
   const auto card_path = std::filesystem::path(project.root_path) / card.rel_path;
   write_text(card_path,
              holder::core::render_card_front_matter(card, {link}, {}) + "body");
-  REQUIRE_THROWS(holder::resource::ResourceStore(db, nullptr, &git)
-                     .remove("resource-1234"));
+  REQUIRE_THROWS_WITH(
+      holder::resource::ResourceStore(db, nullptr, &git)
+                         .remove("resource-1234"),
+      Catch::Matchers::ContainsSubstring("encrypted project missing project_key_id")
+  );
 }
 
 TEST_CASE("Resource and Location stores rebuild after projection writes fail",
@@ -775,8 +935,11 @@ TEST_CASE("Resource and Location stores rebuild after projection writes fail",
   SECTION("location put") {
     db.exec("CREATE TRIGGER block_location_put BEFORE INSERT ON storage_locations "
             "BEGIN SELECT RAISE(ABORT, 'blocked location put'); END;");
-    REQUIRE_THROWS(holder::resource::LocationStore(db, nullptr, &git)
-                       .put(sample_location()));
+    REQUIRE_THROWS_WITH(
+        holder::resource::LocationStore(db, nullptr, &git)
+                           .put(sample_location()),
+        Catch::Matchers::ContainsSubstring("put location failed")
+    );
   }
 
   SECTION("location remove") {
@@ -784,15 +947,18 @@ TEST_CASE("Resource and Location stores rebuild after projection writes fail",
     store.put(sample_location());
     db.exec("CREATE TRIGGER block_location_remove BEFORE DELETE ON storage_locations "
             "BEGIN SELECT RAISE(ABORT, 'blocked location remove'); END;");
-    REQUIRE_THROWS(store.remove("location-1234"));
+    REQUIRE_THROWS_WITH(store.remove("location-1234"), Catch::Matchers::ContainsSubstring("delete failed"));
   }
 
   SECTION("resource put") {
     holder::resource::LocationRepo(db).put(sample_location());
     db.exec("CREATE TRIGGER block_resource_put BEFORE INSERT ON resources "
             "BEGIN SELECT RAISE(ABORT, 'blocked resource put'); END;");
-    REQUIRE_THROWS(holder::resource::ResourceStore(db, nullptr, &git)
-                       .put(sample_bundle()));
+    REQUIRE_THROWS_WITH(
+        holder::resource::ResourceStore(db, nullptr, &git)
+                           .put(sample_bundle()),
+        Catch::Matchers::ContainsSubstring("placement refers to unknown location location-")
+    );
   }
 
   SECTION("resource remove") {
@@ -801,6 +967,6 @@ TEST_CASE("Resource and Location stores rebuild after projection writes fail",
     store.put(sample_bundle());
     db.exec("CREATE TRIGGER block_resource_remove BEFORE DELETE ON resources "
             "BEGIN SELECT RAISE(ABORT, 'blocked resource remove'); END;");
-    REQUIRE_THROWS(store.remove("resource-1234"));
+    REQUIRE_THROWS_WITH(store.remove("resource-1234"), Catch::Matchers::ContainsSubstring("delete failed"));
   }
 }

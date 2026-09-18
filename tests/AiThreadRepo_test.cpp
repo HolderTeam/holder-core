@@ -1,5 +1,6 @@
 #if __has_include(<catch2/catch_test_macros.hpp>)
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #else
 #include <catch2/catch.hpp>
 #endif
@@ -153,7 +154,10 @@ TEST_CASE("AiThreadRepo throws on insert/update/delete step failures", "[aithrea
 
   db.exec("CREATE TRIGGER fail_ai_threads_insert BEFORE INSERT ON ai_threads "
           "BEGIN SELECT RAISE(ABORT, 'no insert'); END;");
-  REQUIRE_THROWS(repo.create(thread));
+  REQUIRE_THROWS_WITH(
+      repo.create(thread),
+      Catch::Matchers::ContainsSubstring("insert ai thread failed: no insert")
+  );
   db.exec("DROP TRIGGER fail_ai_threads_insert;");
 
   thread.thread_id = "thread-ok";
@@ -161,13 +165,22 @@ TEST_CASE("AiThreadRepo throws on insert/update/delete step failures", "[aithrea
 
   db.exec("CREATE TRIGGER fail_ai_threads_update BEFORE UPDATE ON ai_threads "
           "BEGIN SELECT RAISE(ABORT, 'no update'); END;");
-  REQUIRE_THROWS(repo.update_title("thread-ok", "x", 2));
-  REQUIRE_THROWS(repo.touch_updated("thread-ok", 3));
+  REQUIRE_THROWS_WITH(
+      repo.update_title("thread-ok", "x", 2),
+      Catch::Matchers::ContainsSubstring("update ai thread title failed: no update")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.touch_updated("thread-ok", 3),
+      Catch::Matchers::ContainsSubstring("touch ai thread failed: no update")
+  );
   db.exec("DROP TRIGGER fail_ai_threads_update;");
 
   db.exec("CREATE TRIGGER fail_ai_threads_delete BEFORE DELETE ON ai_threads "
           "BEGIN SELECT RAISE(ABORT, 'no delete'); END;");
-  REQUIRE_THROWS(repo.remove("thread-ok"));
+  REQUIRE_THROWS_WITH(
+      repo.remove("thread-ok"),
+      Catch::Matchers::ContainsSubstring("delete ai thread failed: no delete")
+  );
 }
 
 TEST_CASE("AiThreadRepo throws on get/list step error paths", "[aithreaddrepo]") {
@@ -195,8 +208,14 @@ TEST_CASE("AiThreadRepo throws on get/list step error paths", "[aithreaddrepo]")
       nullptr
   );
 
-  REQUIRE_THROWS(repo.get("thread-int"));
-  REQUIRE_THROWS(repo.list("proj-1"));
+  REQUIRE_THROWS_WITH(
+      repo.get("thread-int"),
+      Catch::Matchers::ContainsSubstring("get ai thread failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.list("proj-1"),
+      Catch::Matchers::ContainsSubstring("prepare list ai threads failed: interrupted")
+  );
   sqlite3_progress_handler(db.handle(), 0, nullptr, nullptr);
 }
 
@@ -217,13 +236,34 @@ TEST_CASE("AiThreadRepo throws on prepare failures", "[aithreaddrepo]") {
   thread.created_at = 1;
   thread.updated_at = 1;
 
-  REQUIRE_THROWS(repo.create(thread));
-  REQUIRE_THROWS(repo.get("thread-prepare"));
-  REQUIRE_THROWS(repo.list("proj-1"));
-  REQUIRE_THROWS(repo.update_title("thread-prepare", "x", 2));
-  REQUIRE_THROWS(repo.update_card_id("thread-prepare", std::nullopt));
-  REQUIRE_THROWS(repo.touch_updated("thread-prepare", 3));
-  REQUIRE_THROWS(repo.remove("thread-prepare"));
+  REQUIRE_THROWS_WITH(
+      repo.create(thread),
+      Catch::Matchers::ContainsSubstring("prepare insert ai thread failed: no such table: ai_threads")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.get("thread-prepare"),
+      Catch::Matchers::ContainsSubstring("prepare get ai thread failed: no such table: ai_threads")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.list("proj-1"),
+      Catch::Matchers::ContainsSubstring("prepare list ai threads failed: no such table: ai_threads")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.update_title("thread-prepare", "x", 2),
+      Catch::Matchers::ContainsSubstring("prepare update ai thread title failed: no such table: ai_threads")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.update_card_id("thread-prepare", std::nullopt),
+      Catch::Matchers::ContainsSubstring("prepare update ai thread card_id failed: no such table: ai_threads")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.touch_updated("thread-prepare", 3),
+      Catch::Matchers::ContainsSubstring("prepare touch ai thread failed: no such table: ai_threads")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.remove("thread-prepare"),
+      Catch::Matchers::ContainsSubstring("prepare delete ai thread failed: no such table: ai_threads")
+  );
 }
 
 TEST_CASE("AiThreadRepo update_card_id fails on invalid card fk", "[aithreaddrepo]") {
@@ -242,7 +282,10 @@ TEST_CASE("AiThreadRepo update_card_id fails on invalid card fk", "[aithreaddrep
   thread.updated_at = 1;
   repo.create(thread);
 
-  REQUIRE_THROWS(repo.update_card_id("thread-card-fk", std::optional<std::string>("missing-card")));
+  REQUIRE_THROWS_WITH(
+      repo.update_card_id("thread-card-fk", std::optional<std::string>("missing-card")),
+      Catch::Matchers::ContainsSubstring("update ai thread card_id failed: FOREIGN KEY constraint failed")
+  );
 }
 
 TEST_CASE("AiThreadRepo list throws when interrupted during large scan", "[aithreaddrepo]") {
@@ -274,6 +317,9 @@ TEST_CASE("AiThreadRepo list throws when interrupted during large scan", "[aithr
       },
       &callback_count
   );
-  REQUIRE_THROWS(repo.list("proj-1"));
+  REQUIRE_THROWS_WITH(
+      repo.list("proj-1"),
+      Catch::Matchers::ContainsSubstring("list ai threads failed: interrupted")
+  );
   sqlite3_progress_handler(db.handle(), 0, nullptr, nullptr);
 }

@@ -1,5 +1,6 @@
 #if __has_include(<catch2/catch_test_macros.hpp>)
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #else
 #include <catch2/catch.hpp>
 #endif
@@ -310,11 +311,20 @@ TEST_CASE("CardReferenceResolver propagates repository errors", "[card][referenc
   holder::card::CardReferenceResolver resolver(cards);
   db.close();
 
-  REQUIRE_THROWS(resolver.resolve(
-      "proj-1",
-      "11111111-1111-4111-8111-111111111111",
-      holder::model::CardScope::Either
-  ));
-  REQUIRE_THROWS(resolver.resolve("proj-1", "12345678", holder::model::CardScope::Either));
-  REQUIRE_THROWS(resolver.resolve("proj-1", "Title", holder::model::CardScope::Either));
+  REQUIRE_THROWS_WITH(
+      resolver.resolve(
+          "proj-1",
+          "11111111-1111-4111-8111-111111111111",
+          holder::model::CardScope::Either
+      ),
+      Catch::Matchers::ContainsSubstring("prepare find card by id failed: unknown sqlite error")
+  );
+  REQUIRE_THROWS_WITH(
+      resolver.resolve("proj-1", "12345678", holder::model::CardScope::Either),
+      Catch::Matchers::ContainsSubstring("prepare find cards by id prefix failed: unknown sqlite error")
+  );
+  REQUIRE_THROWS_WITH(
+      resolver.resolve("proj-1", "Title", holder::model::CardScope::Either),
+      Catch::Matchers::ContainsSubstring("prepare find cards by exact title failed: unknown sqlite error")
+  );
 }

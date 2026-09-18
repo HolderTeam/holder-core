@@ -2,6 +2,7 @@
 #include "platform/Db.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -211,7 +212,10 @@ TEST_CASE("AiRunRepo throws when insert step fails", "[db]") {
   run.status = "started";
   run.created_at = 1;
   run.updated_at = 1;
-  REQUIRE_THROWS(repo.create(run));
+  REQUIRE_THROWS_WITH(
+      repo.create(run),
+      Catch::Matchers::ContainsSubstring("insert ai run failed: no insert")
+  );
 }
 
 TEST_CASE("AiRunRepo throws when table missing for prepare paths", "[db]") {
@@ -238,20 +242,35 @@ TEST_CASE("AiRunRepo throws when table missing for prepare paths", "[db]") {
   run.created_at = 1;
   run.updated_at = 1;
 
-  REQUIRE_THROWS(repo.create(run));
-  REQUIRE_THROWS(repo.get("run-prepare"));
-  REQUIRE_THROWS(repo.list_by_thread("thread-1"));
-  REQUIRE_THROWS(repo.list_by_project("proj-1"));
-  REQUIRE_THROWS(repo.update_status(
-      "run-1",
-      "failed",
-      std::nullopt,
-      std::nullopt,
-      std::nullopt,
-      std::nullopt,
-      std::nullopt,
-      2
-  ));
+  REQUIRE_THROWS_WITH(
+      repo.create(run),
+      Catch::Matchers::ContainsSubstring("prepare ai_runs insert failed: no such table: ai_runs")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.get("run-prepare"),
+      Catch::Matchers::ContainsSubstring("prepare ai_runs get failed: no such table: ai_runs")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.list_by_thread("thread-1"),
+      Catch::Matchers::ContainsSubstring("prepare ai_runs list_by_thread failed: no such table: ai_runs")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.list_by_project("proj-1"),
+      Catch::Matchers::ContainsSubstring("prepare ai_runs list_by_project failed: no such table: ai_runs")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.update_status(
+          "run-1",
+          "failed",
+          std::nullopt,
+          std::nullopt,
+          std::nullopt,
+          std::nullopt,
+          std::nullopt,
+          2
+      ),
+      Catch::Matchers::ContainsSubstring("prepare ai_runs update failed: no such table: ai_runs")
+  );
 }
 
 TEST_CASE("AiRunRepo throws when update step fails", "[db]") {
@@ -280,16 +299,19 @@ TEST_CASE("AiRunRepo throws when update step fails", "[db]") {
 
   db.exec("CREATE TRIGGER fail_ai_runs_update BEFORE UPDATE ON ai_runs "
           "BEGIN SELECT RAISE(ABORT, 'no update'); END;");
-  REQUIRE_THROWS(repo.update_status(
-      "run-update-fail",
-      "failed",
-      std::optional<std::string>("err"),
-      std::optional<std::string>("msg"),
-      std::optional<std::string>("m"),
-      std::optional<std::string>("[]"),
-      std::optional<std::string>("{}"),
-      2
-  ));
+  REQUIRE_THROWS_WITH(
+      repo.update_status(
+          "run-update-fail",
+          "failed",
+          std::optional<std::string>("err"),
+          std::optional<std::string>("msg"),
+          std::optional<std::string>("m"),
+          std::optional<std::string>("[]"),
+          std::optional<std::string>("{}"),
+          2
+      ),
+      Catch::Matchers::ContainsSubstring("update ai run failed: no update")
+  );
 }
 
 TEST_CASE("AiRunRepo throws when get step is interrupted", "[db]") {
@@ -317,6 +339,9 @@ TEST_CASE("AiRunRepo throws when get step is interrupted", "[db]") {
   repo.create(run);
 
   sqlite3_progress_handler(db.handle(), 1, sqlite_interrupt_cb, nullptr);
-  REQUIRE_THROWS(repo.get("run-get-interrupt"));
+  REQUIRE_THROWS_WITH(
+      repo.get("run-get-interrupt"),
+      Catch::Matchers::ContainsSubstring("get ai run failed: interrupted")
+  );
   sqlite3_progress_handler(db.handle(), 0, nullptr, nullptr);
 }

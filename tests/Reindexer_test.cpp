@@ -1,5 +1,6 @@
 #if __has_include(<catch2/catch_test_macros.hpp>)
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #else
 #include <catch2/catch.hpp>
 #endif
@@ -111,7 +112,10 @@ TEST_CASE("Reindexer throws when cards query prepare fails", "[reindex]") {
   db.exec("DROP TABLE cards;");
 
   holder::index::Reindexer reindexer(db);
-  REQUIRE_THROWS(reindexer.run());
+  REQUIRE_THROWS_WITH(
+      reindexer.run(),
+      Catch::Matchers::ContainsSubstring("prepare reindex cards failed: no such table: cards")
+  );
 }
 
 TEST_CASE("Reindexer throws when ai messages query prepare fails", "[reindex]") {
@@ -131,7 +135,10 @@ TEST_CASE("Reindexer throws when ai messages query prepare fails", "[reindex]") 
   db.exec("DROP TABLE ai_messages;");
 
   holder::index::Reindexer reindexer(db);
-  REQUIRE_THROWS(reindexer.run());
+  REQUIRE_THROWS_WITH(
+      reindexer.run(),
+      Catch::Matchers::ContainsSubstring("prepare reindex ai messages failed: no such table: ai_messages")
+  );
 }
 
 TEST_CASE("Reindexer throws when cards scan is interrupted", "[reindex]") {
@@ -160,7 +167,10 @@ TEST_CASE("Reindexer throws when cards scan is interrupted", "[reindex]") {
   InterruptAfter interrupt{1000};
   sqlite3_progress_handler(db.handle(), 1, sqlite_interrupt_after, &interrupt);
   holder::index::Reindexer reindexer(db);
-  REQUIRE_THROWS(reindexer.run());
+  REQUIRE_THROWS_WITH(
+      reindexer.run(),
+      Catch::Matchers::ContainsSubstring("insert cards_fts failed: interrupted")
+  );
   sqlite3_progress_handler(db.handle(), 0, nullptr, nullptr);
 }
 
@@ -189,6 +199,9 @@ TEST_CASE("Reindexer throws when ai messages scan is interrupted", "[reindex]") 
   InterruptAfter interrupt{5000};
   sqlite3_progress_handler(db.handle(), 1, sqlite_interrupt_after, &interrupt);
   holder::index::Reindexer reindexer(db);
-  REQUIRE_THROWS(reindexer.run());
+  REQUIRE_THROWS_WITH(
+      reindexer.run(),
+      Catch::Matchers::ContainsSubstring("delete ai_fts failed: interrupted")
+  );
   sqlite3_progress_handler(db.handle(), 0, nullptr, nullptr);
 }

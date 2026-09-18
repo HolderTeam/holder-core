@@ -1,5 +1,6 @@
 #if __has_include(<catch2/catch_test_macros.hpp>)
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #else
 #include <catch2/catch.hpp>
 #endif
@@ -17,5 +18,8 @@ TEST_CASE("card_trash_rel_path uses trash prefix", "[cardpaths]") {
 }
 
 TEST_CASE("card_rel_path rejects short ids", "[cardpaths]") {
-  REQUIRE_THROWS(holder::core::card_rel_path("abc"));
+  REQUIRE_THROWS_WITH(
+      holder::core::card_rel_path("abc"),
+      Catch::Matchers::ContainsSubstring("card_id too short for path sharding")
+  );
 }

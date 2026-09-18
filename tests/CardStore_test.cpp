@@ -841,7 +841,10 @@ TEST_CASE("CardStore create rejects duplicate card_id", "[cardstore]") {
   card.updated_at = 10;
 
   store.create(card, "one");
-  REQUIRE_THROWS(store.create(card, "two"));
+  REQUIRE_THROWS_WITH(
+      store.create(card, "two"),
+      Catch::Matchers::ContainsSubstring("conflict: card_id already exists")
+  );
 }
 
 TEST_CASE("CardStore create rejects existing file without DB row", "[cardstore]") {
@@ -868,7 +871,10 @@ TEST_CASE("CardStore create rejects existing file without DB row", "[cardstore]"
   repo.open_or_init(project_root);
   repo.write_file(rel_path, "manual");
 
-  REQUIRE_THROWS(store.create(card, "one"));
+  REQUIRE_THROWS_WITH(
+      store.create(card, "one"),
+      Catch::Matchers::ContainsSubstring("conflict: card file already exists")
+  );
 }
 
 TEST_CASE("CardStore create appends to end of sibling scope when sort omitted", "[cardstore]") {
@@ -1045,7 +1051,10 @@ TEST_CASE("CardStore create throws when project is missing", "[cardstore]") {
   card.created_at = 1;
   card.updated_at = 1;
 
-  REQUIRE_THROWS(store.create(card, "x"));
+  REQUIRE_THROWS_WITH(
+      store.create(card, "x"),
+      Catch::Matchers::ContainsSubstring("project not found: no-such-project")
+  );
 }
 
 TEST_CASE("CardStore create throws on rel_path mismatch", "[cardstore]") {
@@ -1065,7 +1074,10 @@ TEST_CASE("CardStore create throws on rel_path mismatch", "[cardstore]") {
   card.created_at = 1;
   card.updated_at = 1;
 
-  REQUIRE_THROWS(store.create(card, "x"));
+  REQUIRE_THROWS_WITH(
+      store.create(card, "x"),
+      Catch::Matchers::ContainsSubstring("card rel_path does not match card_id")
+  );
 }
 
 TEST_CASE("CardStore create cleanup removes file when DB write fails", "[cardstore]") {
@@ -1087,7 +1099,10 @@ TEST_CASE("CardStore create cleanup removes file when DB write fails", "[cardsto
   card.created_at = 1;
   card.updated_at = 1;
 
-  REQUIRE_THROWS(store.create(card, "x"));
+  REQUIRE_THROWS_WITH(
+      store.create(card, "x"),
+      Catch::Matchers::ContainsSubstring("prepare insert card failed: unknown sqlite error")
+  );
   REQUIRE_FALSE(std::filesystem::exists(project_root / holder::core::card_rel_path(card.card_id)));
 }
 
@@ -1118,7 +1133,10 @@ TEST_CASE("CardStore encrypted create/get_content throw without key_id", "[cards
   card.title = "Encrypted";
   card.created_at = 1;
   card.updated_at = 1;
-  REQUIRE_THROWS(store.create(card, "secret"));
+  REQUIRE_THROWS_WITH(
+      store.create(card, "secret"),
+      Catch::Matchers::ContainsSubstring("encrypted project missing project_key_id")
+  );
 
   holder::card::CardRepo card_repo(db);
   holder::model::Card inserted = card;
@@ -1129,7 +1147,10 @@ TEST_CASE("CardStore encrypted create/get_content throw without key_id", "[cards
   repo.open_or_init(project_root);
   repo.write_file(inserted.rel_path, "HolderPriv1\nbad");
 
-  REQUIRE_THROWS((void)store.get_content(inserted));
+  REQUIRE_THROWS_WITH(
+      (void)store.get_content(inserted),
+      Catch::Matchers::ContainsSubstring("encrypted project missing project_key_id")
+  );
 }
 
 TEST_CASE("CardStore update_content throws when card is missing", "[cardstore]") {
@@ -1141,7 +1162,10 @@ TEST_CASE("CardStore update_content throws when card is missing", "[cardstore]")
 
   holder::index::FtsIndexer fts(db);
   holder::card::CardStore store(db, &fts);
-  REQUIRE_THROWS(store.update_content("missing", "x", std::nullopt, 2));
+  REQUIRE_THROWS_WITH(
+      store.update_content("missing", "x", std::nullopt, 2),
+      Catch::Matchers::ContainsSubstring("card not found: missing")
+  );
 }
 
 TEST_CASE("CardStore move exercises error and no-op branches", "[cardstore]") {
@@ -1156,7 +1180,10 @@ TEST_CASE("CardStore move exercises error and no-op branches", "[cardstore]") {
   holder::card::CardStore store(db, &fts);
   holder::card::CardRepo card_repo(db);
 
-  REQUIRE_THROWS(store.move("missing", false, std::nullopt, std::nullopt, 2));
+  REQUIRE_THROWS_WITH(
+      store.move("missing", false, std::nullopt, std::nullopt, 2),
+      Catch::Matchers::ContainsSubstring("card not found: missing")
+  );
 
   holder::model::Card bad_rel;
   bad_rel.card_id = "movbad01";
@@ -1304,7 +1331,10 @@ TEST_CASE("CardStore update_links exercises error, encrypted, and no-op branches
   holder::card::CardStore store(db, &fts);
   holder::card::CardRepo card_repo(db);
 
-  REQUIRE_THROWS(store.update_links("missing", 2));
+  REQUIRE_THROWS_WITH(
+      store.update_links("missing", 2),
+      Catch::Matchers::ContainsSubstring("card not found: missing")
+  );
 
   holder::model::Card bad_rel;
   bad_rel.card_id = "lnkbad01";
@@ -1379,9 +1409,18 @@ TEST_CASE("CardStore trash/restore/hard_delete and get_content guards", "[cardst
   holder::card::CardStore store(db, &fts);
   holder::card::CardRepo card_repo(db);
 
-  REQUIRE_THROWS(store.trash("missing", 2));
-  REQUIRE_THROWS(store.restore("missing", 2));
-  REQUIRE_THROWS(store.hard_delete("missing"));
+  REQUIRE_THROWS_WITH(
+      store.trash("missing", 2),
+      Catch::Matchers::ContainsSubstring("card not found: missing")
+  );
+  REQUIRE_THROWS_WITH(
+      store.restore("missing", 2),
+      Catch::Matchers::ContainsSubstring("card not found: missing")
+  );
+  REQUIRE_THROWS_WITH(
+      store.hard_delete("missing"),
+      Catch::Matchers::ContainsSubstring("card not found: missing")
+  );
 
   holder::model::Card active;
   active.card_id = "trashg01";
@@ -1390,8 +1429,14 @@ TEST_CASE("CardStore trash/restore/hard_delete and get_content guards", "[cardst
   active.created_at = 1;
   active.updated_at = 1;
   store.create(active, "body");
-  REQUIRE_THROWS(store.restore(active.card_id, 2));
-  REQUIRE_THROWS(store.hard_delete(active.card_id));
+  REQUIRE_THROWS_WITH(
+      store.restore(active.card_id, 2),
+      Catch::Matchers::ContainsSubstring("card is not deleted")
+  );
+  REQUIRE_THROWS_WITH(
+      store.hard_delete(active.card_id),
+      Catch::Matchers::ContainsSubstring("card is not deleted")
+  );
 
   holder::model::Card removable;
   removable.card_id = "trashok1";
@@ -1430,15 +1475,24 @@ TEST_CASE("CardStore trash/restore/hard_delete and get_content guards", "[cardst
   bad_rel.created_at = 1;
   bad_rel.updated_at = 1;
   card_repo.create(bad_rel);
-  REQUIRE_THROWS(store.trash(bad_rel.card_id, 2));
+  REQUIRE_THROWS_WITH(
+      store.trash(bad_rel.card_id, 2),
+      Catch::Matchers::ContainsSubstring("card rel_path does not match card_id")
+  );
 
   holder::model::Card deleted_bad_rel = bad_rel;
   deleted_bad_rel.card_id = "restbad1";
   deleted_bad_rel.rel_path = "cards/another-wrong.md";
   deleted_bad_rel.deleted_at = 10;
   card_repo.create(deleted_bad_rel);
-  REQUIRE_THROWS(store.trash(deleted_bad_rel.card_id, 2));
-  REQUIRE_THROWS(store.restore(deleted_bad_rel.card_id, 2));
+  REQUIRE_THROWS_WITH(
+      store.trash(deleted_bad_rel.card_id, 2),
+      Catch::Matchers::ContainsSubstring("card already deleted")
+  );
+  REQUIRE_THROWS_WITH(
+      store.restore(deleted_bad_rel.card_id, 2),
+      Catch::Matchers::ContainsSubstring("card rel_path does not match card_id")
+  );
 
   holder::model::Card content_missing;
   content_missing.card_id = "contmiss";
@@ -1456,14 +1510,20 @@ TEST_CASE("CardStore trash/restore/hard_delete and get_content guards", "[cardst
   bad_content.card_id = "contbad1";
   bad_content.rel_path = "cards/wrong-content.md";
   card_repo.create(bad_content);
-  REQUIRE_THROWS((void)store.get_content(bad_content));
+  REQUIRE_THROWS_WITH(
+      (void)store.get_content(bad_content),
+      Catch::Matchers::ContainsSubstring("card rel_path does not match card_id")
+  );
 
   holder::model::Card no_project = content_missing;
   no_project.card_id = "contprj1";
   no_project.project_id = "missing-project";
   no_project.rel_path = holder::core::card_rel_path(no_project.card_id);
   no_project.title = "NoProject";
-  REQUIRE_THROWS((void)store.get_content(no_project));
+  REQUIRE_THROWS_WITH(
+      (void)store.get_content(no_project),
+      Catch::Matchers::ContainsSubstring("project not found: missing-project")
+  );
 }
 
 TEST_CASE(
@@ -1649,7 +1709,10 @@ TEST_CASE("CardStore leaves the current version untouched when historical metada
           "BEFORE INSERT ON card_links "
           "BEGIN SELECT RAISE(ABORT, 'blocked historical link'); END;");
 
-  REQUIRE_THROWS(store.restore_version(card.card_id, *historical_oid, 50));
+  REQUIRE_THROWS_WITH(
+      store.restore_version(card.card_id, *historical_oid, 50),
+      Catch::Matchers::ContainsSubstring("upsert link failed: blocked historical link")
+  );
 
   const auto current = store.get(card.card_id);
   REQUIRE(current.has_value());
@@ -1719,7 +1782,10 @@ TEST_CASE("CardStore update_milestones exercises error, encrypted, and no-op bra
   holder::card::CardRepo card_repo(db);
   holder::card::MilestoneRepo milestones(db);
 
-  REQUIRE_THROWS(store.update_milestones("missing", 2));
+  REQUIRE_THROWS_WITH(
+      store.update_milestones("missing", 2),
+      Catch::Matchers::ContainsSubstring("card not found: missing")
+  );
 
   holder::model::Card bad_rel;
   bad_rel.card_id = "milbad01";
@@ -2178,10 +2244,22 @@ TEST_CASE("CardStore tag and historical restore methods reject missing cards",
   holder::index::FtsIndexer fts(db);
   holder::card::CardStore store(db, &fts);
 
-  REQUIRE_THROWS(store.restore_version("missing-card", "historical-oid", 1));
-  REQUIRE_THROWS(store.add_tag("missing-card", "todo", 1));
-  REQUIRE_THROWS(store.remove_tag("missing-card", "todo", 1));
-  REQUIRE_THROWS(store.list_editable_tags("missing-card"));
+  REQUIRE_THROWS_WITH(
+      store.restore_version("missing-card", "historical-oid", 1),
+      Catch::Matchers::ContainsSubstring("card not found: missing-card")
+  );
+  REQUIRE_THROWS_WITH(
+      store.add_tag("missing-card", "todo", 1),
+      Catch::Matchers::ContainsSubstring("card not found: missing-card")
+  );
+  REQUIRE_THROWS_WITH(
+      store.remove_tag("missing-card", "todo", 1),
+      Catch::Matchers::ContainsSubstring("card not found: missing-card")
+  );
+  REQUIRE_THROWS_WITH(
+      store.list_editable_tags("missing-card"),
+      Catch::Matchers::ContainsSubstring("card not found: missing-card")
+  );
 }
 
 TEST_CASE("CardStore rejects missing milestone content and malformed historical blobs",
@@ -2211,7 +2289,10 @@ TEST_CASE("CardStore rejects missing milestone content and malformed historical 
   bad_path.card_id = "badrestore01";
   bad_path.rel_path = "cards/wrong.md";
   cards.create(bad_path);
-  REQUIRE_THROWS(store.restore_version(bad_path.card_id, "unused-oid", 2));
+  REQUIRE_THROWS_WITH(
+      store.restore_version(bad_path.card_id, "unused-oid", 2),
+      Catch::Matchers::ContainsSubstring("card rel_path does not match card_id")
+  );
 
   holder::model::Card card;
   card.card_id = "badblob01";
@@ -2243,8 +2324,14 @@ TEST_CASE("CardStore rejects missing milestone content and malformed historical 
   repo.stage_path(path);
   repo.commit("Restore valid current blob");
 
-  REQUIRE_THROWS(store.restore_version(card.card_id, *binary_oid, 3));
-  REQUIRE_THROWS(store.restore_version(card.card_id, *malformed_oid, 3));
+  REQUIRE_THROWS_WITH(
+      store.restore_version(card.card_id, *binary_oid, 3),
+      Catch::Matchers::ContainsSubstring("historical card content is binary")
+  );
+  REQUIRE_THROWS_WITH(
+      store.restore_version(card.card_id, *malformed_oid, 3),
+      Catch::Matchers::ContainsSubstring("historical card content is malformed")
+  );
 }
 
 TEST_CASE("CardStore mutations reject a bad rel_path or a missing durable file",

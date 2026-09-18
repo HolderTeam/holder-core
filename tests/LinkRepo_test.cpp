@@ -1,5 +1,6 @@
 #if __has_include(<catch2/catch_test_macros.hpp>)
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #else
 #include <catch2/catch.hpp>
 #endif
@@ -162,7 +163,10 @@ TEST_CASE("LinkRepo upsert rejects project/from mismatch", "[linkrepo]") {
   bad.kind = "ref";
   bad.created_at = 1;
 
-  REQUIRE_THROWS(repo.upsert_links("proj-1", "card-a", {bad}));
+  REQUIRE_THROWS_WITH(
+      repo.upsert_links("proj-1", "card-a", {bad}),
+      Catch::Matchers::ContainsSubstring("link project_id/from_card_id mismatch")
+  );
 }
 
 TEST_CASE("LinkRepo delete_link supports type-only and type+kind filters", "[linkrepo]") {
@@ -269,14 +273,38 @@ TEST_CASE("LinkRepo methods throw sqlite errors when DB is closed", "[linkrepo]"
   link.kind = "ref";
   link.created_at = 1;
 
-  REQUIRE_THROWS(repo.upsert_links("proj-1", "card-a", {link}));
-  REQUIRE_THROWS(repo.list_outgoing("proj-1", "card-a"));
-  REQUIRE_THROWS(repo.list_backlinks("proj-1", "card-b"));
-  REQUIRE_THROWS(repo.list_backlinks_typed("proj-1", "card-b", "card"));
-  REQUIRE_THROWS(repo.list_incoming_typed("proj-1", "card"));
-  REQUIRE_THROWS(repo.delete_link("proj-1", "card-a", "card-b", std::nullopt, std::nullopt));
-  REQUIRE_THROWS(repo.delete_links_to_typed("proj-1", "card-b", "card"));
-  REQUIRE_THROWS(repo.delete_links_from("proj-1", "card-a"));
+  REQUIRE_THROWS_WITH(
+      repo.upsert_links("proj-1", "card-a", {link}),
+      Catch::Matchers::ContainsSubstring("prepare upsert links failed: unknown sqlite error")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.list_outgoing("proj-1", "card-a"),
+      Catch::Matchers::ContainsSubstring("prepare list outgoing links failed: unknown sqlite error")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.list_backlinks("proj-1", "card-b"),
+      Catch::Matchers::ContainsSubstring("prepare list backlinks failed: unknown sqlite error")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.list_backlinks_typed("proj-1", "card-b", "card"),
+      Catch::Matchers::ContainsSubstring("prepare list backlinks typed failed: unknown sqlite error")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.list_incoming_typed("proj-1", "card"),
+      Catch::Matchers::ContainsSubstring("prepare list incoming typed links failed: unknown sqlite error")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.delete_link("proj-1", "card-a", "card-b", std::nullopt, std::nullopt),
+      Catch::Matchers::ContainsSubstring("prepare delete link failed: unknown sqlite error")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.delete_links_to_typed("proj-1", "card-b", "card"),
+      Catch::Matchers::ContainsSubstring("prepare delete links to failed: unknown sqlite error")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.delete_links_from("proj-1", "card-a"),
+      Catch::Matchers::ContainsSubstring("prepare delete links failed: unknown sqlite error")
+  );
 }
 
 TEST_CASE("LinkRepo upsert throws when sqlite step fails", "[linkrepo]") {
@@ -304,7 +332,10 @@ TEST_CASE("LinkRepo upsert throws when sqlite step fails", "[linkrepo]") {
   link.kind = "ref";
   link.created_at = 1;
 
-  REQUIRE_THROWS(repo.upsert_links("proj-1", "card-a", {link}));
+  REQUIRE_THROWS_WITH(
+      repo.upsert_links("proj-1", "card-a", {link}),
+      Catch::Matchers::ContainsSubstring("upsert link failed: blocked insert")
+  );
 }
 
 namespace {
@@ -333,10 +364,22 @@ TEST_CASE("LinkRepo list methods throw when sqlite step is interrupted", "[linkr
   repo.upsert_links("proj-1", "card-a", {link});
 
   sqlite3_progress_handler(db.handle(), 1, interrupt_progress, nullptr);
-  REQUIRE_THROWS(repo.list_outgoing("proj-1", "card-a"));
-  REQUIRE_THROWS(repo.list_backlinks("proj-1", "card-b"));
-  REQUIRE_THROWS(repo.list_backlinks_typed("proj-1", "card-b", "card"));
-  REQUIRE_THROWS(repo.list_incoming_typed("proj-1", "card"));
+  REQUIRE_THROWS_WITH(
+      repo.list_outgoing("proj-1", "card-a"),
+      Catch::Matchers::ContainsSubstring("prepare list outgoing links failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.list_backlinks("proj-1", "card-b"),
+      Catch::Matchers::ContainsSubstring("prepare list backlinks failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.list_backlinks_typed("proj-1", "card-b", "card"),
+      Catch::Matchers::ContainsSubstring("prepare list backlinks typed failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.list_incoming_typed("proj-1", "card"),
+      Catch::Matchers::ContainsSubstring("prepare list incoming typed links failed: interrupted")
+  );
   sqlite3_progress_handler(db.handle(), 0, nullptr, nullptr);
 }
 
@@ -366,13 +409,22 @@ TEST_CASE("LinkRepo delete methods throw when sqlite delete step fails", "[linkr
           "BEFORE DELETE ON card_links "
           "BEGIN SELECT RAISE(ABORT, 'blocked delete'); END;");
 
-  REQUIRE_THROWS(repo.delete_link(
-      "proj-1",
-      "card-a",
-      "card-b",
-      std::optional<std::string>("card"),
-      std::nullopt
-  ));
-  REQUIRE_THROWS(repo.delete_links_to_typed("proj-1", "card-b", "card"));
-  REQUIRE_THROWS(repo.delete_links_from("proj-1", "card-a"));
+  REQUIRE_THROWS_WITH(
+      repo.delete_link(
+          "proj-1",
+          "card-a",
+          "card-b",
+          std::optional<std::string>("card"),
+          std::nullopt
+      ),
+      Catch::Matchers::ContainsSubstring("delete link failed: blocked delete")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.delete_links_to_typed("proj-1", "card-b", "card"),
+      Catch::Matchers::ContainsSubstring("delete links to failed: blocked delete")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.delete_links_from("proj-1", "card-a"),
+      Catch::Matchers::ContainsSubstring("delete links failed: blocked delete")
+  );
 }

@@ -8,6 +8,7 @@
 
 #if __has_include(<catch2/catch_test_macros.hpp>)
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #else
 #include <catch2/catch.hpp>
 #endif
@@ -110,7 +111,10 @@ TEST_CASE("Privacy safety check reports plaintext card blobs", "[privacy]") {
   REQUIRE(check.checked_files == 1);
   REQUIRE(check.unsafe_paths.size() == 1);
   REQUIRE(check.unsafe_paths[0] == "cards/ab/plain.md");
-  REQUIRE_THROWS(holder::privacy::assert_encryption_push_safe(root.string()));
+  REQUIRE_THROWS_WITH(
+      holder::privacy::assert_encryption_push_safe(root.string()),
+      Catch::Matchers::ContainsSubstring("Privacy safety check failed: found plaintext project blobs. Unsafe paths: cards/ab/plain.md")
+  );
 }
 
 TEST_CASE("Privacy safety check accepts HolderPriv1 envelope blobs", "[privacy]") {
@@ -447,11 +451,14 @@ TEST_CASE("export_recovery_token rejects empty PIN", "[privacy]") {
   const auto fetched = repo.get(project.project_id);
   REQUIRE(fetched.has_value());
   REQUIRE(fetched->project_key_id.has_value());
-  REQUIRE_THROWS(holder::privacy::export_recovery_token(
-      project.project_id,
-      fetched->project_key_id.value(),
-      ""
-  ));
+  REQUIRE_THROWS_WITH(
+      holder::privacy::export_recovery_token(
+          project.project_id,
+          fetched->project_key_id.value(),
+          ""
+      ),
+      Catch::Matchers::ContainsSubstring("pin must not be empty")
+  );
 }
 
 TEST_CASE(
@@ -646,15 +653,18 @@ TEST_CASE(
   std::filesystem::create_directories(keystore_dir / "key-open-fail.key");
   holder::test::EnvGuard keystore_env("HOLDER_TEST_KEYSTORE_DIR", keystore_dir.string());
 
-  REQUIRE_THROWS(holder::privacy::ensure_project_key_material(
-      repo,
-      project.project_id,
-      std::nullopt,
-      2,
-      []() {
-        return std::string("key-open-fail");
-      }
-  ));
+  REQUIRE_THROWS_WITH(
+      holder::privacy::ensure_project_key_material(
+          repo,
+          project.project_id,
+          std::nullopt,
+          2,
+          []() {
+            return std::string("key-open-fail");
+          }
+      ),
+      Catch::Matchers::ContainsSubstring("failed to open test keystore file")
+  );
 }
 
 TEST_CASE(
@@ -670,12 +680,15 @@ TEST_CASE(
   // Force std::ofstream open failure for .holder/privacy.json.
   std::filesystem::create_directories(repo_root / ".holder" / "privacy.json");
 
-  REQUIRE_THROWS(holder::privacy::ensure_encrypted_git_setup(
-      git,
-      repo_root.string(),
-      "proj-meta-fail",
-      "key-meta-fail"
-  ));
+  REQUIRE_THROWS_WITH(
+      holder::privacy::ensure_encrypted_git_setup(
+          git,
+          repo_root.string(),
+          "proj-meta-fail",
+          "key-meta-fail"
+      ),
+      Catch::Matchers::ContainsSubstring("failed to write privacy metadata file")
+  );
 }
 
 TEST_CASE(
