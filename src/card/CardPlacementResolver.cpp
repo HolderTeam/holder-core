@@ -81,7 +81,7 @@ bool sibling_less(const holder::model::Card& a, const holder::model::Card& b) {
   if (a.sort_key > b.sort_key) return false;
   if (a.updated_at > b.updated_at) return true;
   if (a.updated_at < b.updated_at) return false;
-  return a.title < b.title; // LCOV_EXCL_LINE - equal timestamps are ordered deterministically.
+  return a.title < b.title;
 }
 
 } // namespace

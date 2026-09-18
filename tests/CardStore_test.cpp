@@ -1,5 +1,6 @@
 #if __has_include(<catch2/catch_test_macros.hpp>)
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #else
 #include <catch2/catch.hpp>
 #endif
@@ -1166,7 +1167,10 @@ TEST_CASE("CardStore move exercises error and no-op branches", "[cardstore]") {
   bad_rel.created_at = 1;
   bad_rel.updated_at = 1;
   card_repo.create(bad_rel);
-  REQUIRE_THROWS(store.move(bad_rel.card_id, false, std::nullopt, std::nullopt, 2));
+  REQUIRE_THROWS_WITH(
+      store.move(bad_rel.card_id, false, std::nullopt, std::nullopt, 2),
+      "card rel_path does not match card_id"
+  );
 
   holder::model::Card noop;
   noop.card_id = "movnop01";
@@ -1187,8 +1191,9 @@ TEST_CASE("CardStore move exercises error and no-op branches", "[cardstore]") {
   missing_body.updated_at = 1;
   store.create(missing_body, "body");
   std::filesystem::remove(project_root / holder::core::card_rel_path(missing_body.card_id));
-  REQUIRE_THROWS(
-      store.move(missing_body.card_id, true, std::optional<std::string>("parentx"), std::nullopt, 2)
+  REQUIRE_THROWS_WITH(
+      store.move(missing_body.card_id, true, std::optional<std::string>("parentx"), std::nullopt, 2),
+      "card content missing"
   );
 
   // Make file front matter already match target move while DB still has old values.
@@ -1310,7 +1315,9 @@ TEST_CASE("CardStore update_links exercises error, encrypted, and no-op branches
   bad_rel.created_at = 1;
   bad_rel.updated_at = 1;
   card_repo.create(bad_rel);
-  REQUIRE_THROWS(store.update_links(bad_rel.card_id, 2));
+  REQUIRE_THROWS_WITH(
+      store.update_links(bad_rel.card_id, 2), "card rel_path does not match card_id"
+  );
 
   holder::model::Card noop;
   noop.card_id = "lnknop01";
@@ -1723,7 +1730,9 @@ TEST_CASE("CardStore update_milestones exercises error, encrypted, and no-op bra
   bad_rel.created_at = 1;
   bad_rel.updated_at = 1;
   card_repo.create(bad_rel);
-  REQUIRE_THROWS(store.update_milestones(bad_rel.card_id, 2));
+  REQUIRE_THROWS_WITH(
+      store.update_milestones(bad_rel.card_id, 2), "card rel_path does not match card_id"
+  );
 
   holder::model::Card noop;
   noop.card_id = "milnop01";
@@ -2196,7 +2205,7 @@ TEST_CASE("CardStore rejects missing milestone content and malformed historical 
   missing_content.created_at = 1;
   missing_content.updated_at = 1;
   cards.create(missing_content);
-  REQUIRE_THROWS(store.update_milestones(missing_content.card_id, 2));
+  REQUIRE_THROWS_WITH(store.update_milestones(missing_content.card_id, 2), "card content missing");
 
   holder::model::Card bad_path = missing_content;
   bad_path.card_id = "badrestore01";
@@ -2236,4 +2245,70 @@ TEST_CASE("CardStore rejects missing milestone content and malformed historical 
 
   REQUIRE_THROWS(store.restore_version(card.card_id, *binary_oid, 3));
   REQUIRE_THROWS(store.restore_version(card.card_id, *malformed_oid, 3));
+}
+
+TEST_CASE("CardStore mutations reject a bad rel_path or a missing durable file",
+          "[cardstore]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  const auto project_root = dir / "project_repo";
+  create_project(db, "proj-1", project_root.string());
+
+  holder::index::FtsIndexer fts(db);
+  holder::card::CardStore store(db, &fts);
+  holder::card::CardRepo cards(db);
+  holder::card::MilestoneRepo milestones(db);
+  constexpr auto kBadRel = "card rel_path does not match card_id";
+  constexpr auto kMissing = "card content missing";
+
+  // A card row whose rel_path disagrees with its card_id, carrying a milestone so the
+  // update passes every earlier check and reaches the rel_path guard.
+  holder::model::Card bad_rel;
+  bad_rel.card_id = "msbad01";
+  bad_rel.project_id = "proj-1";
+  bad_rel.rel_path = "cards/wrong.md";
+  bad_rel.title = "BadRel";
+  bad_rel.created_at = 1;
+  bad_rel.updated_at = 1;
+  cards.create(bad_rel);
+
+  holder::model::Card missing_file;
+  missing_file.card_id = "msmis01";
+  missing_file.project_id = "proj-1";
+  missing_file.title = "MissingFile";
+  missing_file.created_at = 1;
+  missing_file.updated_at = 1;
+  store.create(missing_file, "body");
+
+  holder::model::Milestone bad_milestone;
+  bad_milestone.milestone_id = "ms-bad";
+  bad_milestone.card_id = bad_rel.card_id;
+  bad_milestone.project_id = "proj-1";
+  bad_milestone.start_at = 100;
+  bad_milestone.created_at = 1;
+  bad_milestone.updated_at = 1;
+  milestones.replace_for_card("proj-1", bad_rel.card_id, {bad_milestone});
+
+  holder::model::Milestone missing_milestone = bad_milestone;
+  missing_milestone.milestone_id = "ms-missing";
+  missing_milestone.card_id = missing_file.card_id;
+  milestones.replace_for_card("proj-1", missing_file.card_id, {missing_milestone});
+
+  holder::card::MilestoneUpdate update;
+  update.start_at = 200;
+
+  REQUIRE_THROWS_WITH(
+      store.update_milestone("proj-1", bad_rel.card_id, bad_milestone.milestone_id, update, 2), kBadRel
+  );
+
+  // Removing the durable file behind a live row (an external delete) must fail loudly rather
+  // than recreate or silently skip the card.
+  std::filesystem::remove(project_root / holder::core::card_rel_path(missing_file.card_id));
+  REQUIRE_THROWS_WITH(
+      store.update_milestone("proj-1", missing_file.card_id, missing_milestone.milestone_id, update, 2),
+      kMissing
+  );
+  REQUIRE_THROWS_WITH(store.update_links(missing_file.card_id, 2), kMissing);
 }

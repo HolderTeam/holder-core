@@ -277,9 +277,9 @@ void CardStore::update_content(
   git_->open_or_init(project.root_path);
   if (project.git_remote_url.has_value()) git_->set_remote("origin", *project.git_remote_url);
   const std::string expected = holder::core::card_rel_path(card.card_id);
-  if (card.rel_path != expected) { // LCOV_EXCL_START - durable card rows are validated at creation/rebuild.
+  if (card.rel_path != expected) {
     throw std::runtime_error("card rel_path does not match card_id");
-  } // LCOV_EXCL_STOP
+  }
 
   const auto full_path = git_->repo_dir() / card.rel_path;
   bool unchanged = false;
@@ -344,9 +344,9 @@ void CardStore::move(
   git_->open_or_init(project.root_path);
   if (project.git_remote_url.has_value()) git_->set_remote("origin", *project.git_remote_url);
   const std::string expected = holder::core::card_rel_path(card.card_id);
-  if (card.rel_path != expected) { // LCOV_EXCL_START - durable rows are validated before this write path.
+  if (card.rel_path != expected) {
     throw std::runtime_error("card rel_path does not match card_id");
-  } // LCOV_EXCL_STOP
+  }
 
   const std::optional<std::string> next_parent = has_parent_card_id ? parent_card_id
                                                                     : card.parent_card_id;
@@ -363,9 +363,9 @@ void CardStore::move(
   }
 
   const auto full_path = git_->repo_dir() / card.rel_path;
-  if (!fs_->exists(full_path)) { // LCOV_EXCL_START - sync/rebuild quarantine missing durable files first.
+  if (!fs_->exists(full_path)) {
     throw std::runtime_error("card content missing");
-  } // LCOV_EXCL_STOP
+  }
 
   const auto raw = fs_->read_file(full_path);
   const auto plain = decode_card_blob(project, raw);
@@ -411,14 +411,14 @@ void CardStore::update_links(const std::string& card_id, long long updated_at) {
   git_->open_or_init(project.root_path);
   if (project.git_remote_url.has_value()) git_->set_remote("origin", *project.git_remote_url);
   const std::string expected = holder::core::card_rel_path(card.card_id);
-  if (card.rel_path != expected) { // LCOV_EXCL_START - durable rows are validated before this mutation.
+  if (card.rel_path != expected) {
     throw std::runtime_error("card rel_path does not match card_id");
-  } // LCOV_EXCL_STOP
+  }
 
   const auto full_path = git_->repo_dir() / card.rel_path;
-  if (!fs_->exists(full_path)) { // LCOV_EXCL_START - missing durable files are quarantined by rebuild.
+  if (!fs_->exists(full_path)) {
     throw std::runtime_error("card content missing");
-  } // LCOV_EXCL_STOP
+  }
 
   const auto raw = fs_->read_file(full_path);
   const auto plain = decode_card_blob(project, raw);
@@ -459,14 +459,14 @@ void CardStore::update_milestones(const std::string& card_id, long long updated_
   git_->open_or_init(project.root_path);
   if (project.git_remote_url.has_value()) git_->set_remote("origin", *project.git_remote_url);
   const std::string expected = holder::core::card_rel_path(card.card_id);
-  if (card.rel_path != expected) { // LCOV_EXCL_START - durable rows are validated at creation/rebuild.
+  if (card.rel_path != expected) {
     throw std::runtime_error("card rel_path does not match card_id");
-  } // LCOV_EXCL_STOP
+  }
 
   const auto full_path = git_->repo_dir() / card.rel_path;
-  if (!fs_->exists(full_path)) { // LCOV_EXCL_START - rebuild quarantines missing durable files first.
+  if (!fs_->exists(full_path)) {
     throw std::runtime_error("card content missing");
-  } // LCOV_EXCL_STOP
+  }
 
   const auto raw = fs_->read_file(full_path);
   const auto plain = decode_card_blob(project, raw);
@@ -541,14 +541,14 @@ std::optional<holder::model::Milestone> CardStore::update_milestone(
   git_->open_or_init(project.root_path);
   if (project.git_remote_url.has_value()) git_->set_remote("origin", *project.git_remote_url);
   const std::string expected = holder::core::card_rel_path(card.card_id);
-  if (card.rel_path != expected) { // LCOV_EXCL_START - durable rows are validated at creation/rebuild.
+  if (card.rel_path != expected) {
     throw std::runtime_error("card rel_path does not match card_id");
-  } // LCOV_EXCL_STOP
+  }
 
   const auto full_path = git_->repo_dir() / card.rel_path;
-  if (!fs_->exists(full_path)) { // LCOV_EXCL_START - missing durable files are quarantined before mutation.
+  if (!fs_->exists(full_path)) {
     throw std::runtime_error("card content missing");
-  } // LCOV_EXCL_STOP
+  }
   const auto raw = fs_->read_file(full_path);
   const auto plain = decode_card_blob(project, raw);
   const auto parsed = holder::core::parse_card_file(plain);

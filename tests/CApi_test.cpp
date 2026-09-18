@@ -6097,6 +6097,14 @@ TEST_CASE("C API JSON helpers validate output and context before dispatch", "[ca
     error = nullptr;
   };
 
+  expect_invalid(holder_resource_list(nullptr, "project-1", nullptr, &error));
+  expect_invalid(holder_resource_list(nullptr, "project-1", &json, &error));
+  expect_invalid(holder_card_milestone_update_json(
+      nullptr, "project-1", "card-1", "milestone-1", "{}", nullptr, &error
+  ));
+  expect_invalid(holder_card_milestone_update_json(
+      nullptr, "project-1", "card-1", "milestone-1", "{}", &json, &error
+  ));
   expect_invalid(holder_resource_get(nullptr, "resource-1", nullptr, &error));
   expect_invalid(holder_resource_get(nullptr, "resource-1", &json, &error));
   expect_invalid(holder_resource_put_json(nullptr, "{}", nullptr, &error));
@@ -6163,7 +6171,7 @@ TEST_CASE("C API reference scopes and card-query validation cover every public v
   holder_context_destroy(context);
 }
 
-TEST_CASE("C API JSON entry points preserve malformed and deleted-card behaviour", "[capi]") {
+TEST_CASE("C API JSON entry points report malformed input and unknown ids as runtime errors", "[capi]") {
   const auto data_dir = holder::test::make_temp_dir();
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
@@ -6216,6 +6224,88 @@ TEST_CASE("C API JSON entry points preserve malformed and deleted-card behaviour
       holder_git_sync_now(context, "missing-project", nullptr, 0, 0, &json, &error) ==
       HOLDER_ERROR_RUNTIME
   );
+  holder_error_destroy(error);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API move and milestone update reject a trashed card", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  char* json = nullptr;
+  REQUIRE(holder_card_create(context, "project-1", "Doomed", "body", nullptr, &json, &error) == HOLDER_OK);
+  const auto card_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
+  holder_string_free(json);
+  json = nullptr;
+  REQUIRE(holder_card_delete(context, card_id.c_str(), &error) == HOLDER_OK);
+
+  const auto move_rc = holder_card_move_json(
+      context, "project-1", card_id.c_str(), R"({"intent":"to_end"})", &json, &error
+  );
+  INFO("holder_card_move_json on a trashed card: " << (error ? holder_error_message(error) : "ok"));
+  REQUIRE(move_rc == HOLDER_ERROR_RUNTIME);
+  REQUIRE(json == nullptr);
+  REQUIRE(std::string(holder_error_message(error)) == "card_not_found");
+  holder_error_destroy(error);
+  error = nullptr;
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API maps a fault inside a handler body to a runtime error", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  // A second connection removes tables the open context still expects, so the handler's
+  // repository calls throw std::exception from inside the try block.
+  holder::platform::Db sabotage;
+  sabotage.open(data_dir / "server" / "holder.db");
+
+  // Foreign keys are on by default, which would make the drops trip over referencing tables.
+  sabotage.exec("PRAGMA foreign_keys = OFF;");
+  char* json = nullptr;
+  sabotage.exec("DROP TABLE cards;");
+  const auto resolve_rc =
+      holder_card_reference_resolve(context, "project-1", "anything", 0, &json, &error);
+  INFO("holder_card_reference_resolve without a cards table: " << (error ? holder_error_message(error) : "ok"));
+  REQUIRE(resolve_rc == HOLDER_ERROR_RUNTIME);
+  REQUIRE(json == nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  sabotage.exec("DROP TABLE projects;");
+  const auto sync_rc = holder_git_sync_now(context, "project-1", nullptr, 0, 0, &json, &error);
+  INFO("holder_git_sync_now without a projects table: " << (error ? holder_error_message(error) : "ok"));
+  REQUIRE(sync_rc == HOLDER_ERROR_RUNTIME);
+  REQUIRE(json == nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API probe reports a URL that cannot be serialized as a runtime error", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+
+  // The probe echoes the URL in its JSON body; bytes that are not valid UTF-8 make the
+  // serializer throw after the probe itself has already completed.
+  char* json = nullptr;
+  const auto rc = holder_git_probe_remote_url(context, "not-a-url-\xff\xfe", &json, &error);
+  INFO("holder_git_probe_remote_url with invalid UTF-8: " << (error ? holder_error_message(error) : "ok"));
+  REQUIRE(rc == HOLDER_ERROR_RUNTIME);
+  REQUIRE(json == nullptr);
   holder_error_destroy(error);
   holder_context_destroy(context);
 }

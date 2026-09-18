@@ -497,16 +497,25 @@ TEST_CASE("CardPlacementResolver handles tied siblings and parent edge cases", "
   holder::card::CardRepo cards(db);
   CardPlacementResolver resolver(cards);
   const std::string source = "66666666-0000-4000-8000-000000000001";
-  const std::string earlier = "66666666-0000-4000-8000-000000000002";
-  const std::string later = "66666666-0000-4000-8000-000000000003";
+  const std::string title_first = "66666666-0000-4000-8000-000000000002";
+  const std::string title_last = "66666666-0000-4000-8000-000000000003";
   const std::string deleted_parent = "66666666-0000-4000-8000-000000000004";
   create_card(cards, source, "proj-1", "Source", 10.0);
-  create_card(cards, earlier, "proj-1", "A", 20.0, std::nullopt, 3);
-  create_card(cards, later, "proj-1", "Z", 20.0, std::nullopt, 2);
+  // Identical sort_key and updated_at: only the title decides the sibling order.
+  create_card(cards, title_first, "proj-1", "A", 20.0, std::nullopt, 2);
+  create_card(cards, title_last, "proj-1", "Z", 20.0, std::nullopt, 2);
   create_card(cards, deleted_parent, "proj-1", "Deleted parent", 30.0, std::nullopt, 1, 9);
 
   REQUIRE(resolver.resolve("proj-1", source,
                            simple_request(CardPlacementIntent::ToEnd)).sort_key == 21.0);
+  // Siblings order as [A, Z], so "after A" sits in a zero-width gap and steps past it (21.0).
+  // Were Z first, A would be last and the result would be the midpoint 20.5.
+  REQUIRE(resolver.resolve("proj-1", source,
+                           before_after_request(CardPlacementIntent::After, title_first))
+              .sort_key == 21.0);
+  REQUIRE(resolver.resolve("proj-1", source,
+                           before_after_request(CardPlacementIntent::Before, title_last))
+              .sort_key == 19.0);
   REQUIRE_THROWS_WITH(
       resolver.resolve("proj-1", source, simple_request(CardPlacementIntent::ToStart, deleted_parent)),
       "target_not_found"

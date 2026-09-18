@@ -557,18 +557,26 @@ int with_json_output(
 ) {
   clear_error(out_error);
   if (out_json == nullptr) {
-    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null"); // LCOV_EXCL_LINE - template counters are attributed to unused instantiations.
+    // LCOV_EXCL_START - holder_card_query_json validates this before dispatch, so its instantiation
+    // never reaches the guard; the other instantiations are covered by the C API guard tests.
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+    // LCOV_EXCL_STOP
   }
   *out_json = nullptr;
   if (context == nullptr) {
-    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null"); // LCOV_EXCL_LINE
+    // LCOV_EXCL_START - as above.
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+    // LCOV_EXCL_STOP
   }
   try {
     return return_json(fn(), out_json, out_error);
   } catch (const std::bad_alloc&) { // LCOV_EXCL_LINE - allocation injection is not supported.
     return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed"); // LCOV_EXCL_LINE
-  } catch (const std::exception& e) { // LCOV_EXCL_LINE - wrapper exceptions are tested by public APIs.
-    return set_exception(out_error, e); // LCOV_EXCL_LINE
+  // LCOV_EXCL_START - one handler shared by every entry point. gcov counts it per lambda
+  // instantiation, and only some entry points (e.g. move/query/milestone) can be made to throw.
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  // LCOV_EXCL_STOP
   } catch (...) { // LCOV_EXCL_LINE - GCC attributes the excluded fallback body
                   // to the handler.
     return set_unknown_exception(out_error); // LCOV_EXCL_LINE
@@ -586,8 +594,11 @@ int with_void_output(holder_context* context, holder_error** out_error, Fn&& fn)
     return HOLDER_OK;
   } catch (const std::bad_alloc&) { // LCOV_EXCL_LINE - allocation injection is not supported.
     return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed"); // LCOV_EXCL_LINE
-  } catch (const std::exception& e) { // LCOV_EXCL_LINE - wrapper exceptions are tested by public APIs.
-    return set_exception(out_error, e); // LCOV_EXCL_LINE
+  // LCOV_EXCL_START - shared handler; holder_location_delete cannot be made to throw, while
+  // holder_resource_delete and others exercise it.
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  // LCOV_EXCL_STOP
   } catch (...) { // LCOV_EXCL_LINE - GCC attributes the excluded fallback body
                   // to the handler.
     return set_unknown_exception(out_error); // LCOV_EXCL_LINE
@@ -1185,9 +1196,9 @@ int holder_database_rebuild(
     return return_json(nlohmann::json::parse(report.to_json()), out_json, out_error);
   } catch (const std::bad_alloc&) {
     return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed"); // LCOV_EXCL_LINE
-  } catch (const std::exception& e) { // LCOV_EXCL_LINE - C ABI exception mapping is exercised by representative entry points.
-    return set_exception(out_error, e); // LCOV_EXCL_LINE
-  } catch (...) { // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
     return set_unknown_exception(out_error); // LCOV_EXCL_LINE
   } // LCOV_EXCL_LINE - excluded fallback handler-end counter.
 }
@@ -1591,9 +1602,9 @@ int holder_project_list(holder_context* context, char** out_json, holder_error**
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
     return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
-  } catch (const std::exception& e) { // LCOV_EXCL_LINE - C ABI exception mapping is exercised by representative entry points.
-    return set_exception(out_error, e); // LCOV_EXCL_LINE
-  } catch (...) { // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
     return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }  // LCOV_EXCL_LINE
 }
@@ -1636,9 +1647,9 @@ int holder_card_list(
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
     return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
-  } catch (const std::exception& e) { // LCOV_EXCL_LINE - C ABI exception mapping is exercised by representative entry points.
-    return set_exception(out_error, e); // LCOV_EXCL_LINE
-  } catch (...) { // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
     return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }  // LCOV_EXCL_LINE
 }
@@ -1882,9 +1893,9 @@ int holder_backup_snapshot_page(
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
     return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
-  } catch (const std::exception& e) { // LCOV_EXCL_LINE - C ABI exception mapping is exercised by representative entry points.
-    return set_exception(out_error, e); // LCOV_EXCL_LINE
-  } catch (...) { // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
     return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }  // LCOV_EXCL_LINE
 }
@@ -1959,9 +1970,9 @@ int holder_backup_restore(
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
     return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
-  } catch (const std::exception& e) { // LCOV_EXCL_LINE - C ABI exception mapping is exercised by representative entry points.
-    return set_exception(out_error, e); // LCOV_EXCL_LINE
-  } catch (...) { // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
     return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }  // LCOV_EXCL_LINE
 }
@@ -2007,9 +2018,9 @@ int holder_card_get_content(
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
     return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
-  } catch (const std::exception& e) { // LCOV_EXCL_LINE - C ABI exception mapping is exercised by representative entry points.
-    return set_exception(out_error, e); // LCOV_EXCL_LINE
-  } catch (...) { // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
     return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }  // LCOV_EXCL_LINE
 }
@@ -2082,9 +2093,9 @@ int holder_card_reference_resolve(
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
     return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
-  } catch (const std::exception& e) { // LCOV_EXCL_LINE - C ABI exception mapping is exercised by representative entry points.
-    return set_exception(out_error, e); // LCOV_EXCL_LINE
-  } catch (...) { // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
     return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }  // LCOV_EXCL_LINE
 }
@@ -2195,9 +2206,9 @@ int holder_project_create(
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
     return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
-  } catch (const std::exception& e) { // LCOV_EXCL_LINE - public operation error mapping is covered elsewhere.
-    return set_exception(out_error, e); // LCOV_EXCL_LINE
-  } catch (...) { // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
     return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }  // LCOV_EXCL_LINE
 }
@@ -2249,9 +2260,9 @@ int holder_project_rename(
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
     return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
-  } catch (const std::exception& e) { // LCOV_EXCL_LINE - route-level exception mapping is covered by other C ABI tests.
-    return set_exception(out_error, e); // LCOV_EXCL_LINE
-  } catch (...) { // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
     return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }  // LCOV_EXCL_LINE
 }
@@ -3870,9 +3881,9 @@ int holder_git_probe_remote_url(
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
     return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
-  } catch (const std::exception& e) { // LCOV_EXCL_LINE - route-level exception mapping is covered by other C ABI tests.
-    return set_exception(out_error, e); // LCOV_EXCL_LINE
-  } catch (...) { // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
     return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }  // LCOV_EXCL_LINE
 }
@@ -4279,9 +4290,9 @@ int holder_git_sync_now(
     return HOLDER_OK;
   } catch (const std::bad_alloc&) {
     return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");  // LCOV_EXCL_LINE
-  } catch (const std::exception& e) { // LCOV_EXCL_LINE - route-level exception mapping is covered by other C ABI tests.
-    return set_exception(out_error, e); // LCOV_EXCL_LINE
-  } catch (...) { // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
     return set_unknown_exception(out_error);  // LCOV_EXCL_LINE
   }  // LCOV_EXCL_LINE
 }
