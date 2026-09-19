@@ -394,14 +394,26 @@ TEST_CASE("Local directory provider is atomic and idempotent", "[asset]") {
   holder::resource::LocalDirectoryProvider provider(dir / "objects");
 
   REQUIRE_THROWS_WITH(provider.exists(""), Catch::Matchers::ContainsSubstring("invalid storage object key"));
-  // "/absolute/path" is absolute on POSIX, but on Windows it is only rooted (no drive), so
-  // is_absolute() is false and joining it onto the storage root escapes the root instead. Both
-  // rejections are correct; which one fires depends on the platform's path semantics.
   REQUIRE_THROWS_WITH(
       provider.exists("/absolute/path"),
-      Catch::Matchers::ContainsSubstring("invalid storage object key") ||
-          Catch::Matchers::ContainsSubstring("storage object escapes root")
+      Catch::Matchers::ContainsSubstring("invalid storage object key")
   );
+#ifdef _WIN32
+  // Rooted but not absolute on Windows (no drive, or a drive with no root directory): these used
+  // to slip past is_absolute() and were only stopped by the final "escapes root" defence.
+  REQUIRE_THROWS_WITH(
+      provider.exists("\\rooted\\path"),
+      Catch::Matchers::ContainsSubstring("invalid storage object key")
+  );
+  REQUIRE_THROWS_WITH(
+      provider.exists("C:relative"),
+      Catch::Matchers::ContainsSubstring("invalid storage object key")
+  );
+  REQUIRE_THROWS_WITH(
+      provider.exists("C:\\absolute\\path"),
+      Catch::Matchers::ContainsSubstring("invalid storage object key")
+  );
+#endif
   REQUIRE_THROWS_WITH(
       provider.exists("./relative"),
       Catch::Matchers::ContainsSubstring("unsafe storage object key")

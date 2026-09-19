@@ -59,7 +59,10 @@ LocalDirectoryProvider::LocalDirectoryProvider(std::filesystem::path root)
 
 std::filesystem::path LocalDirectoryProvider::resolve(const std::string& object_key) const {
   const std::filesystem::path relative(object_key);
-  if (object_key.empty() || relative.is_absolute()) {
+  // has_root_path(), not is_absolute(): on Windows a key like "/x" or "C:x" is rooted but not
+  // absolute, and joining it onto root_ would replace or escape the root instead of nesting
+  // under it. On POSIX the two are identical.
+  if (object_key.empty() || relative.has_root_path()) {
     throw StorageError(StorageErrorCode::InvalidConfiguration, "invalid storage object key");
   }
   for (const auto& part : relative) {
@@ -70,9 +73,9 @@ std::filesystem::path LocalDirectoryProvider::resolve(const std::string& object_
   const auto result = (root_ / relative).lexically_normal();
   const auto relative_to_root = result.lexically_relative(root_);
   if (relative_to_root.empty() || *relative_to_root.begin() == "..") {
-    // Absolute keys and every dot/dot-dot component were rejected above, so
-    // lexical joining cannot escape root_. This is a final defence if
-    // filesystem path semantics ever change.
+    // Rooted keys and every dot/dot-dot component were rejected above, so lexical joining
+    // cannot escape root_ on any platform. This is a final defence if filesystem path
+    // semantics ever change.
     throw StorageError(StorageErrorCode::InvalidConfiguration, "storage object escapes root"); // LCOV_EXCL_LINE
   }
   return result;
