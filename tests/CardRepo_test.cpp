@@ -204,8 +204,7 @@ TEST_CASE("CardRepo finds an exact card ID within project and deletion scope", "
   REQUIRE_FALSE(live->deleted_at.has_value());
   REQUIRE_FALSE(repo.find_by_id("proj-1", live_id, holder::model::CardScope::Trashed));
 
-  const auto trashed =
-      repo.find_by_id("proj-1", trashed_id, holder::model::CardScope::Trashed);
+  const auto trashed = repo.find_by_id("proj-1", trashed_id, holder::model::CardScope::Trashed);
   REQUIRE(trashed.has_value());
   REQUIRE(trashed->deleted_at == 50);
   REQUIRE_FALSE(repo.find_by_id("proj-1", trashed_id, holder::model::CardScope::Live));
@@ -254,9 +253,11 @@ TEST_CASE("CardRepo finds literal leading card ID prefixes with a limit", "[card
     return card.card_id == fragment_id;
   }));
 
-  REQUIRE(repo.find_by_id_prefix("proj-1", "12345678", holder::model::CardScope::Either, 1).size()
-          == 1);
-  REQUIRE(repo.find_by_id_prefix("proj-1", "12345678", holder::model::CardScope::Either, 0).empty());
+  REQUIRE(
+      repo.find_by_id_prefix("proj-1", "12345678", holder::model::CardScope::Either, 1).size() == 1
+  );
+  REQUIRE(repo.find_by_id_prefix("proj-1", "12345678", holder::model::CardScope::Either, 0).empty()
+  );
 }
 
 TEST_CASE("CardRepo finds exact titles within project and deletion scope", "[cardrepo]") {
@@ -290,17 +291,27 @@ TEST_CASE("CardRepo finds exact titles within project and deletion scope", "[car
   REQUIRE(trashed.size() == 1);
   REQUIRE(trashed[0].deleted_at == 50);
 
-  REQUIRE(repo.find_by_exact_title("proj-1", "Roadmap", holder::model::CardScope::Either, 10).size()
-          == 3);
-  REQUIRE(repo.find_by_exact_title("proj-1", "Roadmap", holder::model::CardScope::Either, 1).size()
-          == 1);
-  REQUIRE(repo.find_by_exact_title("proj-1", "Roadmaps", holder::model::CardScope::Either, 10).size()
-          == 1);
+  REQUIRE(
+      repo.find_by_exact_title("proj-1", "Roadmap", holder::model::CardScope::Either, 10).size() ==
+      3
+  );
+  REQUIRE(
+      repo.find_by_exact_title("proj-1", "Roadmap", holder::model::CardScope::Either, 1).size() == 1
+  );
+  REQUIRE(
+      repo.find_by_exact_title("proj-1", "Roadmaps", holder::model::CardScope::Either, 10).size() ==
+      1
+  );
   REQUIRE(repo.find_by_exact_title("proj-1", "Road", holder::model::CardScope::Either, 10).empty());
-  REQUIRE(repo.find_by_exact_title("proj-1", "ROADMAP", holder::model::CardScope::Either, 10).empty());
-  REQUIRE(repo.find_by_exact_title("proj-2", "Roadmap", holder::model::CardScope::Either, 10).size()
-          == 1);
-  REQUIRE(repo.find_by_exact_title("proj-1", "Roadmap", holder::model::CardScope::Either, 0).empty());
+  REQUIRE(
+      repo.find_by_exact_title("proj-1", "ROADMAP", holder::model::CardScope::Either, 10).empty()
+  );
+  REQUIRE(
+      repo.find_by_exact_title("proj-2", "Roadmap", holder::model::CardScope::Either, 10).size() ==
+      1
+  );
+  REQUIRE(repo.find_by_exact_title("proj-1", "Roadmap", holder::model::CardScope::Either, 0).empty()
+  );
 }
 
 TEST_CASE("CardRepo counts children and handles deleted_at on create", "[cardrepo]") {
@@ -413,7 +424,9 @@ TEST_CASE("CardRepo create throws on duplicate primary key", "[cardrepo]") {
   repo.create(card);
   REQUIRE_THROWS_WITH(
       repo.create(card),
-      Catch::Matchers::ContainsSubstring("insert card failed: UNIQUE constraint failed: cards.project_id, cards.rel_path")
+      Catch::Matchers::ContainsSubstring(
+          "insert card failed: UNIQUE constraint failed: cards.project_id, cards.rel_path"
+      )
   );
 }
 
@@ -448,11 +461,17 @@ TEST_CASE("CardRepo methods throw sqlite errors when DB is closed", "[cardrepo]"
       Catch::Matchers::ContainsSubstring("prepare find card by id failed: unknown sqlite error")
   );
   REQUIRE_THROWS_WITH(
-      repo.find_by_id_prefix("proj-1", "missing", holder::model::CardScope::Either, 10)
-  , Catch::Matchers::ContainsSubstring("prepare find cards by id prefix failed: unknown sqlite error"));
+      repo.find_by_id_prefix("proj-1", "missing", holder::model::CardScope::Either, 10),
+      Catch::Matchers::ContainsSubstring(
+          "prepare find cards by id prefix failed: unknown sqlite error"
+      )
+  );
   REQUIRE_THROWS_WITH(
-      repo.find_by_exact_title("proj-1", "Missing", holder::model::CardScope::Either, 10)
-  , Catch::Matchers::ContainsSubstring("prepare find cards by exact title failed: unknown sqlite error"));
+      repo.find_by_exact_title("proj-1", "Missing", holder::model::CardScope::Either, 10),
+      Catch::Matchers::ContainsSubstring(
+          "prepare find cards by exact title failed: unknown sqlite error"
+      )
+  );
   REQUIRE_THROWS_WITH(
       repo.list_roots("proj-1"),
       Catch::Matchers::ContainsSubstring("prepare list cards failed: unknown sqlite error")
@@ -503,7 +522,9 @@ TEST_CASE("CardRepo methods throw sqlite errors when DB is closed", "[cardrepo]"
   );
   REQUIRE_THROWS_WITH(
       repo.restore_snapshot(card),
-      Catch::Matchers::ContainsSubstring("prepare restore card snapshot failed: unknown sqlite error")
+      Catch::Matchers::ContainsSubstring(
+          "prepare restore card snapshot failed: unknown sqlite error"
+      )
   );
   REQUIRE_THROWS_WITH(
       repo.remove("card-1"),

@@ -12,9 +12,9 @@
 #include "card/LinkRepo.h"
 #include "card/MilestoneRepo.h"
 #include "card/TagRepo.h"
+#include "core_test_helpers.h"
 #include "git/GitOps.h"
 #include "git/GitRepo.h"
-#include "core_test_helpers.h"
 #include "index/FtsIndexer.h"
 #include "model/Card.h"
 #include "model/CardLink.h"
@@ -231,10 +231,7 @@ class BulkTrackingGitOps final : public holder::git::GitOps {
   void open_or_init(const std::filesystem::path& repo_dir) override {
     real_.open_or_init(repo_dir);
   }
-  void write_file(
-      const std::filesystem::path& relative_path,
-      const std::string& content
-  ) override {
+  void write_file(const std::filesystem::path& relative_path, const std::string& content) override {
     real_.write_file(relative_path, content);
   }
   void stage_path(const std::filesystem::path& relative_path) override {
@@ -329,12 +326,7 @@ TEST_CASE("CardStore create_batch stages and commits the batch once", "[cardstor
   db.open(dir / "holder.db");
   apply_schema(db);
   const auto project_root = dir / "project_repo";
-  create_project(
-      db,
-      "proj-1",
-      project_root.string(),
-      holder::model::IdScheme::Uuid7
-  );
+  create_project(db, "proj-1", project_root.string(), holder::model::IdScheme::Uuid7);
 
   BulkTrackingGitOps git;
   holder::card::CardStore store(db, nullptr, nullptr, &git);
@@ -362,7 +354,9 @@ TEST_CASE("CardStore create_batch stages and commits the batch once", "[cardstor
   store.create_batch(
       "proj-1",
       items,
-      []() { return "new-milestone-id"; },
+      []() {
+        return "new-milestone-id";
+      },
       "Restore batch"
   );
 
@@ -1219,7 +1213,8 @@ TEST_CASE("CardStore move exercises error and no-op branches", "[cardstore]") {
   store.create(missing_body, "body");
   std::filesystem::remove(project_root / holder::core::card_rel_path(missing_body.card_id));
   REQUIRE_THROWS_WITH(
-      store.move(missing_body.card_id, true, std::optional<std::string>("parentx"), std::nullopt, 2),
+      store
+          .move(missing_body.card_id, true, std::optional<std::string>("parentx"), std::nullopt, 2),
       "card content missing"
   );
 
@@ -1346,7 +1341,8 @@ TEST_CASE("CardStore update_links exercises error, encrypted, and no-op branches
   bad_rel.updated_at = 1;
   card_repo.create(bad_rel);
   REQUIRE_THROWS_WITH(
-      store.update_links(bad_rel.card_id, 2), "card rel_path does not match card_id"
+      store.update_links(bad_rel.card_id, 2),
+      "card rel_path does not match card_id"
   );
 
   holder::model::Card noop;
@@ -1630,8 +1626,15 @@ TEST_CASE("CardStore restores an encrypted historical card snapshot", "[cardstor
   holder::test::EnvGuard keystore_env("HOLDER_TEST_KEYSTORE_DIR", (dir / "keystore").string());
   holder::git::RealGitOps bootstrap_git;
   holder::privacy::ensure_encrypted_project_ready(
-      bootstrap_git, project_repo, project.project_id, project.root_path, std::nullopt, 2,
-      []() { return std::string("key-history-restore"); }
+      bootstrap_git,
+      project_repo,
+      project.project_id,
+      project.root_path,
+      std::nullopt,
+      2,
+      []() {
+        return std::string("key-history-restore");
+      }
   );
 
   holder::index::FtsIndexer fts(db);
@@ -1662,7 +1665,10 @@ TEST_CASE("CardStore restores an encrypted historical card snapshot", "[cardstor
   CHECK(raw.find("original encrypted body") == std::string::npos);
 }
 
-TEST_CASE("CardStore leaves the current version untouched when historical metadata restore fails", "[cardstore][history]") {
+TEST_CASE(
+    "CardStore leaves the current version untouched when historical metadata restore fails",
+    "[cardstore][history]"
+) {
   const auto dir = make_temp_dir();
   holder::platform::Db db;
   db.open(dir / "holder.db");
@@ -1722,7 +1728,10 @@ TEST_CASE("CardStore leaves the current version untouched when historical metada
   CHECK(current_links[0].to_card_id == "linked-card");
 }
 
-TEST_CASE("CardStore keeps card_tags in sync across create/update/trash/restore/hard_delete", "[cardstore]") {
+TEST_CASE(
+    "CardStore keeps card_tags in sync across create/update/trash/restore/hard_delete",
+    "[cardstore]"
+) {
   const auto dir = make_temp_dir();
   holder::platform::Db db;
   db.open(dir / "holder.db");
@@ -1757,7 +1766,9 @@ TEST_CASE("CardStore keeps card_tags in sync across create/update/trash/restore/
 
   store.restore(card.card_id, 4);
   REQUIRE(tags.list_tags_for_card("proj-1", card.card_id) == std::vector<std::string>{"urgent"});
-  REQUIRE(tags.list_card_ids_with_tag("proj-1", "urgent") == std::vector<std::string>{card.card_id});
+  REQUIRE(
+      tags.list_card_ids_with_tag("proj-1", "urgent") == std::vector<std::string>{card.card_id}
+  );
 
   store.trash(card.card_id, 5);
   store.hard_delete(card.card_id);
@@ -1765,7 +1776,10 @@ TEST_CASE("CardStore keeps card_tags in sync across create/update/trash/restore/
   REQUIRE(tags.list_card_ids_with_tag("proj-1", "urgent").empty());
 }
 
-TEST_CASE("CardStore update_milestones exercises error, encrypted, and no-op branches", "[cardstore]") {
+TEST_CASE(
+    "CardStore update_milestones exercises error, encrypted, and no-op branches",
+    "[cardstore]"
+) {
   const auto dir = make_temp_dir();
   holder::platform::Db db;
   db.open(dir / "holder.db");
@@ -1793,7 +1807,8 @@ TEST_CASE("CardStore update_milestones exercises error, encrypted, and no-op bra
   bad_rel.updated_at = 1;
   card_repo.create(bad_rel);
   REQUIRE_THROWS_WITH(
-      store.update_milestones(bad_rel.card_id, 2), "card rel_path does not match card_id"
+      store.update_milestones(bad_rel.card_id, 2),
+      "card rel_path does not match card_id"
   );
 
   holder::model::Card noop;
@@ -1858,14 +1873,19 @@ TEST_CASE("CardStore update_milestones exercises error, encrypted, and no-op bra
   enc_card.updated_at = 1;
   store.create(enc_card, "body");
   milestones.replace_for_card(
-      enc.project_id, enc_card.card_id, {make_milestone_for("mile-enc", enc.project_id, enc_card.card_id)}
+      enc.project_id,
+      enc_card.card_id,
+      {make_milestone_for("mile-enc", enc.project_id, enc_card.card_id)}
   );
   const int before_enc = count_commits(enc.root_path);
   store.update_milestones(enc_card.card_id, 2);
   REQUIRE(count_commits(enc.root_path) == before_enc + 1);
 }
 
-TEST_CASE("CardStore restores historical live and Trash lifecycle snapshots", "[cardstore][history]") {
+TEST_CASE(
+    "CardStore restores historical live and Trash lifecycle snapshots",
+    "[cardstore][history]"
+) {
   const auto dir = make_temp_dir();
   holder::platform::Db db;
   db.open(dir / "holder.db");
@@ -1951,7 +1971,9 @@ TEST_CASE("CardStore restores historical live and Trash lifecycle snapshots", "[
   CHECK(restored_milestones[0].kind == std::optional<std::string>("Review"));
   CHECK(restored_milestones[0].description == std::optional<std::string>("Original milestone"));
   CHECK(std::filesystem::exists(project_root / holder::core::card_rel_path(card.card_id)));
-  CHECK_FALSE(std::filesystem::exists(project_root / holder::core::card_trash_rel_path(card.card_id)));
+  CHECK_FALSE(
+      std::filesystem::exists(project_root / holder::core::card_trash_rel_path(card.card_id))
+  );
 
   store.restore_version(card.card_id, *trash_oid, 11);
   const auto trashed = store.get(card.card_id);
@@ -1983,7 +2005,9 @@ TEST_CASE("CardStore keeps milestones in sync across trash/restore/hard_delete",
   store.create(card, "Body");
 
   milestones.replace_for_card(
-      "proj-1", card.card_id, {make_milestone_for("mile-1", "proj-1", card.card_id)}
+      "proj-1",
+      card.card_id,
+      {make_milestone_for("mile-1", "proj-1", card.card_id)}
   );
   store.update_milestones(card.card_id, 2);
   REQUIRE(milestones.list_for_card("proj-1", card.card_id).size() == 1);
@@ -2022,16 +2046,22 @@ TEST_CASE("CardStore add_tag writes to the trailing tag line and reindexes", "[c
   store.create(card, "Some useful thing");
 
   REQUIRE(store.add_tag(card.card_id, "Work", 2) == holder::card::AddTagResult::Added);
-  REQUIRE(store.get_content(store.get(card.card_id).value()).value() == "Some useful thing\n\n#work");
+  REQUIRE(
+      store.get_content(store.get(card.card_id).value()).value() == "Some useful thing\n\n#work"
+  );
   REQUIRE(tags.list_tags_for_card("proj-1", card.card_id) == std::vector<std::string>{"work"});
 
   REQUIRE(store.add_tag(card.card_id, "android", 3) == holder::card::AddTagResult::Added);
   REQUIRE(
-      store.get_content(store.get(card.card_id).value()).value() == "Some useful thing\n\n#work #android"
+      store.get_content(store.get(card.card_id).value()).value() ==
+      "Some useful thing\n\n#work #android"
   );
 }
 
-TEST_CASE("CardStore add_tag is idempotent for a tag already present anywhere", "[cardstore][tags]") {
+TEST_CASE(
+    "CardStore add_tag is idempotent for a tag already present anywhere",
+    "[cardstore][tags]"
+) {
   const auto dir = make_temp_dir();
   holder::platform::Db db;
   db.open(dir / "holder.db");
@@ -2051,10 +2081,15 @@ TEST_CASE("CardStore add_tag is idempotent for a tag already present anywhere", 
   store.create(card, "Mentions #android in prose.");
 
   REQUIRE(store.add_tag(card.card_id, "Android", 2) == holder::card::AddTagResult::AlreadyPresent);
-  REQUIRE(store.get_content(store.get(card.card_id).value()).value() == "Mentions #android in prose.");
+  REQUIRE(
+      store.get_content(store.get(card.card_id).value()).value() == "Mentions #android in prose."
+  );
 }
 
-TEST_CASE("CardStore add_tag rejects an invalid tag without changing the card", "[cardstore][tags]") {
+TEST_CASE(
+    "CardStore add_tag rejects an invalid tag without changing the card",
+    "[cardstore][tags]"
+) {
   const auto dir = make_temp_dir();
   holder::platform::Db db;
   db.open(dir / "holder.db");
@@ -2077,7 +2112,10 @@ TEST_CASE("CardStore add_tag rejects an invalid tag without changing the card", 
   REQUIRE(store.get_content(store.get(card.card_id).value()).value() == "Body");
 }
 
-TEST_CASE("CardStore remove_tag removes from the trailing tag line and reindexes", "[cardstore][tags]") {
+TEST_CASE(
+    "CardStore remove_tag removes from the trailing tag line and reindexes",
+    "[cardstore][tags]"
+) {
   const auto dir = make_temp_dir();
   holder::platform::Db db;
   db.open(dir / "holder.db");
@@ -2098,7 +2136,9 @@ TEST_CASE("CardStore remove_tag removes from the trailing tag line and reindexes
   store.create(card, "Some useful thing\n\n#work #android");
 
   REQUIRE(store.remove_tag(card.card_id, "Work", 2) == holder::card::RemoveTagResult::Removed);
-  REQUIRE(store.get_content(store.get(card.card_id).value()).value() == "Some useful thing\n\n#android");
+  REQUIRE(
+      store.get_content(store.get(card.card_id).value()).value() == "Some useful thing\n\n#android"
+  );
   REQUIRE(tags.list_tags_for_card("proj-1", card.card_id) == std::vector<std::string>{"android"});
 
   REQUIRE(store.remove_tag(card.card_id, "android", 3) == holder::card::RemoveTagResult::Removed);
@@ -2130,13 +2170,19 @@ TEST_CASE("CardStore remove_tag distinguishes not-present from prose-only", "[ca
       holder::card::RemoveTagResult::PresentOutsideEditableTagLine
   );
   REQUIRE(
-      store.get_content(store.get(card.card_id).value()).value() == "Mentions #android only in prose."
+      store.get_content(store.get(card.card_id).value()).value() ==
+      "Mentions #android only in prose."
   );
 
-  REQUIRE(store.remove_tag(card.card_id, "nonexistent", 3) == holder::card::RemoveTagResult::NotPresent);
+  REQUIRE(
+      store.remove_tag(card.card_id, "nonexistent", 3) == holder::card::RemoveTagResult::NotPresent
+  );
 }
 
-TEST_CASE("CardStore remove_tag rejects an invalid tag without changing the card", "[cardstore][tags]") {
+TEST_CASE(
+    "CardStore remove_tag rejects an invalid tag without changing the card",
+    "[cardstore][tags]"
+) {
   const auto dir = make_temp_dir();
   holder::platform::Db db;
   db.open(dir / "holder.db");
@@ -2155,7 +2201,9 @@ TEST_CASE("CardStore remove_tag rejects an invalid tag without changing the card
   card.updated_at = 1;
   store.create(card, "Body\n\n#work");
 
-  REQUIRE(store.remove_tag(card.card_id, "123issue", 2) == holder::card::RemoveTagResult::InvalidTag);
+  REQUIRE(
+      store.remove_tag(card.card_id, "123issue", 2) == holder::card::RemoveTagResult::InvalidTag
+  );
   REQUIRE(store.get_content(store.get(card.card_id).value()).value() == "Body\n\n#work");
 }
 
@@ -2181,7 +2229,10 @@ TEST_CASE("CardStore list_editable_tags returns only the trailing-line tags", "[
   REQUIRE(store.list_editable_tags(card.card_id) == std::vector<std::string>{"work", "android"});
 }
 
-TEST_CASE("CardStore list_editable_tags is empty when there's no trailing tag line", "[cardstore][tags]") {
+TEST_CASE(
+    "CardStore list_editable_tags is empty when there's no trailing tag line",
+    "[cardstore][tags]"
+) {
   const auto dir = make_temp_dir();
   holder::platform::Db db;
   db.open(dir / "holder.db");
@@ -2231,8 +2282,7 @@ TEST_CASE("CardStore list_editable_tags reflects add_tag/remove_tag", "[cardstor
   REQUIRE(store.list_editable_tags(card.card_id).empty());
 }
 
-TEST_CASE("CardStore tag and historical restore methods reject missing cards",
-          "[cardstore]") {
+TEST_CASE("CardStore tag and historical restore methods reject missing cards", "[cardstore]") {
   const auto dir = make_temp_dir();
   holder::platform::Db db;
   db.open(dir / "holder.db");
@@ -2258,8 +2308,10 @@ TEST_CASE("CardStore tag and historical restore methods reject missing cards",
   );
 }
 
-TEST_CASE("CardStore rejects missing milestone content and malformed historical blobs",
-          "[cardstore][history]") {
+TEST_CASE(
+    "CardStore rejects missing milestone content and malformed historical blobs",
+    "[cardstore][history]"
+) {
   const auto dir = make_temp_dir();
   holder::platform::Db db;
   db.open(dir / "holder.db");
@@ -2330,8 +2382,7 @@ TEST_CASE("CardStore rejects missing milestone content and malformed historical 
   );
 }
 
-TEST_CASE("CardStore mutations reject a bad rel_path or a missing durable file",
-          "[cardstore]") {
+TEST_CASE("CardStore mutations reject a bad rel_path or a missing durable file", "[cardstore]") {
   const auto dir = make_temp_dir();
   holder::platform::Db db;
   db.open(dir / "holder.db");
@@ -2383,14 +2434,21 @@ TEST_CASE("CardStore mutations reject a bad rel_path or a missing durable file",
   update.start_at = 200;
 
   REQUIRE_THROWS_WITH(
-      store.update_milestone("proj-1", bad_rel.card_id, bad_milestone.milestone_id, update, 2), kBadRel
+      store.update_milestone("proj-1", bad_rel.card_id, bad_milestone.milestone_id, update, 2),
+      kBadRel
   );
 
   // Removing the durable file behind a live row (an external delete) must fail loudly rather
   // than recreate or silently skip the card.
   std::filesystem::remove(project_root / holder::core::card_rel_path(missing_file.card_id));
   REQUIRE_THROWS_WITH(
-      store.update_milestone("proj-1", missing_file.card_id, missing_milestone.milestone_id, update, 2),
+      store.update_milestone(
+          "proj-1",
+          missing_file.card_id,
+          missing_milestone.milestone_id,
+          update,
+          2
+      ),
       kMissing
   );
   REQUIRE_THROWS_WITH(store.update_links(missing_file.card_id, 2), kMissing);

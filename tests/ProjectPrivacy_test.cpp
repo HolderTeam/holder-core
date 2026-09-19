@@ -1,5 +1,5 @@
-#include "git/GitOps.h"
 #include "core_test_helpers.h"
+#include "git/GitOps.h"
 #include "model/Project.h"
 #include "privacy/CryptoService.h"
 #include "privacy/PlatformKeyring.h"
@@ -113,7 +113,9 @@ TEST_CASE("Privacy safety check reports plaintext card blobs", "[privacy]") {
   REQUIRE(check.unsafe_paths[0] == "cards/ab/plain.md");
   REQUIRE_THROWS_WITH(
       holder::privacy::assert_encryption_push_safe(root.string()),
-      Catch::Matchers::ContainsSubstring("Privacy safety check failed: found plaintext project blobs. Unsafe paths: cards/ab/plain.md")
+      Catch::Matchers::ContainsSubstring(
+          "Privacy safety check failed: found plaintext project blobs. Unsafe paths: cards/ab/plain.md"
+      )
   );
 }
 
@@ -263,13 +265,8 @@ TEST_CASE("recovery token metadata and import preserve project key and remote", 
   repo.update_project_key_id(project.project_id, std::optional<std::string>("old-key"), 3);
   repo.update_git_remote(project.project_id, std::nullopt, 3);
 
-  REQUIRE_NOTHROW(holder::privacy::import_recovery_token(
-      repo,
-      project.project_id,
-      "1234",
-      token,
-      4
-  ));
+  REQUIRE_NOTHROW(holder::privacy::import_recovery_token(repo, project.project_id, "1234", token, 4)
+  );
 
   const auto imported = repo.get(project.project_id);
   REQUIRE(imported.has_value());

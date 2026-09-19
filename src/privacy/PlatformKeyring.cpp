@@ -18,8 +18,11 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+// wincred.h requires Windows types; preserve this include order when formatting.
+// clang-format off
 #include <windows.h>
 #include <wincred.h>
+// clang-format on
 #endif
 
 #include <cstdint>
@@ -132,7 +135,11 @@ PlatformKeyringLookupResult libsecret_lookup_generic(
 ) {
   if (const auto hook = libsecret_api_lookup_hook_storage(); hook != nullptr) {
     const auto result = hook(service, account);
-    return {.secret = result.secret, .error_message = result.error_message}; // LCOV_EXCL_LINE - gcov artefact: designated-initializer return is executed but never counted.
+    return {
+        .secret = result.secret,
+        .error_message = result.error_message
+    }; // LCOV_EXCL_LINE - gcov artefact: designated-initializer return is executed but never
+       // counted.
   }
   // LCOV_EXCL_START: exercised via low-level seam tests; real libsecret calls depend on host
   // keyring state.
@@ -202,7 +209,11 @@ PlatformKeyringLookupResult libsecret_lookup_secret(const PlatformKeyringSecretR
   if (ref.kind == PlatformKeyringSecretKind::GenericSecret) {
     if (const auto hook = libsecret_lookup_hook_storage()) {
       const auto result = hook(ref.service, ref.account);
-      return {.secret = result.secret, .error_message = result.error_message}; // LCOV_EXCL_LINE - gcov artefact: designated-initializer return is executed but never counted.
+      return {
+          .secret = result.secret,
+          .error_message = result.error_message
+      }; // LCOV_EXCL_LINE - gcov artefact: designated-initializer return is executed but never
+         // counted.
     }
     return libsecret_lookup_generic(ref.service, ref.account);
   }
@@ -582,14 +593,8 @@ std::wstring utf8_to_wide(const std::string& value, const std::string& value_nam
   }
   checked_int_size(value.size(), value_name);
   const int input_size = static_cast<int>(value.size());
-  const int required = MultiByteToWideChar(
-      CP_UTF8,
-      MB_ERR_INVALID_CHARS,
-      value.data(),
-      input_size,
-      nullptr,
-      0
-  );
+  const int required =
+      MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), input_size, nullptr, 0);
   if (required <= 0) {
     throw PrivacyError(
         PrivacyErrorCode::KeyringUnavailable,
@@ -631,8 +636,8 @@ std::string wide_to_utf8(const wchar_t* value) {
 
 std::string windows_error_message(DWORD code, const std::string& action) {
   LPWSTR raw_message = nullptr;
-  const DWORD flags =
-      FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS;
+  const DWORD flags = FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+                      FORMAT_MESSAGE_IGNORE_INSERTS;
   const DWORD length = FormatMessageW(
       flags,
       nullptr,
@@ -783,7 +788,11 @@ PlatformKeyringLookupResult platform_keyring_lookup_secret(const PlatformKeyring
     return hook(ref);
   }
   if (ref.kind == PlatformKeyringSecretKind::ProjectKey && !ref.project_id.has_value()) {
-    return {.secret = std::nullopt, .error_message = missing_project_id_message()}; // LCOV_EXCL_LINE - gcov artefact: designated-initializer return is executed but never counted.
+    return {
+        .secret = std::nullopt,
+        .error_message = missing_project_id_message()
+    }; // LCOV_EXCL_LINE - gcov artefact: designated-initializer return is executed but never
+       // counted.
   }
   if (const auto& external = external_lookup_storage()) {
     return external(ref);

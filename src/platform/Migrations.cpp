@@ -186,7 +186,13 @@ UPDATE schema_version SET version = 4 WHERE version = 3;
 
 bool projects_has_id_scheme(Db& db) {
   sqlite3_stmt* stmt = nullptr;
-  if (sqlite3_prepare_v2(db.handle(), "PRAGMA table_info(projects);", -1, &stmt, nullptr) != // LCOV_EXCL_START - SQLite prepare failure requires engine fault injection.
+  if (sqlite3_prepare_v2(
+          db.handle(),
+          "PRAGMA table_info(projects);",
+          -1,
+          &stmt,
+          nullptr
+      ) != // LCOV_EXCL_START - SQLite prepare failure requires engine fault injection.
       SQLITE_OK) {
     throw std::runtime_error(
         std::string("failed to inspect projects schema: ") + sqlite3_errmsg(db.handle())
@@ -204,7 +210,8 @@ bool projects_has_id_scheme(Db& db) {
       continue;
     }
     sqlite3_finalize(stmt);
-    if (rc != SQLITE_DONE) { // LCOV_EXCL_START - SQLite step failure requires engine fault injection.
+    if (rc !=
+        SQLITE_DONE) { // LCOV_EXCL_START - SQLite step failure requires engine fault injection.
       throw std::runtime_error(
           std::string("failed to inspect projects schema: ") + sqlite3_errmsg(db.handle())
       );
@@ -216,10 +223,8 @@ bool projects_has_id_scheme(Db& db) {
 void migrate_v4_to_v5(Db& db) {
   Tx tx(db);
   if (!projects_has_id_scheme(db)) {
-    db.exec(
-        "ALTER TABLE projects ADD COLUMN id_scheme TEXT NOT NULL DEFAULT 'uuid4' "
-        "CHECK(id_scheme IN ('uuid4', 'uuid7'));"
-    );
+    db.exec("ALTER TABLE projects ADD COLUMN id_scheme TEXT NOT NULL DEFAULT 'uuid4' "
+            "CHECK(id_scheme IN ('uuid4', 'uuid7'));");
   }
   db.exec("UPDATE schema_version SET version = 5 WHERE version = 4;");
   tx.commit();

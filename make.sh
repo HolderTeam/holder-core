@@ -14,12 +14,14 @@ Usage:
   ./make.sh [command] [BuildType]
 
 Commands:
-  test      Configure, build libholder, and run CTest
-  build     Configure and build libholder
-  coverage  Build, run tests, and generate coverage reports
-  install   Build and install libholder into out/install/local
-  clean     Remove local build and install output
-  help      Show this help
+  test          Configure, build libholder, and run CTest
+  build         Configure and build libholder
+  coverage      Build, run tests, and generate coverage reports
+  install       Build and install libholder into out/install/local
+  format        Format C++ source, header, and test files
+  format-check  Check C++ source, header, and test formatting
+  clean         Remove local build and install output
+  help          Show this help
 
 Examples:
   ./make.sh
@@ -206,6 +208,54 @@ install_core() {
   cmake --install "${BUILD_DIR}" --prefix "${INSTALL_PREFIX}"
 }
 
+format_files() {
+  local format_bin="clang-format-18"
+  local mode="${1:?}"
+  local format_args
+  local file_list
+  local status
+
+  if ! command -v "${format_bin}" >/dev/null 2>&1; then
+    echo "Missing dependency: clang-format-18 is required for ./make.sh format and format-check." >&2
+    echo "Install clang-format-18 and ensure it is available on PATH." >&2
+    exit 1
+  fi
+
+  case "${mode}" in
+    write)
+      format_args="-i"
+      ;;
+    check)
+      format_args="--dry-run --Werror"
+      ;;
+    *)
+      echo "Unknown format mode: ${mode}" >&2
+      exit 1
+      ;;
+  esac
+
+  file_list="$(mktemp)"
+  if command -v rg >/dev/null 2>&1; then
+    rg --files -0 src include tests -g '*.cpp' -g '*.cc' -g '*.cxx' -g '*.h' -g '*.hpp' >"${file_list}" || true
+  else
+    find src include tests \( -name '*.cpp' -o -name '*.cc' -o -name '*.cxx' -o -name '*.h' -o -name '*.hpp' \) -print0 >"${file_list}"
+  fi
+
+  if [ ! -s "${file_list}" ]; then
+    rm -f "${file_list}"
+    echo "No C++ files found to format." >&2
+    return
+  fi
+
+  if xargs -0 "${format_bin}" ${format_args} <"${file_list}"; then
+    status=0
+  else
+    status=$?
+  fi
+  rm -f "${file_list}"
+  return "${status}"
+}
+
 case "${MODE}" in
   test|"")
     run_tests
@@ -218,6 +268,12 @@ case "${MODE}" in
     ;;
   install)
     install_core
+    ;;
+  format)
+    format_files write
+    ;;
+  format-check)
+    format_files check
     ;;
   clean)
     rm -rf build out

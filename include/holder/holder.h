@@ -284,7 +284,11 @@ int holder_project_rename(
 
 // Removes the project row (cascading to its cards per the schema) and any
 // sync state. Does not touch the project's files on disk.
-int holder_project_delete(holder_context* context, const char* project_id, holder_error** out_error);
+int holder_project_delete(
+    holder_context* context,
+    const char* project_id,
+    holder_error** out_error
+);
 
 // Replaces a card's content and, if title is non-NULL, its title. Sets
 // *out_json to the updated card.

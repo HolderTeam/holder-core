@@ -29,7 +29,7 @@ enum class AddTagResult {
 
 enum class RemoveTagResult {
   Removed,
-  NotPresent,               // The tag doesn't occur anywhere in the card.
+  NotPresent, // The tag doesn't occur anywhere in the card.
   PresentOutsideEditableTagLine, // It exists, but only in prose Tools won't rewrite.
   InvalidTag,
 };
@@ -152,10 +152,15 @@ class CardStore {
   // remove_tag(card, "ANDROID"): normalizes to "android". Only ever removes text from the
   // trailing tag line -- Tools can't safely rewrite prose. If the tag is there, it's removed
   // (Removed; the line itself is removed too if that was its only tag). If the tag doesn't
-  // occur anywhere in the card, NotPresent. If it occurs only in prose, PresentOutsideEditableTagLine
+  // occur anywhere in the card, NotPresent. If it occurs only in prose,
+  // PresentOutsideEditableTagLine
   // -- the card remains tagged, since removal didn't happen, and the caller should tell the
   // user to edit the text directly. Same InvalidTag case as add_tag.
-  RemoveTagResult remove_tag(const std::string& card_id, const std::string& tag, long long updated_at);
+  RemoveTagResult remove_tag(
+      const std::string& card_id,
+      const std::string& tag,
+      long long updated_at
+  );
 
   // The subset of the card's tags that remove_tag can actually remove -- those on its trailing
   // tag line, in order. A client UI can use this to show a remove control only where it would

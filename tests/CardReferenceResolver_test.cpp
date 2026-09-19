@@ -321,10 +321,14 @@ TEST_CASE("CardReferenceResolver propagates repository errors", "[card][referenc
   );
   REQUIRE_THROWS_WITH(
       resolver.resolve("proj-1", "12345678", holder::model::CardScope::Either),
-      Catch::Matchers::ContainsSubstring("prepare find cards by id prefix failed: unknown sqlite error")
+      Catch::Matchers::ContainsSubstring(
+          "prepare find cards by id prefix failed: unknown sqlite error"
+      )
   );
   REQUIRE_THROWS_WITH(
       resolver.resolve("proj-1", "Title", holder::model::CardScope::Either),
-      Catch::Matchers::ContainsSubstring("prepare find cards by exact title failed: unknown sqlite error")
+      Catch::Matchers::ContainsSubstring(
+          "prepare find cards by exact title failed: unknown sqlite error"
+      )
   );
 }

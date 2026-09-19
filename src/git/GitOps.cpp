@@ -38,9 +38,7 @@ void RealGitOps::set_remote(const std::string& name, const std::string& url) {
 void RealGitOps::remove_remote(const std::string& name) { repo_.remove_remote(name); }
 
 // LCOV_EXCL_START
-void RealGitOps::pull_remote_ff_only(const std::string& name) {
-  repo_.pull_remote_ff_only(name);
-}
+void RealGitOps::pull_remote_ff_only(const std::string& name) { repo_.pull_remote_ff_only(name); }
 // LCOV_EXCL_STOP
 
 RemoteProbeResult RealGitOps::probe_remote(const std::string& name) {

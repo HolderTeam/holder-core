@@ -8,10 +8,7 @@ namespace holder::git {
 
 class GitOperationGuard {
  public:
-  GitOperationGuard(
-      std::recursive_mutex& git_ops_mutex,
-      const std::filesystem::path& repo_root
-  );
+  GitOperationGuard(std::recursive_mutex& git_ops_mutex, const std::filesystem::path& repo_root);
 
   GitOperationGuard(const GitOperationGuard&) = delete;
   GitOperationGuard& operator=(const GitOperationGuard&) = delete;

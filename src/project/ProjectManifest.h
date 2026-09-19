@@ -23,10 +23,7 @@ std::string render_project_manifest(const holder::model::Project& project);
 // Writes and stages both files. The caller owns the surrounding Git commit so
 // project metadata can be committed atomically with the operation that changed
 // it.
-void write_project_manifest(
-    holder::git::GitOps& git,
-    const holder::model::Project& project
-);
+void write_project_manifest(holder::git::GitOps& git, const holder::model::Project& project);
 
 // Reads the bootstrap and manifest without consulting SQLite. root_path is
 // supplied by device discovery and is never taken from portable project data.

@@ -5,13 +5,13 @@
 #include <catch2/catch.hpp>
 #endif
 
-#include "model/Project.h"
 #include "card/CardFrontMatter.h"
 #include "card/CardPaths.h"
 #include "card/CardRepo.h"
 #include "card/LinkRepo.h"
 #include "core_test_helpers.h"
 #include "git/GitOps.h"
+#include "model/Project.h"
 #include "platform/Db.h"
 #include "privacy/ProjectPrivacy.h"
 #include "privacy/SecretStore.h"
@@ -97,9 +97,10 @@ holder::model::Project encrypted_project(const std::filesystem::path& dir) {
   project.updated_at = 1;
   holder::project::ProjectRepo repo(db);
   repo.create(project);
-  const auto key_id = holder::privacy::ensure_project_key_material(
-      repo, project.project_id, std::nullopt, 2, [] { return "asset-test-key-1234"; }
-  );
+  const auto key_id =
+      holder::privacy::ensure_project_key_material(repo, project.project_id, std::nullopt, 2, [] {
+        return "asset-test-key-1234";
+      });
   project.privacy_mode = "encrypted_git";
   project.project_key_id = key_id;
   return project;
@@ -132,7 +133,9 @@ class FileGit final : public holder::git::GitOps {
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
     out << content;
   }
-  void stage_path(const std::filesystem::path& relative) override { staged.push_back(relative.string()); }
+  void stage_path(const std::filesystem::path& relative) override {
+    staged.push_back(relative.string());
+  }
   void remove_path(const std::filesystem::path& relative) override {
     std::filesystem::remove(root_ / relative);
     staged.push_back(relative.string());
@@ -153,18 +156,17 @@ class FileGit final : public holder::git::GitOps {
   bool fail_writes = false;
 };
 
-class InvisibleAfterPutProvider final
-    : public holder::resource::StorageProvider {
-public:
-  void put(const std::string &, const std::filesystem::path &, long long,
-           const std::string &) override {
+class InvisibleAfterPutProvider final : public holder::resource::StorageProvider {
+ public:
+  void put(const std::string&, const std::filesystem::path&, long long, const std::string&)
+      override {
     put_called = true;
   }
-  void get(const std::string &, const std::filesystem::path &) override {
+  void get(const std::string&, const std::filesystem::path&) override {
     throw std::runtime_error("not stored");
   }
-  bool exists(const std::string &) override { return available; }
-  void remove(const std::string &) override {
+  bool exists(const std::string&) override { return available; }
+  void remove(const std::string&) override {
     remove_called = true;
     throw std::runtime_error("cleanup unavailable");
   }
@@ -186,7 +188,11 @@ TEST_CASE("Plain and encrypted assets stream round-trip", "[asset]") {
     plain.project_id = "project-plain";
     plain.privacy_mode = "plain";
     auto staged = holder::resource::stage_asset_file(
-        source, dir / "plain.staged", plain, "resource-1234", "asset-1234"
+        source,
+        dir / "plain.staged",
+        plain,
+        "resource-1234",
+        "asset-1234"
     );
     REQUIRE(staged.encoding == "plain");
     holder::resource::recover_asset_file(
@@ -199,11 +205,17 @@ TEST_CASE("Plain and encrypted assets stream round-trip", "[asset]") {
         staged.stored,
         staged.plaintext
     );
-    REQUIRE(holder::resource::digest_file(dir / "plain.recovered").sha256 == staged.plaintext.sha256);
+    REQUIRE(
+        holder::resource::digest_file(dir / "plain.recovered").sha256 == staged.plaintext.sha256
+    );
 
     auto encrypted = encrypted_project(dir);
     staged = holder::resource::stage_asset_file(
-        source, dir / "encrypted.staged", encrypted, "resource-1234", "asset-1234"
+        source,
+        dir / "encrypted.staged",
+        encrypted,
+        "resource-1234",
+        "asset-1234"
     );
     REQUIRE(staged.encoding == "holder_asset_v1");
     REQUIRE(staged.stored.byte_size > staged.plaintext.byte_size);
@@ -218,8 +230,7 @@ TEST_CASE("Plain and encrypted assets stream round-trip", "[asset]") {
         staged.plaintext
     );
     REQUIRE(
-        holder::resource::digest_file(dir / "encrypted.recovered").sha256 ==
-        staged.plaintext.sha256
+        holder::resource::digest_file(dir / "encrypted.recovered").sha256 == staged.plaintext.sha256
     );
   }
 }
@@ -230,7 +241,11 @@ TEST_CASE("Encrypted assets reject changed identity and bytes", "[asset]") {
   write_pattern(source, 100000);
   const auto project = encrypted_project(dir);
   const auto staged = holder::resource::stage_asset_file(
-      source, dir / "stored.bin", project, "resource-1234", "asset-1234"
+      source,
+      dir / "stored.bin",
+      project,
+      "resource-1234",
+      "asset-1234"
   );
 
   REQUIRE_THROWS_WITH(
@@ -280,14 +295,22 @@ TEST_CASE("Asset envelopes reject malformed structure and invalid file targets",
   );
   REQUIRE_THROWS_WITH(
       holder::resource::stage_asset_file(
-          dir / "missing.bin", dir / "missing.staged", plain, "resource-1234", "asset-1234"
+          dir / "missing.bin",
+          dir / "missing.staged",
+          plain,
+          "resource-1234",
+          "asset-1234"
       ),
       Catch::Matchers::ContainsSubstring("failed to open asset source")
   );
   std::filesystem::create_directory(dir / "staging-is-directory");
   REQUIRE_THROWS_WITH(
       holder::resource::stage_asset_file(
-          source, dir / "staging-is-directory", plain, "resource-1234", "asset-1234"
+          source,
+          dir / "staging-is-directory",
+          plain,
+          "resource-1234",
+          "asset-1234"
       ),
       Catch::Matchers::ContainsSubstring("failed to open asset staging file")
   );
@@ -296,7 +319,11 @@ TEST_CASE("Asset envelopes reject malformed structure and invalid file targets",
   missing_key.privacy_mode = "encrypted_git";
   REQUIRE_THROWS_WITH(
       holder::resource::stage_asset_file(
-          source, dir / "missing-key.staged", missing_key, "resource-1234", "asset-1234"
+          source,
+          dir / "missing-key.staged",
+          missing_key,
+          "resource-1234",
+          "asset-1234"
       ),
       Catch::Matchers::ContainsSubstring("encrypted project missing project_key_id")
   );
@@ -304,7 +331,11 @@ TEST_CASE("Asset envelopes reject malformed structure and invalid file targets",
   const auto project = encrypted_project(dir);
   const auto stored_path = dir / "valid.stored";
   const auto staged = holder::resource::stage_asset_file(
-      source, stored_path, project, "resource-1234", "asset-1234"
+      source,
+      stored_path,
+      project,
+      "resource-1234",
+      "asset-1234"
   );
   const auto valid = read_binary(stored_path);
   constexpr std::size_t magic_size = sizeof("HolderAsset1\n") - 1;
@@ -319,8 +350,14 @@ TEST_CASE("Asset envelopes reject malformed structure and invalid file targets",
     const auto digest = holder::resource::digest_file(malformed);
     REQUIRE_THROWS_WITH(
         holder::resource::recover_asset_file(
-            malformed, dir / (name + ".out"), project, "resource-1234", "asset-1234",
-            "holder_asset_v1", digest, staged.plaintext
+            malformed,
+            dir / (name + ".out"),
+            project,
+            "resource-1234",
+            "asset-1234",
+            "holder_asset_v1",
+            digest,
+            staged.plaintext
         ),
         Catch::Matchers::ContainsSubstring("HolderAsset1 authentication failed") ||
             Catch::Matchers::ContainsSubstring("invalid HolderAsset1 chunk size") ||
@@ -362,8 +399,14 @@ TEST_CASE("Asset envelopes reject malformed structure and invalid file targets",
 
   REQUIRE_THROWS_WITH(
       holder::resource::recover_asset_file(
-          stored_path, dir / "unsupported.out", project, "resource-1234", "asset-1234",
-          "future-encoding", staged.stored, staged.plaintext
+          stored_path,
+          dir / "unsupported.out",
+          project,
+          "resource-1234",
+          "asset-1234",
+          "future-encoding",
+          staged.stored,
+          staged.plaintext
       ),
       Catch::Matchers::ContainsSubstring("unsupported asset encoding: future-encoding")
   );
@@ -371,16 +414,28 @@ TEST_CASE("Asset envelopes reject malformed structure and invalid file targets",
   ++wrong_plaintext.byte_size;
   REQUIRE_THROWS_WITH(
       holder::resource::recover_asset_file(
-          stored_path, dir / "wrong-plaintext.out", project, "resource-1234", "asset-1234",
-          staged.encoding, staged.stored, wrong_plaintext
+          stored_path,
+          dir / "wrong-plaintext.out",
+          project,
+          "resource-1234",
+          "asset-1234",
+          staged.encoding,
+          staged.stored,
+          wrong_plaintext
       ),
       Catch::Matchers::ContainsSubstring("plaintext asset integrity check failed")
   );
   std::filesystem::create_directory(dir / "recovered-is-directory");
   REQUIRE_THROWS_WITH(
       holder::resource::recover_asset_file(
-          stored_path, dir / "recovered-is-directory", project, "resource-1234", "asset-1234",
-          staged.encoding, staged.stored, staged.plaintext
+          stored_path,
+          dir / "recovered-is-directory",
+          project,
+          "resource-1234",
+          "asset-1234",
+          staged.encoding,
+          staged.stored,
+          staged.plaintext
       ),
       Catch::Matchers::ContainsSubstring("failed to open recovered asset")
   );
@@ -393,7 +448,10 @@ TEST_CASE("Local directory provider is atomic and idempotent", "[asset]") {
   const auto digest = holder::resource::digest_file(source);
   holder::resource::LocalDirectoryProvider provider(dir / "objects");
 
-  REQUIRE_THROWS_WITH(provider.exists(""), Catch::Matchers::ContainsSubstring("invalid storage object key"));
+  REQUIRE_THROWS_WITH(
+      provider.exists(""),
+      Catch::Matchers::ContainsSubstring("invalid storage object key")
+  );
   REQUIRE_THROWS_WITH(
       provider.exists("/absolute/path"),
       Catch::Matchers::ContainsSubstring("invalid storage object key")
@@ -429,8 +487,7 @@ TEST_CASE("Local directory provider is atomic and idempotent", "[asset]") {
 
   provider.put("project/asset.holderasset", source, digest.byte_size, digest.sha256);
   REQUIRE(provider.exists("project/asset.holderasset"));
-  REQUIRE_NOTHROW(
-      provider.put("project/asset.holderasset", source, digest.byte_size, digest.sha256)
+  REQUIRE_NOTHROW(provider.put("project/asset.holderasset", source, digest.byte_size, digest.sha256)
   );
 
   const auto conflicting_source = dir / "conflicting.bin";
@@ -442,15 +499,16 @@ TEST_CASE("Local directory provider is atomic and idempotent", "[asset]") {
           conflicting_source,
           conflicting_digest.byte_size,
           conflicting_digest.sha256
-      )
-  , Catch::Matchers::ContainsSubstring("object key already contains different bytes"));
+      ),
+      Catch::Matchers::ContainsSubstring("object key already contains different bytes")
+  );
   provider.get("project/asset.holderasset", dir / "download.bin");
-  REQUIRE(holder::resource::digest_file(dir / "download.bin").sha256 ==
-          digest.sha256);
+  REQUIRE(holder::resource::digest_file(dir / "download.bin").sha256 == digest.sha256);
   const auto directory_destination = dir / "directory-destination";
   std::filesystem::create_directory(directory_destination);
   REQUIRE_THROWS_AS(
-      provider.get("project/asset.holderasset", directory_destination), std::filesystem::filesystem_error
+      provider.get("project/asset.holderasset", directory_destination),
+      std::filesystem::filesystem_error
   );
   REQUIRE_THROWS_WITH(
       provider.exists("../escape"),
@@ -470,21 +528,27 @@ TEST_CASE("Location bindings and preferences survive independently of SQLite", "
   bindings.bind("project-1", "location-1", binding, "AKIA…TEST", 10);
   bindings.set_preferred("project-1", "location-1", 10);
 
-  REQUIRE(bindings.get("project-1", "location-1")->values.at("secret_access_key") == "never-log-this");
+  REQUIRE(
+      bindings.get("project-1", "location-1")->values.at("secret_access_key") == "never-log-this"
+  );
   REQUIRE(bindings.preview("project-1", "location-1") == "AKIA…TEST");
   REQUIRE_FALSE(bindings.preview("project-1", "missing-location").has_value());
   REQUIRE(bindings.preferred("project-1") == "location-1");
 
-  secrets->set("org.holder.StorageLocation", "project-1:unsupported-location",
-               R"({"version":2,"provider":"s3_compatible","values":{}})",
-               "unsupported", 10, 10);
+  secrets->set(
+      "org.holder.StorageLocation",
+      "project-1:unsupported-location",
+      R"({"version":2,"provider":"s3_compatible","values":{}})",
+      "unsupported",
+      10,
+      10
+  );
   REQUIRE_THROWS_WITH(
       bindings.get("project-1", "unsupported-location"),
       Catch::Matchers::ContainsSubstring("unsupported location binding")
   );
 
-  auto reopened = holder::privacy::make_encrypted_file_secret_store_for_tests(
-      dir / "server");
+  auto reopened = holder::privacy::make_encrypted_file_secret_store_for_tests(dir / "server");
   holder::resource::LocationBindingStore recovered(*reopened);
   REQUIRE(recovered.get("project-1", "location-1").has_value());
   REQUIRE(recovered.preferred("project-1") == "location-1");
@@ -559,7 +623,9 @@ TEST_CASE("Asset import stores, links, deduplicates and retrieves", "[asset]") {
   holder::resource::AssetImportService importer(
       db,
       dir / "staging",
-      [&] { return "generated-" + std::to_string(++sequence) + "-1234"; },
+      [&] {
+        return "generated-" + std::to_string(++sequence) + "-1234";
+      },
       nullptr,
       &git
   );
@@ -578,7 +644,9 @@ TEST_CASE("Asset import stores, links, deduplicates and retrieves", "[asset]") {
   REQUIRE(bundle.has_value());
   REQUIRE(bundle->assets[0].byte_size == 70000);
   REQUIRE(holder::resource::ResourceStore(db, nullptr, &git).get(first.resource_id).has_value());
-  REQUIRE_FALSE(holder::resource::ResourceStore(db, nullptr, &git).get("missing-resource").has_value());
+  REQUIRE_FALSE(
+      holder::resource::ResourceStore(db, nullptr, &git).get("missing-resource").has_value()
+  );
   REQUIRE(holder::card::LinkRepo(db).list_outgoing(project.project_id, card.card_id).size() == 1);
 
   const auto second = importer.import_file(request, provider);
@@ -601,18 +669,20 @@ TEST_CASE("Asset import stores, links, deduplicates and retrieves", "[asset]") {
       bundle->assets[0].plaintext_sha256
   );
 
-  write_binary(dir / "objects" / placement.object_key,
-               "corrupt provider object");
+  write_binary(dir / "objects" / placement.object_key, "corrupt provider object");
   const auto failed_destination = dir / "failed-retrieval.jpg";
   REQUIRE_THROWS_WITH(
-      importer.retrieve(first.resource_id, first.asset_id,
-                                       placement.placement_id, provider,
-                                       failed_destination),
+      importer.retrieve(
+          first.resource_id,
+          first.asset_id,
+          placement.placement_id,
+          provider,
+          failed_destination
+      ),
       Catch::Matchers::ContainsSubstring("stored asset integrity check failed")
   );
   REQUIRE_FALSE(std::filesystem::exists(failed_destination));
-  REQUIRE_FALSE(std::filesystem::exists(
-      dir / "staging" / (placement.placement_id + ".download")));
+  REQUIRE_FALSE(std::filesystem::exists(dir / "staging" / (placement.placement_id + ".download")));
 
   holder::resource::ResourceStore(db, nullptr, &git).remove(first.resource_id);
   REQUIRE_FALSE(holder::resource::ResourceRepo(db).get(first.resource_id).has_value());
@@ -620,7 +690,8 @@ TEST_CASE("Asset import stores, links, deduplicates and retrieves", "[asset]") {
   std::ifstream rewritten_file(project_root / card.rel_path, std::ios::binary);
   REQUIRE(rewritten_file.is_open());
   const std::string rewritten_text{
-      std::istreambuf_iterator<char>(rewritten_file), std::istreambuf_iterator<char>()
+      std::istreambuf_iterator<char>(rewritten_file),
+      std::istreambuf_iterator<char>()
   };
   const auto rewritten = holder::core::parse_card_file(rewritten_text);
   REQUIRE(rewritten.links.empty());
@@ -641,7 +712,8 @@ TEST_CASE("Asset import stores, links, deduplicates and retrieves", "[asset]") {
     request.source_file = dir / filename;
     write_pattern(request.source_file, format_size++);
     const auto imported = importer.import_file(request, provider);
-    const auto imported_bundle = holder::resource::ResourceRepo(db).get_bundle(imported.resource_id);
+    const auto imported_bundle = holder::resource::ResourceRepo(db).get_bundle(imported.resource_id
+    );
     REQUIRE(imported_bundle.has_value());
     REQUIRE(imported_bundle->resource.type == resource_type);
     REQUIRE(imported_bundle->assets.front().media_type == media_type);
@@ -703,8 +775,7 @@ TEST_CASE("Asset import stores, links, deduplicates and retrieves", "[asset]") {
       Catch::Matchers::ContainsSubstring("card rel_path does not match card_id")
   );
 
-  db.exec("UPDATE cards SET rel_path = '" + card.rel_path +
-          "' WHERE card_id = 'card-1234';");
+  db.exec("UPDATE cards SET rel_path = '" + card.rel_path + "' WHERE card_id = 'card-1234';");
   db.exec("CREATE TRIGGER block_import_projection BEFORE INSERT ON resources "
           "BEGIN SELECT RAISE(ABORT, 'blocked import projection'); END;");
   request.source_file = dir / "post-commit-projection-failure.bin";
@@ -715,12 +786,10 @@ TEST_CASE("Asset import stores, links, deduplicates and retrieves", "[asset]") {
   );
 }
 
-TEST_CASE("Asset import encrypts durable manifests and card updates",
-          "[asset][privacy]") {
+TEST_CASE("Asset import encrypts durable manifests and card updates", "[asset][privacy]") {
   const auto dir = temp_dir("encrypted-import");
   const auto project_root = dir / "project";
-  holder::test::EnvGuard keystore_env("HOLDER_TEST_KEYSTORE_DIR",
-                                      (dir / "keystore").string());
+  holder::test::EnvGuard keystore_env("HOLDER_TEST_KEYSTORE_DIR", (dir / "keystore").string());
   holder::platform::Db db;
   db.open(dir / "holder.db");
   apply_schema(db);
@@ -735,8 +804,14 @@ TEST_CASE("Asset import encrypts durable manifests and card updates",
   holder::project::ProjectRepo projects(db);
   projects.create(project);
   project.project_key_id = holder::privacy::ensure_project_key_material(
-      projects, project.project_id, std::nullopt, 2,
-      [] { return "encrypted-import-key"; });
+      projects,
+      project.project_id,
+      std::nullopt,
+      2,
+      [] {
+        return "encrypted-import-key";
+      }
+  );
   project.privacy_mode = "encrypted_git";
   projects.update_privacy_mode(project.project_id, project.privacy_mode, 2);
 
@@ -751,11 +826,14 @@ TEST_CASE("Asset import encrypts durable manifests and card updates",
 
   holder::git::RealGitOps git;
   git.open_or_init(project_root);
-  git.write_file(card.rel_path,
-                 holder::privacy::encrypt_project_blob(
-                     project.project_id, *project.project_key_id,
-                     holder::core::render_card_front_matter(card, {}, {}) +
-                         "Secret body\n"));
+  git.write_file(
+      card.rel_path,
+      holder::privacy::encrypt_project_blob(
+          project.project_id,
+          *project.project_key_id,
+          holder::core::render_card_front_matter(card, {}, {}) + "Secret body\n"
+      )
+  );
 
   holder::model::Location location;
   location.location_id = "location-1234";
@@ -770,8 +848,14 @@ TEST_CASE("Asset import encrypts durable manifests and card updates",
   write_pattern(source, 1'024);
   int sequence = 0;
   holder::resource::AssetImportService importer(
-      db, dir / "staging",
-      [&] { return "generated-" + std::to_string(++sequence); }, nullptr, &git);
+      db,
+      dir / "staging",
+      [&] {
+        return "generated-" + std::to_string(++sequence);
+      },
+      nullptr,
+      &git
+  );
   holder::resource::LocalDirectoryProvider provider(dir / "objects");
   holder::resource::AssetImportRequest request;
   request.project_id = project.project_id;
@@ -781,19 +865,21 @@ TEST_CASE("Asset import encrypts durable manifests and card updates",
   request.now = 10;
 
   const auto imported = importer.import_file(request, provider);
-  const auto resource_path =
-      project_root / holder::resource::resource_rel_path(imported.resource_id);
+  const auto resource_path = project_root /
+                             holder::resource::resource_rel_path(imported.resource_id);
   CHECK(read_binary(resource_path).rfind("HolderPriv1\n", 0) == 0);
-  CHECK(read_binary(project_root / card.rel_path).rfind("HolderPriv1\n", 0) ==
-        0);
+  CHECK(read_binary(project_root / card.rel_path).rfind("HolderPriv1\n", 0) == 0);
 
-  const auto bundle =
-      holder::resource::ResourceRepo(db).get_bundle(imported.resource_id);
+  const auto bundle = holder::resource::ResourceRepo(db).get_bundle(imported.resource_id);
   REQUIRE(bundle.has_value());
-  const auto &placement = bundle->assets[0].placements[0];
+  const auto& placement = bundle->assets[0].placements[0];
   const auto retrieved = dir / "retrieved.pdf";
-  importer.retrieve(imported.resource_id, imported.asset_id,
-                    placement.placement_id, provider, retrieved);
-  CHECK(holder::resource::digest_file(retrieved).sha256 ==
-        bundle->assets[0].plaintext_sha256);
+  importer.retrieve(
+      imported.resource_id,
+      imported.asset_id,
+      placement.placement_id,
+      provider,
+      retrieved
+  );
+  CHECK(holder::resource::digest_file(retrieved).sha256 == bundle->assets[0].plaintext_sha256);
 }

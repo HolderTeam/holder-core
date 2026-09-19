@@ -66,18 +66,20 @@ bool is_sqlite_corruption_failure(int code) {
 
 std::string health_name(DatabaseHealth health) {
   switch (health) {
-  case DatabaseHealth::Missing: return "missing";
-  case DatabaseHealth::Healthy: return "healthy";
-  case DatabaseHealth::Corrupt: return "corrupt";
+  case DatabaseHealth::Missing:
+    return "missing";
+  case DatabaseHealth::Healthy:
+    return "healthy";
+  case DatabaseHealth::Corrupt:
+    return "corrupt";
   // rebuild_database_projection rejects IoError before constructing a report.
-  case DatabaseHealth::IoError: return "io_error"; // LCOV_EXCL_LINE
+  case DatabaseHealth::IoError:
+    return "io_error"; // LCOV_EXCL_LINE
   }
   return "unknown"; // LCOV_EXCL_LINE
 }
 
-std::vector<std::filesystem::path> normalized_roots(
-    std::vector<std::filesystem::path> roots
-) {
+std::vector<std::filesystem::path> normalized_roots(std::vector<std::filesystem::path> roots) {
   for (auto& root : roots) {
     std::error_code ec;
     const auto canonical = std::filesystem::weakly_canonical(root, ec);
@@ -90,8 +92,17 @@ std::vector<std::filesystem::path> normalized_roots(
 
 std::map<std::string, long long> durable_counts(Db& db) {
   static const std::vector<std::string> tables = {
-      "projects", "cards", "card_links", "milestones", "resources", "resource_metadata",
-      "storage_locations", "assets", "asset_placements", "ai_threads", "ai_messages",
+      "projects",
+      "cards",
+      "card_links",
+      "milestones",
+      "resources",
+      "resource_metadata",
+      "storage_locations",
+      "assets",
+      "asset_placements",
+      "ai_threads",
+      "ai_messages",
   };
   std::map<std::string, long long> result;
   for (const auto& table : tables) {
@@ -127,7 +138,8 @@ void validate_database(Db& db, int expected_schema_version) {
   check("PRAGMA integrity_check;", "ok");
 
   sqlite3_stmt* stmt = nullptr;
-  if (sqlite3_prepare_v2(db.handle(), "PRAGMA foreign_key_check;", -1, &stmt, nullptr) != SQLITE_OK) {
+  if (sqlite3_prepare_v2(db.handle(), "PRAGMA foreign_key_check;", -1, &stmt, nullptr) !=
+      SQLITE_OK) {
     throw std::runtime_error("foreign key validation prepare failed");
   }
   const int rc = sqlite3_step(stmt);
@@ -138,16 +150,14 @@ void validate_database(Db& db, int expected_schema_version) {
   }
 }
 
-std::filesystem::path unique_backup_dir(
-    const std::filesystem::path& backup_root,
-    bool corrupt
-) {
+std::filesystem::path unique_backup_dir(const std::filesystem::path& backup_root, bool corrupt) {
   const auto timestamp = std::chrono::duration_cast<std::chrono::seconds>(
                              std::chrono::system_clock::now().time_since_epoch()
-  ).count();
+  )
+                             .count();
   for (int suffix = 0; suffix < 1000; ++suffix) {
-    const auto name = std::string(corrupt ? "quarantine-" : "backup-") +
-                      std::to_string(timestamp) + (suffix == 0 ? "" : "-" + std::to_string(suffix));
+    const auto name = std::string(corrupt ? "quarantine-" : "backup-") + std::to_string(timestamp) +
+                      (suffix == 0 ? "" : "-" + std::to_string(suffix));
     const auto candidate = backup_root / name;
     if (!std::filesystem::exists(candidate)) return candidate;
   }
@@ -162,9 +172,8 @@ void move_if_exists(const std::filesystem::path& from, const std::filesystem::pa
 
 void use_delete_journal_for_rebuild(Db& db) {
   sqlite3_stmt* stmt = nullptr;
-  if (sqlite3_prepare_v2(
-          db.handle(), "PRAGMA journal_mode = DELETE;", -1, &stmt, nullptr
-      ) != SQLITE_OK) {
+  if (sqlite3_prepare_v2(db.handle(), "PRAGMA journal_mode = DELETE;", -1, &stmt, nullptr) !=
+      SQLITE_OK) {
     // This fixed pragma runs on a newly opened private database before hooks;
     // failure requires an SQLite runtime/allocation fault.
     throw std::runtime_error("failed to prepare rebuild journal mode"); // LCOV_EXCL_LINE
@@ -223,7 +232,10 @@ void require_file_rows(Db& db, const std::string& label, const std::string& sql)
   sqlite3_finalize(stmt);
 }
 
-void populate_report(DatabaseRebuildReport& report, const std::map<std::string, long long>& counts) {
+void populate_report(
+    DatabaseRebuildReport& report,
+    const std::map<std::string, long long>& counts
+) {
   report.projects = static_cast<std::size_t>(counts.at("projects"));
   report.cards = static_cast<std::size_t>(counts.at("cards"));
   report.ai_threads = static_cast<std::size_t>(counts.at("ai_threads"));
@@ -238,17 +250,25 @@ void populate_report(DatabaseRebuildReport& report, const std::map<std::string, 
 
 std::string DatabaseRebuildReport::to_json() const {
   return nlohmann::json{
-      {"ok", true}, {"dry_run", dry_run}, {"previous_health", previous_health},
-      {"projects", projects}, {"cards", cards}, {"ai_threads", ai_threads},
-      {"ai_messages", ai_messages}, {"resources", resources}, {"assets", assets},
-      {"placements", placements}, {"locations", locations},
+      {"ok", true},
+      {"dry_run", dry_run},
+      {"previous_health", previous_health},
+      {"projects", projects},
+      {"cards", cards},
+      {"ai_threads", ai_threads},
+      {"ai_messages", ai_messages},
+      {"resources", resources},
+      {"assets", assets},
+      {"placements", placements},
+      {"locations", locations},
       {"quarantined_cards", quarantined_cards},
       {"regenerated", {"card_tags", "full_text_search", "git_sync_status"}},
       {"reset", {"ai_run_history", "model_cooldowns", "transient_retry_state"}},
       {"warnings", nlohmann::json::array()},
-      {"backup_path", backup_path.empty() ? nlohmann::json(nullptr)
-                                            : nlohmann::json(backup_path.string())},
-  }.dump(2);
+      {"backup_path",
+       backup_path.empty() ? nlohmann::json(nullptr) : nlohmann::json(backup_path.string())},
+  }
+      .dump(2);
 }
 
 DatabaseHealthResult inspect_database_health(const std::filesystem::path& path) {
@@ -273,8 +293,7 @@ DatabaseHealthResult inspect_database_health(const std::filesystem::path& path) 
     // fixed, valid pragma, so a non-operational prepare failure means the database
     // itself cannot be interpreted and is safe to classify as corrupt.
     return {
-        is_sqlite_corruption_failure(code) ? DatabaseHealth::Corrupt
-                                           : DatabaseHealth::IoError,
+        is_sqlite_corruption_failure(code) ? DatabaseHealth::Corrupt : DatabaseHealth::IoError,
         message,
     };
   }
@@ -295,10 +314,14 @@ DatabaseHealthResult inspect_database_health(const std::filesystem::path& path) 
       is_sqlite_corruption_failure(step_rc)) { // LCOV_EXCL_LINE
     return {
         DatabaseHealth::Corrupt,
-        !result.empty() ? result : (!message.empty() ? message : "quick_check failed"), // LCOV_EXCL_LINE
+        !result.empty() ? result
+                        : (!message.empty() ? message : "quick_check failed"), // LCOV_EXCL_LINE
     }; // LCOV_EXCL_LINE
   }
-  return {DatabaseHealth::IoError, !message.empty() ? message : "quick_check could not complete"}; // LCOV_EXCL_LINE
+  return {
+      DatabaseHealth::IoError,
+      !message.empty() ? message : "quick_check could not complete"
+  }; // LCOV_EXCL_LINE
 }
 
 bool database_rebuild_is_ready(const std::filesystem::path& readiness_path) {
@@ -330,7 +353,8 @@ void mark_database_rebuild_ready(const std::filesystem::path& readiness_path) {
 #ifndef _WIN32
   if (::chmod(temporary.c_str(), S_IRUSR | S_IWUSR) != 0) {
     // temporary was just created by this process in a writable directory.
-    throw std::runtime_error("failed to restrict database rebuild readiness marker"); // LCOV_EXCL_LINE
+    throw std::runtime_error("failed to restrict database rebuild readiness marker"
+    ); // LCOV_EXCL_LINE
   }
 #endif
   std::error_code ec;
@@ -338,8 +362,7 @@ void mark_database_rebuild_ready(const std::filesystem::path& readiness_path) {
 #ifdef _WIN32
   if (ec) {
     std::error_code status_ec;
-    const bool existing_regular_file =
-      std::filesystem::is_regular_file(readiness_path, status_ec);
+    const bool existing_regular_file = std::filesystem::is_regular_file(readiness_path, status_ec);
 
     if (!status_ec && existing_regular_file) {
       std::filesystem::remove(readiness_path, ec);
@@ -361,7 +384,10 @@ void mark_database_rebuild_ready(const std::filesystem::path& readiness_path) {
 // starts fresh rather than blocking the rebuild that's trying to report into it) and atomically
 // rewrites it with new_entries appended. Entries accumulate across every rebuild that ever
 // quarantines something, so a device's full quarantine history stays inspectable in one place.
-void append_quarantine_log(const std::filesystem::path& quarantine_log_path, const nlohmann::json& new_entries) {
+void append_quarantine_log(
+    const std::filesystem::path& quarantine_log_path,
+    const nlohmann::json& new_entries
+) {
   if (new_entries.empty()) return;
   nlohmann::json existing = nlohmann::json::array();
   if (std::filesystem::is_regular_file(quarantine_log_path)) {
@@ -374,7 +400,8 @@ void append_quarantine_log(const std::filesystem::path& quarantine_log_path, con
       // than throw. The old (unparseable) file is overwritten below.
     } // LCOV_EXCL_LINE - gcov artefact: function exit is executed but never counted.
   }
-  for (const auto& entry : new_entries) existing.push_back(entry);
+  for (const auto& entry : new_entries)
+    existing.push_back(entry);
 
   std::filesystem::create_directories(quarantine_log_path.parent_path());
   auto temporary = quarantine_log_path;
@@ -388,7 +415,8 @@ void append_quarantine_log(const std::filesystem::path& quarantine_log_path, con
   }
   std::error_code ec;
   std::filesystem::rename(temporary, quarantine_log_path, ec);
-  if (ec) { // LCOV_EXCL_START - filesystem rename faults are not injectable through std::filesystem.
+  if (ec) { // LCOV_EXCL_START - filesystem rename faults are not injectable through
+            // std::filesystem.
     std::filesystem::remove(temporary);
     throw std::runtime_error("failed to replace quarantine log: " + ec.message());
   } // LCOV_EXCL_STOP
@@ -400,26 +428,33 @@ void append_quarantine_log(const std::filesystem::path& quarantine_log_path, con
 // card -- a project can easily have hundreds -- still opens normally. One card that's actually
 // lost must never be a reason the other 999 become inaccessible. Returns the number quarantined,
 // for the caller's report.
-std::size_t quarantine_cards_with_missing_files(Db& db, const std::filesystem::path& quarantine_log_path) {
+std::size_t quarantine_cards_with_missing_files(
+    Db& db,
+    const std::filesystem::path& quarantine_log_path
+) {
   sqlite3_stmt* card_stmt = nullptr;
   if (sqlite3_prepare_v2(
           db.handle(),
           "SELECT p.root_path, c.card_id, c.project_id, c.title, c.deleted_at FROM cards c "
           "JOIN projects p USING(project_id);",
-          -1, &card_stmt, nullptr
+          -1,
+          &card_stmt,
+          nullptr
       ) != SQLITE_OK) {
     throw std::runtime_error("prepare durable ownership audit failed for card");
   }
   std::vector<std::string> missing_ids;
   nlohmann::json log_entries = nlohmann::json::array();
   while (sqlite3_step(card_stmt) == SQLITE_ROW) {
-    const std::filesystem::path root =
-        reinterpret_cast<const char*>(sqlite3_column_text(card_stmt, 0));
+    const std::filesystem::path root = reinterpret_cast<const char*>(
+        sqlite3_column_text(card_stmt, 0)
+    );
     const std::string id = reinterpret_cast<const char*>(sqlite3_column_text(card_stmt, 1));
     const std::string project_id = reinterpret_cast<const char*>(sqlite3_column_text(card_stmt, 2));
     const auto* title_text = reinterpret_cast<const char*>(sqlite3_column_text(card_stmt, 3));
     const bool deleted = sqlite3_column_type(card_stmt, 4) != SQLITE_NULL;
-    const auto rel = deleted ? holder::core::card_trash_rel_path(id) : holder::core::card_rel_path(id);
+    const auto rel = deleted ? holder::core::card_trash_rel_path(id)
+                             : holder::core::card_rel_path(id);
     if (!std::filesystem::is_regular_file(root / rel)) {
       missing_ids.push_back(id);
       log_entries.push_back({
@@ -430,7 +465,8 @@ std::size_t quarantine_cards_with_missing_files(Db& db, const std::filesystem::p
           {"quarantined_at",
            std::chrono::duration_cast<std::chrono::seconds>(
                std::chrono::system_clock::now().time_since_epoch()
-           ).count()},
+           )
+               .count()},
       });
     }
   }
@@ -438,7 +474,13 @@ std::size_t quarantine_cards_with_missing_files(Db& db, const std::filesystem::p
 
   for (const auto& id : missing_ids) {
     sqlite3_stmt* delete_stmt = nullptr;
-    if (sqlite3_prepare_v2(db.handle(), "DELETE FROM cards WHERE card_id = ?;", -1, &delete_stmt, nullptr) != // LCOV_EXCL_START - SQLite prepare failure requires engine fault injection.
+    if (sqlite3_prepare_v2(
+            db.handle(),
+            "DELETE FROM cards WHERE card_id = ?;",
+            -1,
+            &delete_stmt,
+            nullptr
+        ) != // LCOV_EXCL_START - SQLite prepare failure requires engine fault injection.
         SQLITE_OK) {
       throw std::runtime_error("prepare card quarantine delete failed");
     } // LCOV_EXCL_STOP
@@ -453,16 +495,18 @@ std::size_t quarantine_cards_with_missing_files(Db& db, const std::filesystem::p
 
 std::size_t audit_core_durable_ownership(Db& db, const std::filesystem::path& quarantine_log_path) {
   require_file_rows(
-      db, "project metadata",
+      db,
+      "project metadata",
       "SELECT root_path, '.holder/privacy.json' FROM projects "
       "UNION ALL SELECT root_path, '.holder/project.json' FROM projects;"
   );
-  // Cards are quarantined rather than audited-and-thrown -- see quarantine_cards_with_missing_files's
-  // doc comment. This also folds in the trash-path fix: a trashed card's stored rel_path is never
-  // updated to its post-trash location (CardStore::trash moves the file to card_trash_rel_path()
-  // and CardRepo::soft_delete only touches deleted_at/updated_at), so the expected path is always
-  // recomputed from card_id + deleted_at rather than trusting the stored column -- the same way
-  // CardStore, Rebuilder, and the AI message audit just below already do.
+  // Cards are quarantined rather than audited-and-thrown -- see
+  // quarantine_cards_with_missing_files's doc comment. This also folds in the trash-path fix: a
+  // trashed card's stored rel_path is never updated to its post-trash location (CardStore::trash
+  // moves the file to card_trash_rel_path() and CardRepo::soft_delete only touches
+  // deleted_at/updated_at), so the expected path is always recomputed from card_id + deleted_at
+  // rather than trusting the stored column -- the same way CardStore, Rebuilder, and the AI message
+  // audit just below already do.
   const std::size_t quarantined = quarantine_cards_with_missing_files(db, quarantine_log_path);
 
   sqlite3_stmt* stmt = nullptr;
@@ -470,7 +514,10 @@ std::size_t audit_core_durable_ownership(Db& db, const std::filesystem::path& qu
           db.handle(),
           "SELECT p.root_path, m.message_id, m.deleted_at FROM ai_messages m "
           "JOIN ai_threads t ON t.thread_id=m.thread_id "
-          "JOIN projects p ON p.project_id=t.project_id;", -1, &stmt, nullptr
+          "JOIN projects p ON p.project_id=t.project_id;",
+          -1,
+          &stmt,
+          nullptr
       ) != SQLITE_OK) {
     throw std::runtime_error("prepare AI message ownership audit failed");
   }
@@ -490,7 +537,9 @@ std::size_t audit_core_durable_ownership(Db& db, const std::filesystem::path& qu
   if (sqlite3_prepare_v2(
           db.handle(),
           "SELECT p.root_path, t.thread_id FROM ai_threads t JOIN projects p USING(project_id);",
-          -1, &stmt, nullptr
+          -1,
+          &stmt,
+          nullptr
       ) != SQLITE_OK) {
     throw std::runtime_error("prepare AI thread ownership audit failed");
   }
@@ -507,7 +556,9 @@ std::size_t audit_core_durable_ownership(Db& db, const std::filesystem::path& qu
   if (sqlite3_prepare_v2(
           db.handle(),
           "SELECT p.root_path, r.resource_id FROM resources r JOIN projects p USING(project_id);",
-          -1, &stmt, nullptr
+          -1,
+          &stmt,
+          nullptr
       ) != SQLITE_OK) {
     throw std::runtime_error("prepare Resource ownership audit failed");
   }
@@ -524,7 +575,10 @@ std::size_t audit_core_durable_ownership(Db& db, const std::filesystem::path& qu
   if (sqlite3_prepare_v2(
           db.handle(),
           "SELECT p.root_path, l.location_id FROM storage_locations l "
-          "JOIN projects p USING(project_id);", -1, &stmt, nullptr
+          "JOIN projects p USING(project_id);",
+          -1,
+          &stmt,
+          nullptr
       ) != SQLITE_OK) {
     throw std::runtime_error("prepare Location ownership audit failed");
   }
@@ -559,7 +613,9 @@ DatabaseRebuildReport rebuild_database_projection(const DatabaseRebuildRequest& 
       (health.health == DatabaseHealth::Missing && !request.project_roots.empty())) {
     for (const auto& [label, path] : request.required_authorities) {
       if (!std::filesystem::is_regular_file(path)) {
-        throw std::runtime_error("database recovery authority is missing its " + label + ": " + path.string());
+        throw std::runtime_error(
+            "database recovery authority is missing its " + label + ": " + path.string()
+        );
       }
     }
   }
@@ -616,11 +672,15 @@ DatabaseRebuildReport rebuild_database_projection(const DatabaseRebuildRequest& 
     if (request.hooks.restore_before_projects) request.hooks.restore_before_projects(rebuilt);
     holder::index::FtsIndexer fts(rebuilt);
     holder::project::recover_project_roots(
-        rebuilt, &fts, request.project_roots,
+        rebuilt,
+        &fts,
+        request.project_roots,
         // Strict recovery rejects encrypted projects whose durable key material is absent,
         // so this fallback generator is deliberately unreachable. The callback is still
         // required by recover_project_roots' shared API.
-        [] { return std::string("unused-in-strict-recovery"); }, // LCOV_EXCL_LINE
+        [] {
+          return std::string("unused-in-strict-recovery");
+        }, // LCOV_EXCL_LINE
         true
     );
     if (request.hooks.restore_after_projects) request.hooks.restore_after_projects(rebuilt);
@@ -628,7 +688,8 @@ DatabaseRebuildReport rebuild_database_projection(const DatabaseRebuildRequest& 
     if (request.hooks.validate_rebuilt) request.hooks.validate_rebuilt(rebuilt);
     new_counts = durable_counts(rebuilt);
     if (!old_counts.empty() && old_counts != new_counts) {
-      throw std::runtime_error("rebuilt database durable object counts do not match source database");
+      throw std::runtime_error("rebuilt database durable object counts do not match source database"
+      );
     }
     rebuilt.close();
     remove_rebuild_sidecars(temporary);
@@ -663,17 +724,25 @@ DatabaseRebuildReport rebuild_database_projection(const DatabaseRebuildRequest& 
     if (final_health.health != DatabaseHealth::Healthy) {
       // The same file was fully validated immediately before an atomic rename;
       // only external mutation/storage failure can invalidate it here.
-      throw std::runtime_error("replacement database failed final health check: " + final_health.detail); // LCOV_EXCL_LINE
+      throw std::runtime_error(
+          "replacement database failed final health check: " + final_health.detail
+      ); // LCOV_EXCL_LINE
     }
   } catch (...) { // LCOV_EXCL_LINE
     // Recovery from an external failure during rename/fsync/final re-open. The
     // normal replacement and healthy-backup paths are integration-tested.
-    std::error_code ignored;                                  // LCOV_EXCL_LINE
-    std::filesystem::remove(request.database_path, ignored);  // LCOV_EXCL_LINE
+    std::error_code ignored; // LCOV_EXCL_LINE
+    std::filesystem::remove(request.database_path, ignored); // LCOV_EXCL_LINE
     if (!backup_dir.empty() && health.health == DatabaseHealth::Healthy) { // LCOV_EXCL_LINE
       move_if_exists(backup_dir / "holder.db", request.database_path); // LCOV_EXCL_LINE
-      move_if_exists(backup_dir / "holder.db-wal", request.database_path.string() + "-wal"); // LCOV_EXCL_LINE
-      move_if_exists(backup_dir / "holder.db-shm", request.database_path.string() + "-shm"); // LCOV_EXCL_LINE
+      move_if_exists(
+          backup_dir / "holder.db-wal",
+          request.database_path.string() + "-wal"
+      ); // LCOV_EXCL_LINE
+      move_if_exists(
+          backup_dir / "holder.db-shm",
+          request.database_path.string() + "-shm"
+      ); // LCOV_EXCL_LINE
     }
     throw; // LCOV_EXCL_LINE
   } // LCOV_EXCL_LINE

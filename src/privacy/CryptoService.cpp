@@ -24,7 +24,8 @@ void strip_trailing_carriage_return(std::string& line) {
 }
 
 void ensure_sodium_ready() {
-  if (sodium_init() < 0) { // LCOV_EXCL_START - libsodium documents initialization failure as unrecoverable.
+  if (sodium_init() <
+      0) { // LCOV_EXCL_START - libsodium documents initialization failure as unrecoverable.
     throw holder::privacy::PrivacyError(
         holder::privacy::PrivacyErrorCode::PrivacyCryptoFailed,
         "failed to initialize libsodium"

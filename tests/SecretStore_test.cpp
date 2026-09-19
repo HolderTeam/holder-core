@@ -367,8 +367,12 @@ class FakeExternalKeyring {
             const holder::privacy::PlatformKeyringSecretRef& ref,
             const std::string& label,
             const std::string& secret
-        ) { return store(ref, label, secret); },
-        [this](const holder::privacy::PlatformKeyringSecretRef& ref) { return remove(ref); }
+        ) {
+          return store(ref, label, secret);
+        },
+        [this](const holder::privacy::PlatformKeyringSecretRef& ref) {
+          return remove(ref);
+        }
     );
   }
 
@@ -459,12 +463,16 @@ TEST_CASE("PlatformKeyring external provider store failure maps to PrivacyError"
   }
 }
 
-TEST_CASE("PlatformKeyring _for_tests hooks still take priority over an external provider", "[privacy]") {
+TEST_CASE(
+    "PlatformKeyring _for_tests hooks still take priority over an external provider",
+    "[privacy]"
+) {
   FakeExternalKeyring fake;
   fake.install();
 
   holder::privacy::platform_keyring_set_store_hook_for_tests(
-      +[](const holder::privacy::PlatformKeyringSecretRef&, const std::string&) -> std::optional<std::string> {
+      +[](const holder::privacy::PlatformKeyringSecretRef&,
+          const std::string&) -> std::optional<std::string> {
         return std::nullopt;
       }
   );
@@ -484,7 +492,10 @@ TEST_CASE("PlatformKeyring _for_tests hooks still take priority over an external
   holder::privacy::platform_keyring_set_store_hook_for_tests(nullptr);
 }
 
-TEST_CASE("SecretStore selects the platform backend once an external keyring provider is installed", "[privacy]") {
+TEST_CASE(
+    "SecretStore selects the platform backend once an external keyring provider is installed",
+    "[privacy]"
+) {
   const auto dir = holder::test::make_temp_dir();
   EnvUnsetGuard unset_test_keystore("HOLDER_TEST_KEYSTORE_DIR");
   FakeExternalKeyring fake;

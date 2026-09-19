@@ -49,10 +49,7 @@ std::pair<std::string, std::string> classify(const std::filesystem::path& path) 
   return {"thing", "application/octet-stream"};
 }
 
-std::string encode_project_blob(
-    const holder::model::Project& project,
-    const std::string& plain
-) {
+std::string encode_project_blob(const holder::model::Project& project, const std::string& plain) {
   if (project.privacy_mode != "encrypted_git") return plain;
   // stage_asset_file() validates the same project key before either helper is
   // reached; these checks defend future call-order changes.
@@ -62,10 +59,7 @@ std::string encode_project_blob(
   return holder::privacy::encrypt_project_blob(project.project_id, *project.project_key_id, plain);
 }
 
-std::string decode_project_blob(
-    const holder::model::Project& project,
-    const std::string& raw
-) {
+std::string decode_project_blob(const holder::model::Project& project, const std::string& raw) {
   if (project.privacy_mode != "encrypted_git") return raw;
   if (!project.project_key_id.has_value() || project.project_key_id->empty()) {
     throw std::runtime_error("encrypted project missing project_key_id"); // LCOV_EXCL_LINE
@@ -78,11 +72,12 @@ std::string object_key_for(
     const std::string& project_id,
     const std::string& asset_id
 ) {
-  auto prefix = location.configuration.contains("prefix")
-                    ? location.configuration.at("prefix")
-                    : std::string();
-  while (!prefix.empty() && prefix.front() == '/') prefix.erase(prefix.begin());
-  while (!prefix.empty() && prefix.back() == '/') prefix.pop_back();
+  auto prefix = location.configuration.contains("prefix") ? location.configuration.at("prefix")
+                                                          : std::string();
+  while (!prefix.empty() && prefix.front() == '/')
+    prefix.erase(prefix.begin());
+  while (!prefix.empty() && prefix.back() == '/')
+    prefix.pop_back();
   if (!prefix.empty()) prefix += "/";
   return prefix + project_id + "/" + asset_id + ".holderasset";
 }
@@ -161,10 +156,10 @@ AssetImportResult AssetImportService::import_file(
 
   holder::resource::ResourceRepo resources(db_);
   const auto duplicate = resources.find_by_asset_hash(request.project_id, staged.plaintext.sha256);
-  const std::string resource_id =
-      duplicate.has_value() ? duplicate->resource.resource_id : provisional_resource_id;
+  const std::string resource_id = duplicate.has_value() ? duplicate->resource.resource_id
+                                                        : provisional_resource_id;
   const std::string asset_id = duplicate.has_value() ? duplicate->assets.front().asset_id
-                                                      : provisional_asset_id;
+                                                     : provisional_asset_id;
 
   holder::card::LinkRepo link_repo(db_);
   auto links = link_repo.list_outgoing(request.project_id, request.card_id);
@@ -304,16 +299,17 @@ void AssetImportService::retrieve(
   holder::resource::ResourceRepo resources(db_);
   const auto bundle = resources.get_bundle(resource_id);
   if (!bundle.has_value()) throw std::runtime_error("resource not found");
-  const auto asset = std::find_if(bundle->assets.begin(), bundle->assets.end(), [&](const auto& item) {
-    return item.asset_id == asset_id;
-  });
+  const auto asset =
+      std::find_if(bundle->assets.begin(), bundle->assets.end(), [&](const auto& item) {
+        return item.asset_id == asset_id;
+      });
   if (asset == bundle->assets.end()) throw std::runtime_error("asset not found in resource");
-  const auto placement = std::find_if(
-      asset->placements.begin(), asset->placements.end(), [&](const auto& item) {
+  const auto placement =
+      std::find_if(asset->placements.begin(), asset->placements.end(), [&](const auto& item) {
         return item.placement_id == placement_id;
-      }
-  );
-  if (placement == asset->placements.end()) throw std::runtime_error("placement not found in asset");
+      });
+  if (placement == asset->placements.end())
+    throw std::runtime_error("placement not found in asset");
   const auto project = holder::project::ProjectRepo(db_).get(bundle->resource.project_id);
   if (!project.has_value()) throw std::runtime_error("project not found");
   std::filesystem::create_directories(staging_root_);

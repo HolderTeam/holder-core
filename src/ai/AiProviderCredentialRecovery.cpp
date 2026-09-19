@@ -13,7 +13,7 @@ constexpr const char* kAiProviderCredentialService = "holder.ai_provider_credent
 
 void recover_ai_provider_credentials_from_secret_store(
     holder::platform::Db& db,
-  holder::privacy::SecretStore& secret_store
+    holder::privacy::SecretStore& secret_store
 ) {
   AiProviderCredentialRepo repo(db);
   const auto entries = secret_store.list(kAiProviderCredentialService);

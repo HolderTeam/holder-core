@@ -30,7 +30,11 @@ void create_project(holder::platform::Db& db, const std::string& project_id) {
   repo.create(project);
 }
 
-void create_card(holder::platform::Db& db, const std::string& card_id, const std::string& project_id) {
+void create_card(
+    holder::platform::Db& db,
+    const std::string& card_id,
+    const std::string& project_id
+) {
   holder::card::CardRepo repo(db);
   holder::model::Card card;
   card.card_id = card_id;
@@ -61,7 +65,10 @@ holder::model::Milestone make_milestone(
 
 } // namespace
 
-TEST_CASE("MilestoneRepo reports a prepare failure when the database is not open", "[milestonerepo]") {
+TEST_CASE(
+    "MilestoneRepo reports a prepare failure when the database is not open",
+    "[milestonerepo]"
+) {
   holder::platform::Db db;
   holder::card::MilestoneRepo repo(db);
   REQUIRE_THROWS_WITH(
@@ -74,11 +81,15 @@ TEST_CASE("MilestoneRepo reports a prepare failure when the database is not open
   );
   REQUIRE_THROWS_WITH(
       repo.list_for_card("proj-1", "card-a"),
-      Catch::Matchers::ContainsSubstring("prepare list milestones for card failed: unknown sqlite error")
+      Catch::Matchers::ContainsSubstring(
+          "prepare list milestones for card failed: unknown sqlite error"
+      )
   );
   REQUIRE_THROWS_WITH(
       repo.list_in_range("proj-1", 0, 10),
-      Catch::Matchers::ContainsSubstring("prepare list milestones in range failed: unknown sqlite error")
+      Catch::Matchers::ContainsSubstring(
+          "prepare list milestones in range failed: unknown sqlite error"
+      )
   );
 }
 
@@ -91,7 +102,9 @@ TEST_CASE("MilestoneRepo reports a duplicate insert in one replacement", "[miles
   const auto milestone = make_milestone("duplicate", "proj-1", "card-a", 10);
   REQUIRE_THROWS_WITH(
       repo.replace_for_card("proj-1", "card-a", {milestone, milestone}),
-      Catch::Matchers::ContainsSubstring("insert milestone failed: UNIQUE constraint failed: milestones.milestone_id")
+      Catch::Matchers::ContainsSubstring(
+          "insert milestone failed: UNIQUE constraint failed: milestones.milestone_id"
+      )
   );
 }
 
@@ -130,7 +143,10 @@ TEST_CASE("MilestoneRepo replace_for_card replaces the whole set, not upserts", 
   REQUIRE(milestones[0].milestone_id == "mile-2");
 }
 
-TEST_CASE("MilestoneRepo replace_for_card with an empty list clears existing milestones", "[milestonerepo]") {
+TEST_CASE(
+    "MilestoneRepo replace_for_card with an empty list clears existing milestones",
+    "[milestonerepo]"
+) {
   const auto dir = holder::test::make_temp_dir();
   auto db = holder::test::open_db_with_schema(dir / "holder.db");
   create_project(db, "proj-1");
@@ -154,8 +170,13 @@ TEST_CASE(
 
   holder::card::MilestoneRepo repo(db);
   REQUIRE_THROWS_WITH(
-      repo.replace_for_card("proj-1", "card-a", {make_milestone("mile-1", "proj-1", "card-b", 100)})
-  , Catch::Matchers::ContainsSubstring("milestone project_id/card_id mismatch"));
+      repo.replace_for_card(
+          "proj-1",
+          "card-a",
+          {make_milestone("mile-1", "proj-1", "card-b", 100)}
+      ),
+      Catch::Matchers::ContainsSubstring("milestone project_id/card_id mismatch")
+  );
 }
 
 TEST_CASE("MilestoneRepo delete_for_card removes a card's milestones", "[milestonerepo]") {
@@ -171,7 +192,10 @@ TEST_CASE("MilestoneRepo delete_for_card removes a card's milestones", "[milesto
   REQUIRE(repo.list_for_card("proj-1", "card-a").empty());
 }
 
-TEST_CASE("MilestoneRepo delete_for_card on a card with no milestones is a harmless no-op", "[milestonerepo]") {
+TEST_CASE(
+    "MilestoneRepo delete_for_card on a card with no milestones is a harmless no-op",
+    "[milestonerepo]"
+) {
   const auto dir = holder::test::make_temp_dir();
   auto db = holder::test::open_db_with_schema(dir / "holder.db");
   create_project(db, "proj-1");
@@ -214,7 +238,10 @@ TEST_CASE("MilestoneRepo preserves nullable end_at, kind, and description", "[mi
   REQUIRE_FALSE(bare_milestones[0].description.has_value());
 }
 
-TEST_CASE("MilestoneRepo list_in_range returns milestones within range, ordered by start_at", "[milestonerepo]") {
+TEST_CASE(
+    "MilestoneRepo list_in_range returns milestones within range, ordered by start_at",
+    "[milestonerepo]"
+) {
   const auto dir = holder::test::make_temp_dir();
   auto db = holder::test::open_db_with_schema(dir / "holder.db");
   create_project(db, "proj-1");
@@ -223,7 +250,11 @@ TEST_CASE("MilestoneRepo list_in_range returns milestones within range, ordered 
 
   holder::card::MilestoneRepo repo(db);
   repo.replace_for_card("proj-1", "card-a", {make_milestone("mile-late", "proj-1", "card-a", 300)});
-  repo.replace_for_card("proj-1", "card-b", {make_milestone("mile-early", "proj-1", "card-b", 100)});
+  repo.replace_for_card(
+      "proj-1",
+      "card-b",
+      {make_milestone("mile-early", "proj-1", "card-b", 100)}
+  );
 
   const auto milestones = repo.list_in_range("proj-1", 100, 300);
   REQUIRE(milestones.size() == 2);
@@ -307,7 +338,10 @@ TEST_CASE("MilestoneRepo list_in_range is scoped per project", "[milestonerepo]"
   REQUIRE(milestones[0].milestone_id == "mile-a");
 }
 
-TEST_CASE("MilestoneRepo list_for_card returns nothing for a card with no milestones", "[milestonerepo]") {
+TEST_CASE(
+    "MilestoneRepo list_for_card returns nothing for a card with no milestones",
+    "[milestonerepo]"
+) {
   const auto dir = holder::test::make_temp_dir();
   auto db = holder::test::open_db_with_schema(dir / "holder.db");
   create_project(db, "proj-1");

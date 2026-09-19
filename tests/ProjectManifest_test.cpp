@@ -27,7 +27,10 @@ std::string read_file(const std::filesystem::path& path) {
 
 } // namespace
 
-TEST_CASE("plain project manifest round trips stable identity and metadata", "[project][manifest]") {
+TEST_CASE(
+    "plain project manifest round trips stable identity and metadata",
+    "[project][manifest]"
+) {
   const auto dir = holder::test::make_temp_dir();
   holder::model::Project project;
   project.project_id = "plain-project-id";
@@ -43,9 +46,9 @@ TEST_CASE("plain project manifest round trips stable identity and metadata", "[p
   holder::git::RealGitOps git;
   holder::project::write_project_manifest(git, project);
 
-  const auto manifest = nlohmann::json::parse(read_file(
-      std::filesystem::path(project.root_path) / holder::project::kProjectManifestPath
-  ));
+  const auto manifest = nlohmann::json::parse(
+      read_file(std::filesystem::path(project.root_path) / holder::project::kProjectManifestPath)
+  );
   REQUIRE(manifest.at("id_scheme") == "uuid7");
 
   const auto recovered = holder::project::read_project_manifest(project.root_path);
@@ -87,7 +90,9 @@ TEST_CASE("encrypted project manifest does not expose its name", "[project][mani
       project.root_path,
       project.project_key_id,
       project.updated_at,
-      [] { return std::string("manifest-key"); }
+      [] {
+        return std::string("manifest-key");
+      }
   );
   project = *repo.get(project.project_id);
   holder::project::write_project_manifest(git, project);
@@ -117,7 +122,10 @@ TEST_CASE("project manifest missing id_scheme defaults to UUID4", "[project][man
   REQUIRE(recovered.id_scheme == holder::model::IdScheme::Uuid4);
 }
 
-TEST_CASE("project manifest rejects bootstrap and payload identity mismatch", "[project][manifest]") {
+TEST_CASE(
+    "project manifest rejects bootstrap and payload identity mismatch",
+    "[project][manifest]"
+) {
   const auto dir = holder::test::make_temp_dir();
   holder::model::Project project;
   project.project_id = "project-one";
@@ -184,8 +192,7 @@ TEST_CASE("project manifest rejects malformed durable metadata", "[project][mani
     std::ofstream(bootstrap_path, std::ios::trunc) << bootstrap;
     std::ofstream(manifest_path, std::ios::trunc) << manifest;
   };
-  const std::string valid_bootstrap =
-      R"({"version":1,"project_id":"project-1","mode":"plain"})";
+  const std::string valid_bootstrap = R"({"version":1,"project_id":"project-1","mode":"plain"})";
   const std::string valid_manifest =
       R"({"version":1,"project_id":"project-1","name":"Project","created_at":1,"updated_at":2})";
 
@@ -218,7 +225,10 @@ TEST_CASE("project manifest rejects malformed durable metadata", "[project][mani
       Catch::Matchers::ContainsSubstring("unsupported project privacy mode 'unknown")
   );
 
-  write_metadata(R"({"version":1,"project_id":"project-1","mode":"encrypted_git"})", valid_manifest);
+  write_metadata(
+      R"({"version":1,"project_id":"project-1","mode":"encrypted_git"})",
+      valid_manifest
+  );
   REQUIRE_THROWS_WITH(
       holder::project::read_project_manifest(root),
       Catch::Matchers::ContainsSubstring("encrypted project bootstrap has no key_id")

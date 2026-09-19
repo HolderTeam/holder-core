@@ -52,7 +52,8 @@ TEST_CASE("ensure_schema_version accepts expected version", "[migrations]") {
   holder::platform::Migrations::ensure_schema(db, schema_path);
 
   REQUIRE_NOTHROW(holder::platform::Migrations::ensure_schema_version(
-      db, holder::platform::Migrations::latest_schema_version
+      db,
+      holder::platform::Migrations::latest_schema_version
   ));
   REQUIRE_FALSE(holder::platform::Migrations::migrate_to_latest(db));
 }
@@ -85,7 +86,8 @@ TEST_CASE("migrate_to_latest upgrades v1 databases with card tags", "[migrations
 
   REQUIRE(holder::platform::Migrations::migrate_to_latest(db));
   REQUIRE_NOTHROW(holder::platform::Migrations::ensure_schema_version(
-      db, holder::platform::Migrations::latest_schema_version
+      db,
+      holder::platform::Migrations::latest_schema_version
   ));
   REQUIRE_NOTHROW(db.exec("SELECT project_id, card_id, tag, created_at FROM card_tags;"));
   REQUIRE_FALSE(holder::platform::Migrations::migrate_to_latest(db));
@@ -102,11 +104,15 @@ TEST_CASE("migrate_to_latest tolerates a v1 database that already has card tags"
 
   REQUIRE(holder::platform::Migrations::migrate_to_latest(db));
   REQUIRE_NOTHROW(holder::platform::Migrations::ensure_schema_version(
-      db, holder::platform::Migrations::latest_schema_version
+      db,
+      holder::platform::Migrations::latest_schema_version
   ));
 }
 
-TEST_CASE("migrate_to_latest upgrades v2 databases with milestones and drops alerts", "[migrations]") {
+TEST_CASE(
+    "migrate_to_latest upgrades v2 databases with milestones and drops alerts",
+    "[migrations]"
+) {
   const auto dir = make_temp_dir();
   const auto db_path = dir / "holder.db";
 
@@ -114,29 +120,26 @@ TEST_CASE("migrate_to_latest upgrades v2 databases with milestones and drops ale
   db.open(db_path);
   holder::platform::Migrations::ensure_schema(db, find_schema_sql());
   db.exec("DROP TABLE milestones;");
-  db.exec(
-      "CREATE TABLE alerts ("
-      "  alert_id TEXT PRIMARY KEY,"
-      "  project_id TEXT NOT NULL,"
-      "  card_id TEXT NULL,"
-      "  title TEXT NOT NULL,"
-      "  due_at INTEGER NOT NULL,"
-      "  created_at INTEGER NOT NULL,"
-      "  updated_at INTEGER NOT NULL"
-      ");"
-  );
+  db.exec("CREATE TABLE alerts ("
+          "  alert_id TEXT PRIMARY KEY,"
+          "  project_id TEXT NOT NULL,"
+          "  card_id TEXT NULL,"
+          "  title TEXT NOT NULL,"
+          "  due_at INTEGER NOT NULL,"
+          "  created_at INTEGER NOT NULL,"
+          "  updated_at INTEGER NOT NULL"
+          ");");
   db.exec("UPDATE schema_version SET version = 2;");
 
   REQUIRE(holder::platform::Migrations::migrate_to_latest(db));
   REQUIRE_NOTHROW(holder::platform::Migrations::ensure_schema_version(
-      db, holder::platform::Migrations::latest_schema_version
+      db,
+      holder::platform::Migrations::latest_schema_version
   ));
-  REQUIRE_NOTHROW(
-      db.exec(
-          "SELECT milestone_id, project_id, card_id, start_at, end_at, all_day, kind, description, "
-          "created_at, updated_at FROM milestones;"
-      )
-  );
+  REQUIRE_NOTHROW(db.exec(
+      "SELECT milestone_id, project_id, card_id, start_at, end_at, all_day, kind, description, "
+      "created_at, updated_at FROM milestones;"
+  ));
   REQUIRE_THROWS_WITH(
       db.exec("SELECT 1 FROM alerts;"),
       Catch::Matchers::ContainsSubstring("sqlite exec failed: no such table: alerts")
@@ -155,7 +158,8 @@ TEST_CASE("migrate_to_latest tolerates a v2 database that already has milestones
 
   REQUIRE(holder::platform::Migrations::migrate_to_latest(db));
   REQUIRE_NOTHROW(holder::platform::Migrations::ensure_schema_version(
-      db, holder::platform::Migrations::latest_schema_version
+      db,
+      holder::platform::Migrations::latest_schema_version
   ));
 }
 
@@ -163,41 +167,40 @@ TEST_CASE("migrate_to_latest adds UUID4 ID scheme to v4 projects", "[migrations]
   const auto dir = make_temp_dir();
   holder::platform::Db db;
   db.open(dir / "holder.db");
-  db.exec(
-      "CREATE TABLE projects ("
-      "project_id TEXT PRIMARY KEY,"
-      "name TEXT NOT NULL,"
-      "root_path TEXT NOT NULL,"
-      "git_remote_url TEXT NULL,"
-      "git_provider TEXT NULL,"
-      "privacy_mode TEXT NOT NULL DEFAULT 'encrypted_git',"
-      "project_key_id TEXT NULL,"
-      "created_at INTEGER NOT NULL,"
-      "updated_at INTEGER NOT NULL,"
-      "CHECK(privacy_mode IN ('encrypted_git', 'plain'))"
-      ");"
-      "CREATE TABLE cards ("
-      "card_id TEXT PRIMARY KEY,"
-      "project_id TEXT NOT NULL"
-      ");"
-      "CREATE TABLE schema_version(version INTEGER NOT NULL);"
-      "INSERT INTO schema_version VALUES(4);"
-      "INSERT INTO projects(project_id,name,root_path,privacy_mode,created_at,updated_at) "
-      "VALUES('legacy','Legacy','/tmp/legacy','plain',1,2);"
-  );
+  db.exec("CREATE TABLE projects ("
+          "project_id TEXT PRIMARY KEY,"
+          "name TEXT NOT NULL,"
+          "root_path TEXT NOT NULL,"
+          "git_remote_url TEXT NULL,"
+          "git_provider TEXT NULL,"
+          "privacy_mode TEXT NOT NULL DEFAULT 'encrypted_git',"
+          "project_key_id TEXT NULL,"
+          "created_at INTEGER NOT NULL,"
+          "updated_at INTEGER NOT NULL,"
+          "CHECK(privacy_mode IN ('encrypted_git', 'plain'))"
+          ");"
+          "CREATE TABLE cards ("
+          "card_id TEXT PRIMARY KEY,"
+          "project_id TEXT NOT NULL"
+          ");"
+          "CREATE TABLE schema_version(version INTEGER NOT NULL);"
+          "INSERT INTO schema_version VALUES(4);"
+          "INSERT INTO projects(project_id,name,root_path,privacy_mode,created_at,updated_at) "
+          "VALUES('legacy','Legacy','/tmp/legacy','plain',1,2);");
 
   REQUIRE(holder::platform::Migrations::migrate_to_latest(db));
   REQUIRE_NOTHROW(holder::platform::Migrations::ensure_schema_version(
-      db, holder::platform::Migrations::latest_schema_version
+      db,
+      holder::platform::Migrations::latest_schema_version
   ));
   const auto project = holder::project::ProjectRepo(db).get("legacy");
   REQUIRE(project.has_value());
   REQUIRE(project->id_scheme == holder::model::IdScheme::Uuid4);
   REQUIRE_THROWS_WITH(
-      db.exec(
-          "UPDATE projects SET id_scheme = 'uuid8' WHERE project_id = 'legacy';"
-      ),
-      Catch::Matchers::ContainsSubstring("sqlite exec failed: CHECK constraint failed: id_scheme IN ('uuid4', 'uuid7')")
+      db.exec("UPDATE projects SET id_scheme = 'uuid8' WHERE project_id = 'legacy';"),
+      Catch::Matchers::ContainsSubstring(
+          "sqlite exec failed: CHECK constraint failed: id_scheme IN ('uuid4', 'uuid7')"
+      )
   );
 }
 
@@ -211,12 +214,11 @@ TEST_CASE("migrate_to_latest adds the project card ID lookup index to v5", "[mig
 
   REQUIRE(holder::platform::Migrations::migrate_to_latest(db));
   REQUIRE_NOTHROW(holder::platform::Migrations::ensure_schema_version(
-      db, holder::platform::Migrations::latest_schema_version
+      db,
+      holder::platform::Migrations::latest_schema_version
   ));
-  REQUIRE_NOTHROW(db.exec(
-      "SELECT card_id FROM cards INDEXED BY idx_cards_project_card_id "
-      "WHERE project_id = 'project' AND card_id >= '';"
-  ));
+  REQUIRE_NOTHROW(db.exec("SELECT card_id FROM cards INDEXED BY idx_cards_project_card_id "
+                          "WHERE project_id = 'project' AND card_id >= '';"));
 }
 
 TEST_CASE("migrate_to_latest rejects databases newer than this build", "[migrations]") {
@@ -234,8 +236,7 @@ TEST_CASE("migrate_to_latest rejects databases newer than this build", "[migrati
   REQUIRE_THROWS_WITH(
       holder::platform::Migrations::migrate_to_latest(db),
       Catch::Matchers::ContainsSubstring(
-          "Expected at most " +
-          std::to_string(holder::platform::Migrations::latest_schema_version)
+          "Expected at most " + std::to_string(holder::platform::Migrations::latest_schema_version)
       )
   );
 }
@@ -344,11 +345,16 @@ TEST_CASE("ensure_schema_version throws when sqlite step fails", "[migrations]")
   );
 }
 
-TEST_CASE("migrate_to_latest rejects a schema version outside its migration graph", "[migrations]") {
+TEST_CASE(
+    "migrate_to_latest rejects a schema version outside its migration graph",
+    "[migrations]"
+) {
   const auto dir = make_temp_dir();
   holder::platform::Db db;
   db.open(dir / "holder.db");
-  db.exec("CREATE TABLE schema_version(version INTEGER NOT NULL); INSERT INTO schema_version VALUES(0);");
+  db.exec(
+      "CREATE TABLE schema_version(version INTEGER NOT NULL); INSERT INTO schema_version VALUES(0);"
+  );
   REQUIRE_THROWS_WITH(
       holder::platform::Migrations::migrate_to_latest(db),
       Catch::Matchers::ContainsSubstring("Unsupported schema version")

@@ -23,4 +23,4 @@ struct LinkKindInfo {
 // unique and every label is non-empty.
 const std::vector<LinkKindInfo>& link_kind_catalog();
 
-}  // namespace holder::core
+} // namespace holder::core

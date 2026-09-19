@@ -20,4 +20,4 @@ std::optional<IdScheme> id_scheme_from_string(std::string_view value) {
   return std::nullopt;
 }
 
-}  // namespace holder::model
+} // namespace holder::model

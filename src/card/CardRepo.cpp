@@ -75,12 +75,12 @@ holder::model::Card read_card(sqlite3_stmt* stmt) {
 
 std::string deletion_scope_clause(holder::model::CardScope scope) {
   switch (scope) {
-    case holder::model::CardScope::Live:
-      return " AND deleted_at IS NULL";
-    case holder::model::CardScope::Trashed:
-      return " AND deleted_at IS NOT NULL";
-    case holder::model::CardScope::Either:
-      return {};
+  case holder::model::CardScope::Live:
+    return " AND deleted_at IS NULL";
+  case holder::model::CardScope::Trashed:
+    return " AND deleted_at IS NOT NULL";
+  case holder::model::CardScope::Either:
+    return {};
   }
   throw std::invalid_argument("invalid card scope"); // LCOV_EXCL_LINE
 }
@@ -150,11 +150,10 @@ std::optional<holder::model::Card> CardRepo::find_by_id(
     const std::string& card_id,
     holder::model::CardScope scope
 ) const {
-  const std::string sql =
-      "SELECT card_id, project_id, title, rel_path, parent_card_id, sort_key, "
-      "created_at, updated_at, deleted_at "
-      "FROM cards WHERE project_id = ? AND card_id = ?" +
-      deletion_scope_clause(scope) + ";";
+  const std::string sql = "SELECT card_id, project_id, title, rel_path, parent_card_id, sort_key, "
+                          "created_at, updated_at, deleted_at "
+                          "FROM cards WHERE project_id = ? AND card_id = ?" +
+                          deletion_scope_clause(scope) + ";";
 
   sqlite3_stmt* stmt = nullptr;
   if (sqlite3_prepare_v2(db_.handle(), sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
@@ -231,11 +230,10 @@ std::vector<holder::model::Card> CardRepo::find_by_exact_title(
 ) const {
   if (limit <= 0) return {};
 
-  const std::string sql =
-      "SELECT card_id, project_id, title, rel_path, parent_card_id, sort_key, "
-      "created_at, updated_at, deleted_at "
-      "FROM cards WHERE project_id = ? AND title = ?" +
-      deletion_scope_clause(scope) + " LIMIT ?;";
+  const std::string sql = "SELECT card_id, project_id, title, rel_path, parent_card_id, sort_key, "
+                          "created_at, updated_at, deleted_at "
+                          "FROM cards WHERE project_id = ? AND title = ?" +
+                          deletion_scope_clause(scope) + " LIMIT ?;";
 
   sqlite3_stmt* stmt = nullptr;
   if (sqlite3_prepare_v2(db_.handle(), sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {

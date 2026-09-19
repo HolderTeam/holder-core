@@ -5,9 +5,9 @@
 #include <catch2/catch.hpp>
 #endif
 
+#include "core_test_helpers.h"
 #include "git/GitOps.h"
 #include "git/RepoLocks.h"
-#include "core_test_helpers.h"
 
 #include <fstream>
 #include <sstream>
@@ -36,10 +36,16 @@ TEST_CASE("canonical_repo_key tolerates an empty unresolved path", "[git]") {
 
 TEST_CASE("RealGitOps probe_remote throws when repo is not opened", "[git]") {
   holder::git::RealGitOps ops;
-  REQUIRE_THROWS_WITH(ops.probe_remote("origin"), Catch::Matchers::ContainsSubstring("GitRepo not opened"));
+  REQUIRE_THROWS_WITH(
+      ops.probe_remote("origin"),
+      Catch::Matchers::ContainsSubstring("GitRepo not opened")
+  );
 }
 
-TEST_CASE("URL probes use detached remotes and preserve repository configuration", "[git][probe-url]") {
+TEST_CASE(
+    "URL probes use detached remotes and preserve repository configuration",
+    "[git][probe-url]"
+) {
   const auto dir = holder::test::make_temp_dir();
   holder::git::GitRepo remote;
   remote.open_or_init(dir / "remote");
@@ -71,8 +77,10 @@ TEST_CASE("URL probes use detached remotes and preserve repository configuration
   const auto invalid = ops.probe_remote_url("nosuchscheme://example.invalid/repo.git");
   CAPTURE(invalid.error_message);
   REQUIRE(invalid.status == holder::git::RemoteProbeStatus::InvalidRemoteUrl);
-  REQUIRE(ops.probe_remote_url((dir / "missing").string()).status !=
-          holder::git::RemoteProbeStatus::Reachable);
+  REQUIRE(
+      ops.probe_remote_url((dir / "missing").string()).status !=
+      holder::git::RemoteProbeStatus::Reachable
+  );
   REQUIRE(read_config() == before);
   REQUIRE(ops.probe_remote("origin").status != holder::git::RemoteProbeStatus::Reachable);
 }
@@ -83,10 +91,14 @@ TEST_CASE("URL probes leave absent origins absent", "[git][probe-url]") {
   remote.open_or_init(dir / "remote");
   holder::git::RealGitOps ops;
   ops.open_or_init(dir / "local");
-  REQUIRE(ops.probe_remote_url((dir / "remote").string()).status ==
-          holder::git::RemoteProbeStatus::Reachable);
+  REQUIRE(
+      ops.probe_remote_url((dir / "remote").string()).status ==
+      holder::git::RemoteProbeStatus::Reachable
+  );
   REQUIRE(ops.probe_remote("origin").status == holder::git::RemoteProbeStatus::RemoteUnset);
-  REQUIRE(ops.GitOps::probe_remote_url("url").status == holder::git::RemoteProbeStatus::UnknownError);
+  REQUIRE(
+      ops.GitOps::probe_remote_url("url").status == holder::git::RemoteProbeStatus::UnknownError
+  );
 }
 
 TEST_CASE("RealGitOps push_branch throws when repo is not opened", "[git]") {

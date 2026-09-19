@@ -20,7 +20,8 @@ enum class StorageErrorCode {
 class StorageError : public std::runtime_error {
  public:
   StorageError(StorageErrorCode code, const std::string& message)
-      : std::runtime_error(message), code_(code) {}
+      : std::runtime_error(message),
+        code_(code) {}
   StorageErrorCode code() const noexcept { return code_; }
 
  private:

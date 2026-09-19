@@ -121,8 +121,8 @@ bool EcdsaDerSigningCredentialProvider::acquire(
   // one (matching SshAgentAndFileCredentialProvider's behavior) and only
   // fall back to default_username_ when the URL didn't specify one.
   const char* user = (username_from_url != nullptr && username_from_url[0] != '\0')
-                          ? username_from_url
-                          : default_username_.c_str();
+                         ? username_from_url
+                         : default_username_.c_str();
 
   const int rc = git_credential_ssh_custom_new(
       out,

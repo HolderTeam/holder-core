@@ -13,4 +13,4 @@ enum class IdScheme {
 std::string_view to_string(IdScheme scheme);
 std::optional<IdScheme> id_scheme_from_string(std::string_view value);
 
-}  // namespace holder::model
+} // namespace holder::model

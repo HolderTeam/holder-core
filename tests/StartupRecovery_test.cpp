@@ -12,8 +12,8 @@
 #include "card/CardPaths.h"
 #include "card/CardRepo.h"
 #include "card/CardStore.h"
-#include "git/GitOps.h"
 #include "core_test_helpers.h"
+#include "git/GitOps.h"
 #include "index/FtsIndexer.h"
 #include "model/Card.h"
 #include "model/Project.h"
@@ -21,7 +21,6 @@
 #include "project/ProjectManifest.h"
 #include "project/ProjectRepo.h"
 #include "project/Rebuilder.h"
-#include "project/ProjectRepo.h"
 #include "project/StartupRecovery.h"
 
 #include <algorithm>
@@ -30,15 +29,14 @@
 
 namespace {
 
-void write_startup_file(const std::filesystem::path &path,
-                        const std::string &text) {
+void write_startup_file(const std::filesystem::path& path, const std::string& text) {
   std::filesystem::create_directories(path.parent_path());
   std::ofstream output(path, std::ios::binary | std::ios::trunc);
   REQUIRE(output.is_open());
   output << text;
 }
 
-std::vector<std::string> split_lines3_sr(const std::string &envelope) {
+std::vector<std::string> split_lines3_sr(const std::string& envelope) {
   std::istringstream in(envelope);
   std::vector<std::string> lines;
   std::string line;
@@ -151,9 +149,7 @@ TEST_CASE("Rebuilder rejects a non-UUID canonical card identity", "[startup][rec
     (void)holder::store::Rebuilder(db, nullptr).rebuild_project(project);
     FAIL("Expected a non-UUID card identity to be rejected");
   } catch (const std::exception& ex) {
-    REQUIRE(
-        std::string(ex.what()) == "invalid card_id in file: expected UUIDv4 or UUIDv7"
-    );
+    REQUIRE(std::string(ex.what()) == "invalid card_id in file: expected UUIDv4 or UUIDv7");
   }
   holder::card::CardRepo cards(db);
   REQUIRE_FALSE(cards.get(card.card_id).has_value());
@@ -188,8 +184,7 @@ TEST_CASE("Rebuilder rejects ai message front matter without message id", "[star
   );
 }
 
-TEST_CASE("Rebuilder validates durable AI thread manifests",
-          "[startup][recovery]") {
+TEST_CASE("Rebuilder validates durable AI thread manifests", "[startup][recovery]") {
   const auto dir = holder::test::make_temp_dir();
   const auto root = dir / "project";
   std::filesystem::create_directories(root);
@@ -212,32 +207,39 @@ TEST_CASE("Rebuilder validates durable AI thread manifests",
   thread.updated_at = 2;
 
   const auto rebuild = [&](bool require_manifests = false) {
-    return holder::store::Rebuilder(db, nullptr, nullptr, false,
-                                    require_manifests)
+    return holder::store::Rebuilder(db, nullptr, nullptr, false, require_manifests)
         .rebuild_project(project);
   };
 
   SECTION("malformed manifest") {
     write_startup_file(
         root / holder::ai::ai_thread_manifest_rel_path(thread.thread_id),
-        "{bad-json");
+        "{bad-json"
+    );
     REQUIRE_THROWS_WITH(
         rebuild(),
-        Catch::Matchers::ContainsSubstring("ai_threads/th/re/thread-1234.json: [json.exception.parse_err")
+        Catch::Matchers::ContainsSubstring(
+            "ai_threads/th/re/thread-1234.json: [json.exception.parse_err"
+        )
     );
   }
 
   SECTION("manifest in the wrong shard") {
-    write_startup_file(root / "ai_threads" / "xx" / "yy" /
-                           (thread.thread_id + ".json"),
-                       holder::ai::render_ai_thread_manifest(project, thread));
-    REQUIRE_THROWS_WITH(rebuild(), Catch::Matchers::ContainsSubstring("AI thread path does not match id"));
+    write_startup_file(
+        root / "ai_threads" / "xx" / "yy" / (thread.thread_id + ".json"),
+        holder::ai::render_ai_thread_manifest(project, thread)
+    );
+    REQUIRE_THROWS_WITH(
+        rebuild(),
+        Catch::Matchers::ContainsSubstring("AI thread path does not match id")
+    );
   }
 
   SECTION("durable manifest is rebuilt without messages") {
     write_startup_file(
         root / holder::ai::ai_thread_manifest_rel_path(thread.thread_id),
-        holder::ai::render_ai_thread_manifest(project, thread));
+        holder::ai::render_ai_thread_manifest(project, thread)
+    );
     REQUIRE(rebuild().ai_threads == 1);
   }
 
@@ -247,27 +249,25 @@ TEST_CASE("Rebuilder validates durable AI thread manifests",
   message.role = "user";
   message.source = "manual";
   message.created_at = 3;
-  const auto message_text = holder::core::render_ai_message_front_matter(
-                                message, project.project_id, {}) +
-                            "Hello\n";
+  const auto message_text =
+      holder::core::render_ai_message_front_matter(message, project.project_id, {}) + "Hello\n";
 
   SECTION("message refers to a thread without a matching durable manifest") {
     write_startup_file(
         root / holder::ai::ai_thread_manifest_rel_path(thread.thread_id),
-        holder::ai::render_ai_thread_manifest(project, thread));
-    write_startup_file(
-        root / holder::core::ai_message_rel_path(message.message_id),
-        message_text);
+        holder::ai::render_ai_thread_manifest(project, thread)
+    );
+    write_startup_file(root / holder::core::ai_message_rel_path(message.message_id), message_text);
     REQUIRE_THROWS_WITH(
         rebuild(),
-        Catch::Matchers::ContainsSubstring("AI message refers to thread without durable manifest: thread-")
+        Catch::Matchers::ContainsSubstring(
+            "AI message refers to thread without durable manifest: thread-"
+        )
     );
   }
 
   SECTION("strict rebuilding requires thread manifests") {
-    write_startup_file(
-        root / holder::core::ai_message_rel_path(message.message_id),
-        message_text);
+    write_startup_file(root / holder::core::ai_message_rel_path(message.message_id), message_text);
     REQUIRE_THROWS_WITH(
         rebuild(true),
         Catch::Matchers::ContainsSubstring("AI messages exist without durable thread manifests")
@@ -275,8 +275,7 @@ TEST_CASE("Rebuilder validates durable AI thread manifests",
   }
 }
 
-TEST_CASE("Strict project recovery requires unique durable manifests",
-          "[startup][recovery]") {
+TEST_CASE("Strict project recovery requires unique durable manifests", "[startup][recovery]") {
   const auto dir = holder::test::make_temp_dir();
   auto db = holder::test::open_db_with_schema(dir / "holder.db");
 
@@ -285,12 +284,19 @@ TEST_CASE("Strict project recovery requires unique durable manifests",
     std::filesystem::create_directories(root);
     REQUIRE_THROWS_WITH(
         holder::project::recover_project_roots(
-            db, nullptr, {root}, [] { return std::string("unused"); }, true),
+            db,
+            nullptr,
+            {root},
+            [] {
+              return std::string("unused");
+            },
+            true
+        ),
         Catch::Matchers::ContainsSubstring("project has no durable manifest")
     );
   }
 
-  const auto write_project = [&](const std::filesystem::path &root) {
+  const auto write_project = [&](const std::filesystem::path& root) {
     holder::model::Project project;
     project.project_id = "project-1234";
     project.name = "Project";
@@ -298,10 +304,14 @@ TEST_CASE("Strict project recovery requires unique durable manifests",
     project.privacy_mode = "plain";
     project.created_at = 1;
     project.updated_at = 1;
-    write_startup_file(root / holder::project::kProjectBootstrapPath,
-                       holder::project::render_project_bootstrap(project));
-    write_startup_file(root / holder::project::kProjectManifestPath,
-                       holder::project::render_project_manifest(project));
+    write_startup_file(
+        root / holder::project::kProjectBootstrapPath,
+        holder::project::render_project_bootstrap(project)
+    );
+    write_startup_file(
+        root / holder::project::kProjectManifestPath,
+        holder::project::render_project_manifest(project)
+    );
   };
 
   SECTION("an already recovered root is skipped") {
@@ -316,7 +326,14 @@ TEST_CASE("Strict project recovery requires unique durable manifests",
     existing.updated_at = 1;
     holder::project::ProjectRepo(db).create(existing);
     REQUIRE(holder::project::recover_project_roots(
-                db, nullptr, {root}, [] { return std::string("unused"); }, true)
+                db,
+                nullptr,
+                {root},
+                [] {
+                  return std::string("unused");
+                },
+                true
+    )
                 .empty());
   }
 
@@ -327,9 +344,17 @@ TEST_CASE("Strict project recovery requires unique durable manifests",
     write_project(second);
     REQUIRE_THROWS_WITH(
         holder::project::recover_project_roots(
-            db, nullptr, {first, second}, [] { return std::string("unused"); },
-            true),
-        Catch::Matchers::ContainsSubstring("duplicate project_id discovered at different roots: project-")
+            db,
+            nullptr,
+            {first, second},
+            [] {
+              return std::string("unused");
+            },
+            true
+        ),
+        Catch::Matchers::ContainsSubstring(
+            "duplicate project_id discovered at different roots: project-"
+        )
     );
   }
 }
@@ -454,22 +479,15 @@ TEST_CASE(
   const auto recovered_db_path = dir / "recovered.db";
   const auto plain_root = projects_root / "plain-no-metadata";
   const auto no_key_root = projects_root / "encrypted-no-key-id";
-  const auto plain_card_rel = holder::core::card_rel_path(
-      "550e8400-e29b-41d4-a716-446655440000"
-  );
-  const auto no_key_card_rel = holder::core::card_rel_path(
-      "01890f3e-7b5a-7cc8-98c4-dc0c0c07398f"
-  );
+  const auto plain_card_rel = holder::core::card_rel_path("550e8400-e29b-41d4-a716-446655440000");
+  const auto no_key_card_rel = holder::core::card_rel_path("01890f3e-7b5a-7cc8-98c4-dc0c0c07398f");
 
   std::filesystem::create_directories((plain_root / plain_card_rel).parent_path());
   std::filesystem::create_directories((no_key_root / no_key_card_rel).parent_path());
   std::filesystem::create_directories(no_key_root / ".holder");
 
   {
-    std::ofstream card(
-        plain_root / plain_card_rel,
-        std::ios::binary | std::ios::trunc
-    );
+    std::ofstream card(plain_root / plain_card_rel, std::ios::binary | std::ios::trunc);
     REQUIRE(card.is_open());
     card << "# Plain no metadata\n\nRecovered.\n";
   }
@@ -482,10 +500,7 @@ TEST_CASE(
     privacy << R"({"version":1,"project_id":"proj-nokey","mode":"encrypted_git"})";
   }
   {
-    std::ofstream card(
-        no_key_root / no_key_card_rel,
-        std::ios::binary | std::ios::trunc
-    );
+    std::ofstream card(no_key_root / no_key_card_rel, std::ios::binary | std::ios::trunc);
     REQUIRE(card.is_open());
     card << "# Plain from encrypted metadata\n\nRecovered.\n";
   }
@@ -623,8 +638,7 @@ TEST_CASE(
   card.updated_at = 1;
   original_store.create(card, "# Encrypted card\n\nRecovered body.\n");
 
-  const auto card_path = projects_root / "mismatch" /
-                         holder::core::card_rel_path(card.card_id);
+  const auto card_path = projects_root / "mismatch" / holder::core::card_rel_path(card.card_id);
   std::ifstream in(card_path, std::ios::binary);
   REQUIRE(in.is_open());
   const std::string envelope(

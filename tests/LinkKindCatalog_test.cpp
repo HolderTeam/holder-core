@@ -35,14 +35,14 @@ namespace {
 
 const holder::core::LinkKindInfo& find(const std::string& id) {
   const auto& catalog = link_kind_catalog();
-  auto it = std::find_if(
-      catalog.begin(), catalog.end(), [&id](const auto& entry) { return entry.id == id; }
-  );
+  auto it = std::find_if(catalog.begin(), catalog.end(), [&id](const auto& entry) {
+    return entry.id == id;
+  });
   REQUIRE(it != catalog.end());
   return *it;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("link_kind_catalog spot-checks known kinds", "[link_kind_catalog]") {
   const auto& depends_on = find("depends_on");

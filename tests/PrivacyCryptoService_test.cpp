@@ -63,9 +63,8 @@ TEST_CASE("PrivacyCryptoService decrypts an envelope checked out with CRLF", "[p
   const std::string plaintext = "# Card\nBody\n";
   const auto envelope = holder::privacy::encrypt_envelope_v1(plaintext, key, "key-123");
 
-  const auto decrypted = holder::privacy::decrypt_envelope_v1(
-      with_crlf_line_endings(envelope), key, "key-123"
-  );
+  const auto decrypted =
+      holder::privacy::decrypt_envelope_v1(with_crlf_line_endings(envelope), key, "key-123");
   REQUIRE(decrypted == plaintext);
 }
 
@@ -130,7 +129,9 @@ TEST_CASE("PrivacyCryptoService rejects malformed base64 as an invalid envelope"
   // '!' is outside the Base64 alphabet, so this is malformed input rather than a wrong-length key
   // (which "AQ==" above covers). It is reachable from user-supplied keys and checked-out files, so
   // it must be reported as an invalid envelope, not treated as an internal crypto failure.
-  expect_invalid_base64([] { (void)holder::privacy::key_from_base64("!"); });
+  expect_invalid_base64([] {
+    (void)holder::privacy::key_from_base64("!");
+  });
 
   auto bad_iv = split_lines3(holder::privacy::encrypt_envelope_v1("hello", key, "key-1"));
   auto meta = nlohmann::json::parse(bad_iv[1]);

@@ -27,7 +27,7 @@ namespace holder::core {
 std::string upsert_trailing_tag_line(const std::string& body, const std::string& tag);
 
 enum class RemoveTagLineOutcome {
-  Removed,          // tag was on the trailing tag line and has been removed from it.
+  Removed, // tag was on the trailing tag line and has been removed from it.
   NotOnTrailingLine, // tag wasn't found there (it may or may not exist elsewhere in the body).
 };
 

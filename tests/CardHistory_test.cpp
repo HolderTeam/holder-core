@@ -7,12 +7,12 @@
 
 #include "card/CardFrontMatter.h"
 #include "card/CardPaths.h"
+#include "core_test_helpers.h"
 #include "git/GitRepo.h"
 #include "history/CardHistory.h"
 #include "model/Card.h"
 #include "model/Project.h"
 #include "privacy/ProjectPrivacy.h"
-#include "core_test_helpers.h"
 
 #include <git2.h>
 
@@ -25,9 +25,9 @@
 namespace {
 
 std::filesystem::path history_temp_dir() {
-  const auto suffix = std::to_string(static_cast<unsigned long long>(
-      std::chrono::steady_clock::now().time_since_epoch().count()
-  ));
+  const auto suffix = std::to_string(
+      static_cast<unsigned long long>(std::chrono::steady_clock::now().time_since_epoch().count())
+  );
   const auto path = std::filesystem::temp_directory_path() / ("holder_history_test_" + suffix);
   std::filesystem::create_directories(path);
   return path;
@@ -39,7 +39,11 @@ std::string read_file_bytes(const std::filesystem::path& path) {
   return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
 }
 
-std::string card_file(const std::string& card_id, const std::string& title, const std::string& body) {
+std::string card_file(
+    const std::string& card_id,
+    const std::string& title,
+    const std::string& body
+) {
   holder::model::Card card;
   card.card_id = card_id;
   card.project_id = "project-history";
@@ -105,7 +109,9 @@ std::string commit_staged_at(
   git_tree* tree = nullptr;
   REQUIRE(git_tree_lookup(&tree, raw, &tree_oid) == 0);
   git_signature* signature = nullptr;
-  REQUIRE(git_signature_new(&signature, author_name.c_str(), author_email.c_str(), committed_at, 0) == 0);
+  REQUIRE(
+      git_signature_new(&signature, author_name.c_str(), author_email.c_str(), committed_at, 0) == 0
+  );
 
   std::vector<git_commit*> parents;
   std::vector<const git_commit*> parent_pointers;
@@ -119,19 +125,22 @@ std::string commit_staged_at(
   }
 
   git_oid commit_oid{};
-  REQUIRE(git_commit_create(
-      &commit_oid,
-      raw,
-      update_ref,
-      signature,
-      signature,
-      nullptr,
-      message.c_str(),
-      tree,
-      parent_pointers.size(),
-      parent_pointers.empty() ? nullptr : parent_pointers.data()
-  ) == 0);
-  for (auto* parent : parents) git_commit_free(parent);
+  REQUIRE(
+      git_commit_create(
+          &commit_oid,
+          raw,
+          update_ref,
+          signature,
+          signature,
+          nullptr,
+          message.c_str(),
+          tree,
+          parent_pointers.size(),
+          parent_pointers.empty() ? nullptr : parent_pointers.data()
+      ) == 0
+  );
+  for (auto* parent : parents)
+    git_commit_free(parent);
   git_signature_free(signature);
   git_tree_free(tree);
   git_repository_free(raw);
@@ -174,7 +183,9 @@ void write_encrypted_commit(
 ) {
   const auto path = holder::core::card_rel_path(card_id);
   const auto encrypted = holder::privacy::encrypt_project_blob(
-      project.project_id, project.project_key_id.value(), card_file(card_id, title, body)
+      project.project_id,
+      project.project_key_id.value(),
+      card_file(card_id, title, body)
   );
   repo.write_file(path, encrypted);
   repo.stage_path(path);
@@ -194,7 +205,13 @@ TEST_CASE("Card history lists card-only commits and groups adjacent edits", "[hi
   repo.write_file("unrelated.txt", "ignored");
   repo.stage_path("unrelated.txt");
   repo.commit("Unrelated project change");
-  write_commit(repo, card_id, "Knife", "First line\nSecond line revised\nAttachment\n", "Update links for Knife");
+  write_commit(
+      repo,
+      card_id,
+      "Knife",
+      "First line\nSecond line revised\nAttachment\n",
+      "Update links for Knife"
+  );
 
   holder::model::Project project;
   project.project_id = "project-history";
@@ -251,9 +268,13 @@ TEST_CASE("Card history compares the change introduced by a revision", "[history
   CHECK(edit.comparison->from.body == "Original body\n");
   CHECK(edit.comparison->to.oid == edit_oid);
   CHECK(edit.comparison->to.body == "Revised body\n");
-  CHECK(std::none_of(edit.comparison->lines.begin(), edit.comparison->lines.end(), [](const auto& line) {
-    return line.origin == '+' && line.text == "# Change";
-  }));
+  CHECK(std::none_of(
+      edit.comparison->lines.begin(),
+      edit.comparison->lines.end(),
+      [](const auto& line) {
+        return line.origin == '+' && line.text == "# Change";
+      }
+  ));
 
   const auto missing = service.compare_change(project, card_id, "00000000");
   CHECK(missing.revision.status == holder::git::RevisionReferenceStatus::NotFound);
@@ -267,14 +288,50 @@ TEST_CASE("Card history splits editing sessions at author and time boundaries", 
   holder::git::GitRepo repo;
   repo.open_or_init(root);
 
-  write_commit_at(repo, root, card_id, "Sessions", "One\n",
-                  "Add card Sessions", "Alice", "alice@example.test", 1'000);
-  write_commit_at(repo, root, card_id, "Sessions", "Two\n", "Update card Sessions",
-                  "Alice", "alice@example.test", 1'100);
-  write_commit_at(repo, root, card_id, "Sessions", "Three\n", "Update card Sessions",
-                  "Bob", "bob@example.test", 1'200);
-  write_commit_at(repo, root, card_id, "Sessions", "Four\n", "Update card Sessions",
-                  "Bob", "bob@example.test", 1'300);
+  write_commit_at(
+      repo,
+      root,
+      card_id,
+      "Sessions",
+      "One\n",
+      "Add card Sessions",
+      "Alice",
+      "alice@example.test",
+      1'000
+  );
+  write_commit_at(
+      repo,
+      root,
+      card_id,
+      "Sessions",
+      "Two\n",
+      "Update card Sessions",
+      "Alice",
+      "alice@example.test",
+      1'100
+  );
+  write_commit_at(
+      repo,
+      root,
+      card_id,
+      "Sessions",
+      "Three\n",
+      "Update card Sessions",
+      "Bob",
+      "bob@example.test",
+      1'200
+  );
+  write_commit_at(
+      repo,
+      root,
+      card_id,
+      "Sessions",
+      "Four\n",
+      "Update card Sessions",
+      "Bob",
+      "bob@example.test",
+      1'300
+  );
 
   holder::model::Project project;
   project.project_id = "project-history";
@@ -291,12 +348,39 @@ TEST_CASE("Card history splits editing sessions at author and time boundaries", 
   const std::string gap_card_id = "abcd-session-gap";
   holder::git::GitRepo gap_repo;
   gap_repo.open_or_init(gap_root);
-  write_commit_at(gap_repo, gap_root, gap_card_id, "Gap", "One\n", "Add card Gap",
-                  "Alice", "alice@example.test", 2'000);
-  write_commit_at(gap_repo, gap_root, gap_card_id, "Gap", "Two\n", "Update card Gap",
-                  "Alice", "alice@example.test", 2'100);
-  write_commit_at(gap_repo, gap_root, gap_card_id, "Gap", "Three\n", "Update card Gap",
-                  "Alice", "alice@example.test", 2'701);
+  write_commit_at(
+      gap_repo,
+      gap_root,
+      gap_card_id,
+      "Gap",
+      "One\n",
+      "Add card Gap",
+      "Alice",
+      "alice@example.test",
+      2'000
+  );
+  write_commit_at(
+      gap_repo,
+      gap_root,
+      gap_card_id,
+      "Gap",
+      "Two\n",
+      "Update card Gap",
+      "Alice",
+      "alice@example.test",
+      2'100
+  );
+  write_commit_at(
+      gap_repo,
+      gap_root,
+      gap_card_id,
+      "Gap",
+      "Three\n",
+      "Update card Gap",
+      "Alice",
+      "alice@example.test",
+      2'701
+  );
 
   project.root_path = gap_root.string();
   const auto gap_page = holder::history::CardHistoryService().list(project, gap_card_id);
@@ -308,18 +392,72 @@ TEST_CASE("Card history splits editing sessions at author and time boundaries", 
   const std::string span_card_id = "abcd-session-span";
   holder::git::GitRepo span_repo;
   span_repo.open_or_init(span_root);
-  write_commit_at(span_repo, span_root, span_card_id, "Span", "One\n", "Add card Span",
-                  "Alice", "alice@example.test", 3'000);
-  write_commit_at(span_repo, span_root, span_card_id, "Span", "Two\n", "Update card Span",
-                  "Alice", "alice@example.test", 3'100);
-  write_commit_at(span_repo, span_root, span_card_id, "Span", "Three\n", "Update card Span",
-                  "Alice", "alice@example.test", 3'700);
-  write_commit_at(span_repo, span_root, span_card_id, "Span", "Four\n", "Update card Span",
-                  "Alice", "alice@example.test", 4'300);
-  write_commit_at(span_repo, span_root, span_card_id, "Span", "Five\n", "Update card Span",
-                  "Alice", "alice@example.test", 4'900);
-  write_commit_at(span_repo, span_root, span_card_id, "Span", "Six\n", "Update card Span",
-                  "Alice", "alice@example.test", 5'500);
+  write_commit_at(
+      span_repo,
+      span_root,
+      span_card_id,
+      "Span",
+      "One\n",
+      "Add card Span",
+      "Alice",
+      "alice@example.test",
+      3'000
+  );
+  write_commit_at(
+      span_repo,
+      span_root,
+      span_card_id,
+      "Span",
+      "Two\n",
+      "Update card Span",
+      "Alice",
+      "alice@example.test",
+      3'100
+  );
+  write_commit_at(
+      span_repo,
+      span_root,
+      span_card_id,
+      "Span",
+      "Three\n",
+      "Update card Span",
+      "Alice",
+      "alice@example.test",
+      3'700
+  );
+  write_commit_at(
+      span_repo,
+      span_root,
+      span_card_id,
+      "Span",
+      "Four\n",
+      "Update card Span",
+      "Alice",
+      "alice@example.test",
+      4'300
+  );
+  write_commit_at(
+      span_repo,
+      span_root,
+      span_card_id,
+      "Span",
+      "Five\n",
+      "Update card Span",
+      "Alice",
+      "alice@example.test",
+      4'900
+  );
+  write_commit_at(
+      span_repo,
+      span_root,
+      span_card_id,
+      "Span",
+      "Six\n",
+      "Update card Span",
+      "Alice",
+      "alice@example.test",
+      5'500
+  );
 
   project.root_path = span_root.string();
   const auto span_page = holder::history::CardHistoryService().list(project, span_card_id);
@@ -328,21 +466,69 @@ TEST_CASE("Card history splits editing sessions at author and time boundaries", 
   CHECK(span_page.entries[1].commit_count == 1);
 }
 
-TEST_CASE("Card history groups direct-parent updates at exact session time limits", "[history][git]") {
+TEST_CASE(
+    "Card history groups direct-parent updates at exact session time limits",
+    "[history][git]"
+) {
   const auto root = history_temp_dir();
   const std::string card_id = "abcd-session-exact-limits";
   holder::git::GitRepo repo;
   repo.open_or_init(root);
-  write_commit_at(repo, root, card_id, "Limits", "One\n", "Add card Limits",
-                  "Alice", "alice@example.test", 1'000);
-  write_commit_at(repo, root, card_id, "Limits", "Two\n", "Update card Limits",
-                  "Alice", "alice@example.test", 1'100);
-  write_commit_at(repo, root, card_id, "Limits", "Three\n", "Update card Limits",
-                  "Alice", "alice@example.test", 1'700);
-  write_commit_at(repo, root, card_id, "Limits", "Four\n", "Update card Limits",
-                  "Alice", "alice@example.test", 2'300);
-  write_commit_at(repo, root, card_id, "Limits", "Five\n", "Update card Limits",
-                  "Alice", "alice@example.test", 2'900);
+  write_commit_at(
+      repo,
+      root,
+      card_id,
+      "Limits",
+      "One\n",
+      "Add card Limits",
+      "Alice",
+      "alice@example.test",
+      1'000
+  );
+  write_commit_at(
+      repo,
+      root,
+      card_id,
+      "Limits",
+      "Two\n",
+      "Update card Limits",
+      "Alice",
+      "alice@example.test",
+      1'100
+  );
+  write_commit_at(
+      repo,
+      root,
+      card_id,
+      "Limits",
+      "Three\n",
+      "Update card Limits",
+      "Alice",
+      "alice@example.test",
+      1'700
+  );
+  write_commit_at(
+      repo,
+      root,
+      card_id,
+      "Limits",
+      "Four\n",
+      "Update card Limits",
+      "Alice",
+      "alice@example.test",
+      2'300
+  );
+  write_commit_at(
+      repo,
+      root,
+      card_id,
+      "Limits",
+      "Five\n",
+      "Update card Limits",
+      "Alice",
+      "alice@example.test",
+      2'900
+  );
 
   holder::model::Project project;
   project.project_id = "project-history";
@@ -358,17 +544,47 @@ TEST_CASE("Card history groups direct-parent updates at exact session time limit
   CHECK(page.entries[1].kind == "created");
 }
 
-TEST_CASE("Card history preserves parent order when commit clocks move backwards", "[history][git]") {
+TEST_CASE(
+    "Card history preserves parent order when commit clocks move backwards",
+    "[history][git]"
+) {
   const auto root = history_temp_dir();
   const std::string card_id = "abcd-clock-skew";
   holder::git::GitRepo repo;
   repo.open_or_init(root);
-  write_commit_at(repo, root, card_id, "Skew", "One\n", "Add card Skew",
-                  "Alice", "alice@example.test", 1'000);
-  write_commit_at(repo, root, card_id, "Skew", "Two\n", "Update card Skew",
-                  "Alice", "alice@example.test", 1'200);
-  write_commit_at(repo, root, card_id, "Skew", "Three\n", "Update card Skew",
-                  "Alice", "alice@example.test", 900);
+  write_commit_at(
+      repo,
+      root,
+      card_id,
+      "Skew",
+      "One\n",
+      "Add card Skew",
+      "Alice",
+      "alice@example.test",
+      1'000
+  );
+  write_commit_at(
+      repo,
+      root,
+      card_id,
+      "Skew",
+      "Two\n",
+      "Update card Skew",
+      "Alice",
+      "alice@example.test",
+      1'200
+  );
+  write_commit_at(
+      repo,
+      root,
+      card_id,
+      "Skew",
+      "Three\n",
+      "Update card Skew",
+      "Alice",
+      "alice@example.test",
+      900
+  );
   const auto head_oid = repo.head_oid();
   REQUIRE(head_oid.has_value());
 
@@ -389,18 +605,35 @@ TEST_CASE("Card history preserves parent order when commit clocks move backwards
   CHECK(page.entries[1].commit_count == 1);
 }
 
-TEST_CASE("Card history retains both merge parents and the resulting card state", "[history][git]") {
+TEST_CASE(
+    "Card history retains both merge parents and the resulting card state",
+    "[history][git]"
+) {
   const auto root = history_temp_dir();
   const std::string card_id = "abcd-merge-history";
   holder::git::GitRepo repo;
   repo.open_or_init(root);
   const auto base_oid = write_commit_at(
-      repo, root, card_id, "Merge", "Base\n", "Add card Merge",
-      "Alice", "alice@example.test", 1'000
+      repo,
+      root,
+      card_id,
+      "Merge",
+      "Base\n",
+      "Add card Merge",
+      "Alice",
+      "alice@example.test",
+      1'000
   );
   const auto first_parent_oid = write_commit_at(
-      repo, root, card_id, "Merge", "Main branch\n", "Update card Merge",
-      "Alice", "alice@example.test", 1'100
+      repo,
+      root,
+      card_id,
+      "Merge",
+      "Main branch\n",
+      "Update card Merge",
+      "Alice",
+      "alice@example.test",
+      1'100
   );
 
   const auto path = holder::core::card_rel_path(card_id);
@@ -463,7 +696,10 @@ TEST_CASE("Card history retains both merge parents and the resulting card state"
   CHECK(change.comparison->to.body == "Combined branches\n");
 }
 
-TEST_CASE("Card history classifies direct metadata, move, Trash, and deletion changes", "[history][git]") {
+TEST_CASE(
+    "Card history classifies direct metadata, move, Trash, and deletion changes",
+    "[history][git]"
+) {
   const auto root = history_temp_dir();
   const std::string card_id = "abcd-semantic-history";
   holder::git::GitRepo repo;
@@ -499,7 +735,12 @@ TEST_CASE("Card history classifies direct metadata, move, Trash, and deletion ch
   milestone.updated_at = 3;
   card.updated_at = 3;
   write_metadata_commit(
-      repo, card, {link}, {milestone}, "Original body\n", "Update milestones for Semantics"
+      repo,
+      card,
+      {link},
+      {milestone},
+      "Original body\n",
+      "Update milestones for Semantics"
   );
 
   card.parent_card_id = "parent-semantic";
@@ -555,8 +796,15 @@ TEST_CASE("Card history follows the same UUID through live and Trash paths", "[h
   holder::git::GitRepo repo;
   repo.open_or_init(root);
   const auto created_oid = write_commit_at(
-      repo, root, card_id, "Trash", "Live version\n", "Add card Trash",
-      "Alice", "alice@example.test", 1'000
+      repo,
+      root,
+      card_id,
+      "Trash",
+      "Live version\n",
+      "Add card Trash",
+      "Alice",
+      "alice@example.test",
+      1'000
   );
 
   const auto live_path = holder::core::card_rel_path(card_id);
@@ -629,8 +877,7 @@ TEST_CASE("Card history compares a selected version with current HEAD", "[histor
   project.project_id = "project-history";
   project.root_path = root.string();
   project.privacy_mode = "plain";
-  const auto comparison =
-      holder::history::CardHistoryService().compare(project, card_id, old_oid);
+  const auto comparison = holder::history::CardHistoryService().compare(project, card_id, old_oid);
 
   REQUIRE(comparison.from.exists);
   REQUIRE(comparison.to.exists);
@@ -721,8 +968,10 @@ TEST_CASE("Card history bounds unrelated revision scanning with a continuation",
   CHECK_FALSE(second.next_cursor.has_value());
 }
 
-TEST_CASE("Card history preserves a scan continuation after returning a matching commit",
-          "[history][git]") {
+TEST_CASE(
+    "Card history preserves a scan continuation after returning a matching commit",
+    "[history][git]"
+) {
   const auto root = history_temp_dir();
   const std::string card_id = "abcd-partial-bounded-scan";
   holder::git::GitRepo repo;
@@ -730,8 +979,7 @@ TEST_CASE("Card history preserves a scan continuation after returning a matching
   repo.write_file("older-note.txt", "older unrelated revision\n");
   repo.stage_path("older-note.txt");
   repo.commit("Add unrelated note");
-  write_commit(repo, card_id, "Bounded", "Newest card version\n",
-               "Add card Bounded");
+  write_commit(repo, card_id, "Bounded", "Newest card version\n", "Add card Bounded");
 
   holder::model::Project project;
   project.project_id = "project-history";
@@ -743,15 +991,13 @@ TEST_CASE("Card history preserves a scan continuation after returning a matching
   REQUIRE(page.next_cursor.has_value());
 }
 
-TEST_CASE("Card history advances through a full raw history batch",
-          "[history][git]") {
+TEST_CASE("Card history advances through a full raw history batch", "[history][git]") {
   const auto root = history_temp_dir();
   const std::string card_id = "abcd-full-raw-batch";
   holder::git::GitRepo repo;
   repo.open_or_init(root);
   for (int revision = 0; revision < 201; ++revision) {
-    write_commit(repo, card_id, "Batch", "Revision " + std::to_string(revision),
-                 "Move card Batch");
+    write_commit(repo, card_id, "Batch", "Revision " + std::to_string(revision), "Move card Batch");
   }
 
   holder::model::Project project;
@@ -796,7 +1042,8 @@ TEST_CASE("Card history bounds very large comparison output", "[history][git]") 
   const auto old_oid = repo.head_oid();
   REQUIRE(old_oid.has_value());
   std::string body;
-  for (int i = 0; i < 6'000; ++i) body += "Line " + std::to_string(i) + "\n";
+  for (int i = 0; i < 6'000; ++i)
+    body += "Line " + std::to_string(i) + "\n";
   write_commit(repo, card_id, "Large", body, "Update card Large");
 
   holder::model::Project project;
@@ -810,13 +1057,14 @@ TEST_CASE("Card history bounds very large comparison output", "[history][git]") 
 
 TEST_CASE(
     "Card history uses a bounded fallback when diff inputs have a huge product",
-    "[history][git]") {
+    "[history][git]"
+) {
   const auto root = history_temp_dir();
   const std::string card_id = "abcd-product-bounded-diff";
   holder::git::GitRepo repo;
   repo.open_or_init(root);
 
-  const auto make_body = [](int count, const std::string &prefix) {
+  const auto make_body = [](int count, const std::string& prefix) {
     std::string body;
     for (int i = 0; i < count; ++i)
       body += prefix + std::to_string(i) + "\n";
@@ -828,14 +1076,12 @@ TEST_CASE(
   project.privacy_mode = "plain";
 
   SECTION("the replacement side reaches the output cap") {
-    write_commit(repo, card_id, "Large", make_body(3'000, "Old "),
-                 "Add card Large");
+    write_commit(repo, card_id, "Large", make_body(3'000, "Old "), "Add card Large");
     const auto old_oid = repo.head_oid();
     REQUIRE(old_oid.has_value());
-    write_commit(repo, card_id, "Large", make_body(3'000, "New "),
-                 "Update card Large");
-    const auto comparison = holder::history::CardHistoryService().compare(
-        project, card_id, old_oid);
+    write_commit(repo, card_id, "Large", make_body(3'000, "New "), "Update card Large");
+    const auto comparison =
+        holder::history::CardHistoryService().compare(project, card_id, old_oid);
     CHECK(comparison.truncated);
     CHECK(comparison.lines.size() == 5'000);
     CHECK(comparison.lines.front().origin == '-');
@@ -843,36 +1089,32 @@ TEST_CASE(
   }
 
   SECTION("the original side reaches the output cap") {
-    write_commit(repo, card_id, "Large", make_body(6'000, "Old "),
-                 "Add card Large");
+    write_commit(repo, card_id, "Large", make_body(6'000, "Old "), "Add card Large");
     const auto old_oid = repo.head_oid();
     REQUIRE(old_oid.has_value());
-    write_commit(repo, card_id, "Large", make_body(200, "New "),
-                 "Update card Large");
-    const auto comparison = holder::history::CardHistoryService().compare(
-        project, card_id, old_oid);
+    write_commit(repo, card_id, "Large", make_body(200, "New "), "Update card Large");
+    const auto comparison =
+        holder::history::CardHistoryService().compare(project, card_id, old_oid);
     CHECK(comparison.truncated);
     CHECK(comparison.lines.size() == 5'000);
-    CHECK(std::all_of(comparison.lines.begin(), comparison.lines.end(),
-                      [](const auto &line) { return line.origin == '-'; }));
+    CHECK(std::all_of(comparison.lines.begin(), comparison.lines.end(), [](const auto& line) {
+      return line.origin == '-';
+    }));
   }
 
   SECTION("the bounded fallback can finish below the output cap") {
-    write_commit(repo, card_id, "Large", make_body(1'100, "Old "),
-                 "Add card Large");
+    write_commit(repo, card_id, "Large", make_body(1'100, "Old "), "Add card Large");
     const auto old_oid = repo.head_oid();
     REQUIRE(old_oid.has_value());
-    write_commit(repo, card_id, "Large", make_body(1'100, "New "),
-                 "Update card Large");
-    const auto comparison = holder::history::CardHistoryService().compare(
-        project, card_id, old_oid);
+    write_commit(repo, card_id, "Large", make_body(1'100, "New "), "Update card Large");
+    const auto comparison =
+        holder::history::CardHistoryService().compare(project, card_id, old_oid);
     CHECK_FALSE(comparison.truncated);
     CHECK(comparison.lines.size() == 2'204);
   }
 }
 
-TEST_CASE("Card history rejects encrypted snapshots without a project key id",
-          "[history][git]") {
+TEST_CASE("Card history rejects encrypted snapshots without a project key id", "[history][git]") {
   const auto root = history_temp_dir();
   const std::string card_id = "abcd-missing-history-key";
   holder::git::GitRepo repo;
@@ -889,8 +1131,7 @@ TEST_CASE("Card history rejects encrypted snapshots without a project key id",
   );
 }
 
-TEST_CASE("Card history describes an all-whitespace edit without an excerpt",
-          "[history][git]") {
+TEST_CASE("Card history describes an all-whitespace edit without an excerpt", "[history][git]") {
   const auto root = history_temp_dir();
   const std::string card_id = "abcd-blank-summary";
   holder::git::GitRepo repo;
@@ -902,8 +1143,7 @@ TEST_CASE("Card history describes an all-whitespace edit without an excerpt",
   project.project_id = "project-history";
   project.root_path = root.string();
   project.privacy_mode = "plain";
-  const auto page =
-      holder::history::CardHistoryService().list(project, card_id);
+  const auto page = holder::history::CardHistoryService().list(project, card_id);
   REQUIRE_FALSE(page.entries.empty());
   CHECK(page.entries.front().summary == "Edited card");
 }
@@ -925,9 +1165,10 @@ TEST_CASE("Card history shortens an oversized diff line", "[history][git]") {
   const auto comparison = holder::history::CardHistoryService().compare(project, card_id, old_oid);
 
   CHECK(comparison.truncated);
-  const auto added = std::find_if(comparison.lines.begin(), comparison.lines.end(), [](const auto& line) {
-    return line.origin == '+' && line.text.find("... [line shortened]") != std::string::npos;
-  });
+  const auto added =
+      std::find_if(comparison.lines.begin(), comparison.lines.end(), [](const auto& line) {
+        return line.origin == '+' && line.text.find("... [line shortened]") != std::string::npos;
+      });
   REQUIRE(added != comparison.lines.end());
   CHECK(added->text.size() <= 16 * 1024);
 }
@@ -950,7 +1191,9 @@ TEST_CASE("Card history decrypts encrypted project versions", "[history][git][pr
       project.project_id,
       std::nullopt,
       2,
-      []() { return std::string("history-key"); }
+      []() {
+        return std::string("history-key");
+      }
   );
 
   holder::git::GitRepo repo;
@@ -958,9 +1201,7 @@ TEST_CASE("Card history decrypts encrypted project versions", "[history][git][pr
   write_encrypted_commit(repo, project, card_id, "Secret", "First secret\n", "Add card Secret");
   const auto old_oid = repo.head_oid();
   REQUIRE(old_oid.has_value());
-  write_encrypted_commit(
-      repo, project, card_id, "Secret", "Second secret\n", "Update card Secret"
-  );
+  write_encrypted_commit(repo, project, card_id, "Secret", "Second secret\n", "Update card Secret");
 
   holder::history::CardHistoryService service;
   const auto page = service.list(project, card_id);
@@ -988,7 +1229,9 @@ TEST_CASE("Card history fails closed for a damaged encrypted envelope", "[histor
       project.project_id,
       std::nullopt,
       2,
-      []() { return std::string("history-corrupt-key"); }
+      []() {
+        return std::string("history-corrupt-key");
+      }
   );
 
   holder::git::GitRepo repo;

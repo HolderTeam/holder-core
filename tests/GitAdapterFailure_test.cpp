@@ -139,7 +139,10 @@ TEST_CASE("CardStore create propagates git commit failure after DB write", "[git
   card.created_at = 1;
   card.updated_at = 1;
 
-  REQUIRE_THROWS_WITH(store.create(card, "body"), Catch::Matchers::ContainsSubstring("commit failed"));
+  REQUIRE_THROWS_WITH(
+      store.create(card, "body"),
+      Catch::Matchers::ContainsSubstring("commit failed")
+  );
 
   holder::card::CardRepo repo(db);
   REQUIRE(repo.get("card-1").has_value());
@@ -203,7 +206,10 @@ TEST_CASE("CardStore create propagates set_remote failure", "[git]") {
   card.created_at = 1;
   card.updated_at = 1;
 
-  REQUIRE_THROWS_WITH(store.create(card, "body"), Catch::Matchers::ContainsSubstring("set remote failed"));
+  REQUIRE_THROWS_WITH(
+      store.create(card, "body"),
+      Catch::Matchers::ContainsSubstring("set remote failed")
+  );
 }
 
 TEST_CASE("CardStore update propagates git stage failure", "[git]") {

@@ -252,11 +252,15 @@ TEST_CASE("AiRunRepo throws when table missing for prepare paths", "[db]") {
   );
   REQUIRE_THROWS_WITH(
       repo.list_by_thread("thread-1"),
-      Catch::Matchers::ContainsSubstring("prepare ai_runs list_by_thread failed: no such table: ai_runs")
+      Catch::Matchers::ContainsSubstring(
+          "prepare ai_runs list_by_thread failed: no such table: ai_runs"
+      )
   );
   REQUIRE_THROWS_WITH(
       repo.list_by_project("proj-1"),
-      Catch::Matchers::ContainsSubstring("prepare ai_runs list_by_project failed: no such table: ai_runs")
+      Catch::Matchers::ContainsSubstring(
+          "prepare ai_runs list_by_project failed: no such table: ai_runs"
+      )
   );
   REQUIRE_THROWS_WITH(
       repo.update_status(

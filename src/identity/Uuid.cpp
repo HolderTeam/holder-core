@@ -10,8 +10,7 @@ namespace holder::identity {
 namespace {
 
 bool is_hex_digit(char value) {
-  return (value >= '0' && value <= '9') ||
-         (value >= 'a' && value <= 'f') ||
+  return (value >= '0' && value <= '9') || (value >= 'a' && value <= 'f') ||
          (value >= 'A' && value <= 'F');
 }
 
@@ -38,7 +37,7 @@ std::string format_uuid(const unsigned char bytes[16]) {
   return out;
 } // LCOV_EXCL_LINE - gcov artefact: function exit is executed but never counted.
 
-}  // namespace
+} // namespace
 
 std::string uuid_v4() {
   ensure_sodium();
@@ -58,13 +57,12 @@ std::string uuid_v7() {
   unsigned char bytes[16];
   randombytes_buf(bytes, sizeof(bytes));
 
-  const auto now_ms =
-      std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::system_clock::now().time_since_epoch())
-          .count();
+  const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::system_clock::now().time_since_epoch()
+  )
+                          .count();
 
-  if (now_ms < 0 ||
-      static_cast<std::uint64_t>(now_ms) > 0xFFFFFFFFFFFFULL) {
+  if (now_ms < 0 || static_cast<std::uint64_t>(now_ms) > 0xFFFFFFFFFFFFULL) {
     throw std::runtime_error("system clock outside UUIDv7 range"); // LCOV_EXCL_LINE
   }
 
@@ -111,8 +109,8 @@ bool is_valid_uuid(std::string_view value) {
   if (value[14] != '4' && value[14] != '7') return false;
 
   const char variant = value[19];
-  return variant == '8' || variant == '9' || variant == 'a' || variant == 'A' ||
-         variant == 'b' || variant == 'B';
+  return variant == '8' || variant == '9' || variant == 'a' || variant == 'A' || variant == 'b' ||
+         variant == 'B';
 }
 
-}  // namespace holder::identity
+} // namespace holder::identity

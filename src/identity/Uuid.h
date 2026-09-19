@@ -12,4 +12,4 @@ std::string uuid_v7();
 std::string generate_id(holder::model::IdScheme scheme);
 bool is_valid_uuid(std::string_view value);
 
-}  // namespace holder::identity
+} // namespace holder::identity

@@ -5,14 +5,15 @@
 #include <catch2/catch.hpp>
 #endif
 
-#include "model/Location.h"
-#include "model/Project.h"
-#include "model/Resource.h"
 #include "card/CardFrontMatter.h"
 #include "card/CardPaths.h"
 #include "card/CardRepo.h"
 #include "card/LinkRepo.h"
+#include "core_test_helpers.h"
 #include "git/GitOps.h"
+#include "model/Location.h"
+#include "model/Project.h"
+#include "model/Resource.h"
 #include "platform/Db.h"
 #include "platform/Tx.h"
 #include "privacy/ProjectPrivacy.h"
@@ -20,12 +21,11 @@
 #include "project/Rebuilder.h"
 #include "resource/LocationRepo.h"
 #include "resource/LocationStore.h"
-#include "resource/ResourceManifest.h"
 #include "resource/MetadataMapping.h"
+#include "resource/ResourceManifest.h"
 #include "resource/ResourcePaths.h"
 #include "resource/ResourceRepo.h"
 #include "resource/ResourceStore.h"
-#include "core_test_helpers.h"
 
 #include <nlohmann/json.hpp>
 
@@ -71,7 +71,7 @@ void create_project(holder::platform::Db& db, const std::string& project_id) {
   holder::project::ProjectRepo(db).create(project);
 }
 
-void write_text(const std::filesystem::path &path, const std::string &text) {
+void write_text(const std::filesystem::path& path, const std::string& text) {
   std::filesystem::create_directories(path.parent_path());
   std::ofstream output(path, std::ios::binary | std::ios::trunc);
   REQUIRE(output.is_open());
@@ -133,9 +133,7 @@ holder::model::Location sample_location() {
   return location;
 }
 
-int always_interrupt(void*) {
-  return 1;
-}
+int always_interrupt(void*) { return 1; }
 
 struct InterruptAfter {
   int remaining;
@@ -169,7 +167,10 @@ bool observes_sqlite_failure(
 
 } // namespace
 
-TEST_CASE("Card resource join isolates attachments and paginates live cards", "[resource][attachments]") {
+TEST_CASE(
+    "Card resource join isolates attachments and paginates live cards",
+    "[resource][attachments]"
+) {
   const auto dir = make_temp_dir();
   holder::platform::Db db;
   db.open(dir / "holder.db");
@@ -218,9 +219,18 @@ TEST_CASE("Card resource join isolates attachments and paginates live cards", "[
   REQUIRE(next.size() == 1);
   REQUIRE(first[0].resource_id != next[0].resource_id);
   REQUIRE(resources.list_for_card(card.project_id, card.card_id, 1, 2).empty());
-  REQUIRE_THROWS_AS(resources.list_for_card(card.project_id, card.card_id, 0), std::invalid_argument);
-  REQUIRE_THROWS_AS(resources.list_for_card(card.project_id, card.card_id, 1001), std::invalid_argument);
-  REQUIRE_THROWS_AS(resources.list_for_card(card.project_id, card.card_id, 1, -1), std::invalid_argument);
+  REQUIRE_THROWS_AS(
+      resources.list_for_card(card.project_id, card.card_id, 0),
+      std::invalid_argument
+  );
+  REQUIRE_THROWS_AS(
+      resources.list_for_card(card.project_id, card.card_id, 1001),
+      std::invalid_argument
+  );
+  REQUIRE_THROWS_AS(
+      resources.list_for_card(card.project_id, card.card_id, 1, -1),
+      std::invalid_argument
+  );
   links.delete_link(card.project_id, card.card_id, resource.resource_id, "resource", "attachment");
   REQUIRE(resources.get(resource.resource_id).has_value());
   REQUIRE(resources.list_for_card(card.project_id, card.card_id).size() == 1);
@@ -323,7 +333,10 @@ TEST_CASE("Dublin Core mapping keeps Holder friendly and unknown terms lossless"
       "http://purl.org/dc/terms/description"
   );
   REQUIRE(holder::resource::holder_property_for_dublin_core("dcterms:creator") == "creator");
-  REQUIRE(holder::resource::holder_property_for_dublin_core("schema:recipeCuisine") == "schema:recipeCuisine");
+  REQUIRE(
+      holder::resource::holder_property_for_dublin_core("schema:recipeCuisine") ==
+      "schema:recipeCuisine"
+  );
   REQUIRE_FALSE(holder::resource::dublin_core_term_for("schema:recipeCuisine").has_value());
 }
 
@@ -369,7 +382,10 @@ TEST_CASE("Resource and Location repositories preserve complete projection", "[r
   resources.update(updated_resource);
   const auto updated_bundle = resources.get_bundle("resource-1234");
   REQUIRE(updated_bundle->resource.label == "Renamed boiler");
-  REQUIRE(updated_bundle->resource.metadata.at("description") == std::vector<std::string>{"Recently serviced"});
+  REQUIRE(
+      updated_bundle->resource.metadata.at("description") ==
+      std::vector<std::string>{"Recently serviced"}
+  );
   REQUIRE(updated_bundle->assets.size() == 1);
   REQUIRE_THROWS_WITH(
       resources.update(holder::model::Resource{}),
@@ -432,7 +448,9 @@ TEST_CASE("Resource repository validates ownership links", "[resource]") {
   invalid_location.location_id.clear();
   REQUIRE_THROWS_WITH(
       holder::resource::LocationRepo(db).put(invalid_location),
-      Catch::Matchers::ContainsSubstring("location identity, project, name and provider are required")
+      Catch::Matchers::ContainsSubstring(
+          "location identity, project, name and provider are required"
+      )
   );
   resources.put_bundle(sample_bundle());
   REQUIRE_THROWS_WITH(
@@ -566,8 +584,7 @@ TEST_CASE("Resource and Location repositories surface interrupted sqlite steps",
   sqlite3_progress_handler(db.handle(), 0, nullptr, nullptr);
 }
 
-TEST_CASE("Resource and Location repositories report nested sqlite scan failures",
-          "[resource]") {
+TEST_CASE("Resource and Location repositories report nested sqlite scan failures", "[resource]") {
   const auto dir = make_temp_dir();
   holder::platform::Db db;
   db.open(dir / "holder.db");
@@ -629,8 +646,10 @@ TEST_CASE("Project rebuild reconstructs resources assets placements and location
 
   const auto location = sample_location();
   const auto bundle = sample_bundle();
-  const auto location_path = project_root / holder::resource::location_rel_path(location.location_id);
-  const auto resource_path = project_root / holder::resource::resource_rel_path(bundle.resource.resource_id);
+  const auto location_path = project_root /
+                             holder::resource::location_rel_path(location.location_id);
+  const auto resource_path = project_root /
+                             holder::resource::resource_rel_path(bundle.resource.resource_id);
   std::filesystem::create_directories(location_path.parent_path());
   std::filesystem::create_directories(resource_path.parent_path());
   std::ofstream(location_path) << holder::resource::render_location_manifest(location);
@@ -651,9 +670,7 @@ TEST_CASE("Project rebuild reconstructs resources assets placements and location
   REQUIRE(holder::resource::ResourceRepo(db).get("resource-1234").has_value());
 }
 
-TEST_CASE(
-    "Project rebuild rejects corrupt resource and location ownership data",
-    "[resource]") {
+TEST_CASE("Project rebuild rejects corrupt resource and location ownership data", "[resource]") {
   const auto dir = make_temp_dir();
   const auto project_root = dir / "project";
   std::filesystem::create_directories(project_root);
@@ -669,58 +686,44 @@ TEST_CASE(
   project.updated_at = 1;
   holder::project::ProjectRepo(db).create(project);
 
-  const auto write_location = [&](const holder::model::Location &location) {
-    write_text(project_root /
-                   holder::resource::location_rel_path(location.location_id),
-               holder::resource::render_location_manifest(location));
+  const auto write_location = [&](const holder::model::Location& location) {
+    write_text(
+        project_root / holder::resource::location_rel_path(location.location_id),
+        holder::resource::render_location_manifest(location)
+    );
   };
-  const auto write_resource = [&](const holder::model::ResourceBundle &bundle) {
-    write_text(project_root / holder::resource::resource_rel_path(
-                                  bundle.resource.resource_id),
-               holder::resource::render_resource_manifest(bundle));
+  const auto write_resource = [&](const holder::model::ResourceBundle& bundle) {
+    write_text(
+        project_root / holder::resource::resource_rel_path(bundle.resource.resource_id),
+        holder::resource::render_resource_manifest(bundle)
+    );
   };
   const auto rebuild = [&] {
     holder::store::Rebuilder(db, nullptr).rebuild_project(project);
   };
 
   SECTION("malformed location manifest") {
-    write_text(project_root /
-                   holder::resource::location_rel_path("location-1234"),
-               "{not-json");
-    REQUIRE_THROWS_WITH(
-        rebuild(),
-        Catch::Matchers::ContainsSubstring("location-1234.json")
-    );
+    write_text(project_root / holder::resource::location_rel_path("location-1234"), "{not-json");
+    REQUIRE_THROWS_WITH(rebuild(), Catch::Matchers::ContainsSubstring("location-1234.json"));
   }
 
   SECTION("location belongs to another project") {
     auto location = sample_location();
     location.project_id = "another-project";
     write_location(location);
-    REQUIRE_THROWS_WITH(
-        rebuild(),
-        Catch::Matchers::ContainsSubstring("another project")
-    );
+    REQUIRE_THROWS_WITH(rebuild(), Catch::Matchers::ContainsSubstring("another project"));
   }
 
   SECTION("malformed resource manifest") {
-    write_text(project_root /
-                   holder::resource::resource_rel_path("resource-1234"),
-               "{not-json");
-    REQUIRE_THROWS_WITH(
-        rebuild(),
-        Catch::Matchers::ContainsSubstring("resource-1234.json")
-    );
+    write_text(project_root / holder::resource::resource_rel_path("resource-1234"), "{not-json");
+    REQUIRE_THROWS_WITH(rebuild(), Catch::Matchers::ContainsSubstring("resource-1234.json"));
   }
 
   SECTION("resource belongs to another project") {
     auto bundle = sample_bundle();
     bundle.resource.project_id = "another-project";
     write_resource(bundle);
-    REQUIRE_THROWS_WITH(
-        rebuild(),
-        Catch::Matchers::ContainsSubstring("another project")
-    );
+    REQUIRE_THROWS_WITH(rebuild(), Catch::Matchers::ContainsSubstring("another project"));
   }
 
   SECTION("duplicate asset id") {
@@ -731,21 +734,14 @@ TEST_CASE(
     second.assets[0].placements[0].asset_id = second.assets[0].asset_id;
     write_resource(first);
     write_resource(second);
-    REQUIRE_THROWS_WITH(
-        rebuild(),
-        Catch::Matchers::ContainsSubstring("duplicate asset_id")
-    );
+    REQUIRE_THROWS_WITH(rebuild(), Catch::Matchers::ContainsSubstring("duplicate asset_id"));
   }
 
   SECTION("invalid plaintext digest") {
     auto bundle = sample_bundle();
     bundle.assets[0].plaintext_sha256 = "not-a-sha256";
     write_resource(bundle);
-    REQUIRE_THROWS_WITH(
-        rebuild(),
-        Catch::Matchers::ContainsSubstring(
-                                       "invalid plaintext_sha256")
-    );
+    REQUIRE_THROWS_WITH(rebuild(), Catch::Matchers::ContainsSubstring("invalid plaintext_sha256"));
   }
 
   SECTION("duplicate placement id") {
@@ -756,35 +752,27 @@ TEST_CASE(
     second_asset.placements[0].asset_id = second_asset.asset_id;
     bundle.assets.push_back(second_asset);
     write_resource(bundle);
-    REQUIRE_THROWS_WITH(
-        rebuild(),
-        Catch::Matchers::ContainsSubstring(
-                                       "duplicate placement_id")
-    );
+    REQUIRE_THROWS_WITH(rebuild(), Catch::Matchers::ContainsSubstring("duplicate placement_id"));
   }
 
   SECTION("invalid stored digest") {
     auto bundle = sample_bundle();
     bundle.assets[0].placements[0].stored_sha256 = "not-a-sha256";
     write_resource(bundle);
-    REQUIRE_THROWS_WITH(
-        rebuild(),
-        Catch::Matchers::ContainsSubstring("invalid stored_sha256")
-    );
+    REQUIRE_THROWS_WITH(rebuild(), Catch::Matchers::ContainsSubstring("invalid stored_sha256"));
   }
 
   SECTION("placement refers to unknown location") {
     write_resource(sample_bundle());
-    REQUIRE_THROWS_WITH(
-        rebuild(),
-        Catch::Matchers::ContainsSubstring("unknown location")
-    );
+    REQUIRE_THROWS_WITH(rebuild(), Catch::Matchers::ContainsSubstring("unknown location"));
   }
 }
 
-TEST_CASE("Encrypted Resource and Location manifests rebuild after projection "
-          "deletion",
-          "[resource][privacy]") {
+TEST_CASE(
+    "Encrypted Resource and Location manifests rebuild after projection "
+    "deletion",
+    "[resource][privacy]"
+) {
   const auto dir = make_temp_dir();
   const auto project_root = dir / "project";
   holder::test::EnvGuard keystore_env("HOLDER_TEST_KEYSTORE_DIR", (dir / "keystore").string());
@@ -810,28 +798,34 @@ TEST_CASE("Encrypted Resource and Location manifests rebuild after projection "
       project.root_path,
       std::nullopt,
       2,
-      [] { return std::string("resource-rebuild-key"); }
+      [] {
+        return std::string("resource-rebuild-key");
+      }
   );
   project = *projects.get(project.project_id);
 
   holder::resource::LocationStore(db, nullptr, &git).put(sample_location());
   holder::resource::ResourceStore(db, nullptr, &git).put(sample_bundle());
   REQUIRE(holder::resource::LocationStore(db, nullptr, &git).get("location-1234").has_value());
-  REQUIRE_FALSE(holder::resource::LocationStore(db, nullptr, &git).get("missing-location").has_value());
+  REQUIRE_FALSE(
+      holder::resource::LocationStore(db, nullptr, &git).get("missing-location").has_value()
+  );
   REQUIRE(holder::resource::ResourceStore(db, nullptr, &git).get("resource-1234").has_value());
-  REQUIRE_FALSE(holder::resource::ResourceStore(db, nullptr, &git).get("missing-resource").has_value());
+  REQUIRE_FALSE(
+      holder::resource::ResourceStore(db, nullptr, &git).get("missing-resource").has_value()
+  );
 
-  const auto location_path = project_root /
-                             holder::resource::location_rel_path("location-1234");
-  const auto resource_path = project_root /
-                             holder::resource::resource_rel_path("resource-1234");
+  const auto location_path = project_root / holder::resource::location_rel_path("location-1234");
+  const auto resource_path = project_root / holder::resource::resource_rel_path("resource-1234");
   std::ifstream location_file(location_path, std::ios::binary);
   std::ifstream resource_file(resource_path, std::ios::binary);
   const std::string location_raw{
-      std::istreambuf_iterator<char>(location_file), std::istreambuf_iterator<char>()
+      std::istreambuf_iterator<char>(location_file),
+      std::istreambuf_iterator<char>()
   };
   const std::string resource_raw{
-      std::istreambuf_iterator<char>(resource_file), std::istreambuf_iterator<char>()
+      std::istreambuf_iterator<char>(resource_file),
+      std::istreambuf_iterator<char>()
   };
   REQUIRE(location_raw.rfind("HolderPriv1\n", 0) == 0);
   REQUIRE(resource_raw.rfind("HolderPriv1\n", 0) == 0);
@@ -847,12 +841,14 @@ TEST_CASE("Encrypted Resource and Location manifests rebuild after projection "
   REQUIRE(rebuilt.assets == 1);
   REQUIRE(rebuilt.placements == 1);
   REQUIRE(rebuilt.locations == 1);
-  REQUIRE(holder::resource::ResourceRepo(db).get_bundle("resource-1234")->resource.label == "Boiler фото");
+  REQUIRE(
+      holder::resource::ResourceRepo(db).get_bundle("resource-1234")->resource.label ==
+      "Boiler фото"
+  );
   REQUIRE(holder::resource::LocationRepo(db).get("location-1234")->name == "Family Assets");
 
   REQUIRE_THROWS_WITH(
-      holder::resource::LocationStore(db, nullptr, &git)
-                         .remove("location-1234"),
+      holder::resource::LocationStore(db, nullptr, &git).remove("location-1234"),
       Catch::Matchers::ContainsSubstring("storage location is in use by an asset placement")
   );
   holder::resource::ResourceStore(db, nullptr, &git).remove("resource-1234");
@@ -861,8 +857,10 @@ TEST_CASE("Encrypted Resource and Location manifests rebuild after projection "
   REQUIRE_FALSE(holder::resource::LocationRepo(db).get("location-1234").has_value());
 }
 
-TEST_CASE("Encrypted resource stores reject projects without key identities",
-          "[resource][privacy]") {
+TEST_CASE(
+    "Encrypted resource stores reject projects without key identities",
+    "[resource][privacy]"
+) {
   const auto dir = make_temp_dir();
   holder::platform::Db db;
   db.open(dir / "holder.db");
@@ -879,8 +877,7 @@ TEST_CASE("Encrypted resource stores reject projects without key identities",
 
   holder::git::RealGitOps git;
   REQUIRE_THROWS_WITH(
-      holder::resource::LocationStore(db, nullptr, &git)
-                         .put(sample_location()),
+      holder::resource::LocationStore(db, nullptr, &git).put(sample_location()),
       Catch::Matchers::ContainsSubstring("encrypted project missing project_key_id")
   );
   REQUIRE_THROWS_WITH(
@@ -905,20 +902,19 @@ TEST_CASE("Encrypted resource stores reject projects without key identities",
   link.to_type = "resource";
   link.kind = "attachment";
   link.created_at = 1;
-  holder::card::LinkRepo(db).upsert_links(project.project_id, card.card_id,
-                                           {link});
+  holder::card::LinkRepo(db).upsert_links(project.project_id, card.card_id, {link});
   const auto card_path = std::filesystem::path(project.root_path) / card.rel_path;
-  write_text(card_path,
-             holder::core::render_card_front_matter(card, {link}, {}) + "body");
+  write_text(card_path, holder::core::render_card_front_matter(card, {link}, {}) + "body");
   REQUIRE_THROWS_WITH(
-      holder::resource::ResourceStore(db, nullptr, &git)
-                         .remove("resource-1234"),
+      holder::resource::ResourceStore(db, nullptr, &git).remove("resource-1234"),
       Catch::Matchers::ContainsSubstring("encrypted project missing project_key_id")
   );
 }
 
-TEST_CASE("Resource and Location stores rebuild after projection writes fail",
-          "[resource][rebuild]") {
+TEST_CASE(
+    "Resource and Location stores rebuild after projection writes fail",
+    "[resource][rebuild]"
+) {
   const auto dir = make_temp_dir();
   const auto project_root = dir / "project";
   holder::platform::Db db;
@@ -938,8 +934,7 @@ TEST_CASE("Resource and Location stores rebuild after projection writes fail",
     db.exec("CREATE TRIGGER block_location_put BEFORE INSERT ON storage_locations "
             "BEGIN SELECT RAISE(ABORT, 'blocked location put'); END;");
     REQUIRE_THROWS_WITH(
-        holder::resource::LocationStore(db, nullptr, &git)
-                           .put(sample_location()),
+        holder::resource::LocationStore(db, nullptr, &git).put(sample_location()),
         Catch::Matchers::ContainsSubstring("put location failed")
     );
   }
@@ -949,7 +944,10 @@ TEST_CASE("Resource and Location stores rebuild after projection writes fail",
     store.put(sample_location());
     db.exec("CREATE TRIGGER block_location_remove BEFORE DELETE ON storage_locations "
             "BEGIN SELECT RAISE(ABORT, 'blocked location remove'); END;");
-    REQUIRE_THROWS_WITH(store.remove("location-1234"), Catch::Matchers::ContainsSubstring("delete failed"));
+    REQUIRE_THROWS_WITH(
+        store.remove("location-1234"),
+        Catch::Matchers::ContainsSubstring("delete failed")
+    );
   }
 
   SECTION("resource put") {
@@ -957,8 +955,7 @@ TEST_CASE("Resource and Location stores rebuild after projection writes fail",
     db.exec("CREATE TRIGGER block_resource_put BEFORE INSERT ON resources "
             "BEGIN SELECT RAISE(ABORT, 'blocked resource put'); END;");
     REQUIRE_THROWS_WITH(
-        holder::resource::ResourceStore(db, nullptr, &git)
-                           .put(sample_bundle()),
+        holder::resource::ResourceStore(db, nullptr, &git).put(sample_bundle()),
         Catch::Matchers::ContainsSubstring("placement refers to unknown location location-")
     );
   }
@@ -969,6 +966,9 @@ TEST_CASE("Resource and Location stores rebuild after projection writes fail",
     store.put(sample_bundle());
     db.exec("CREATE TRIGGER block_resource_remove BEFORE DELETE ON resources "
             "BEGIN SELECT RAISE(ABORT, 'blocked resource remove'); END;");
-    REQUIRE_THROWS_WITH(store.remove("resource-1234"), Catch::Matchers::ContainsSubstring("delete failed"));
+    REQUIRE_THROWS_WITH(
+        store.remove("resource-1234"),
+        Catch::Matchers::ContainsSubstring("delete failed")
+    );
   }
 }

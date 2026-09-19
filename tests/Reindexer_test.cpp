@@ -137,7 +137,9 @@ TEST_CASE("Reindexer throws when ai messages query prepare fails", "[reindex]") 
   holder::index::Reindexer reindexer(db);
   REQUIRE_THROWS_WITH(
       reindexer.run(),
-      Catch::Matchers::ContainsSubstring("prepare reindex ai messages failed: no such table: ai_messages")
+      Catch::Matchers::ContainsSubstring(
+          "prepare reindex ai messages failed: no such table: ai_messages"
+      )
   );
 }
 

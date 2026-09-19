@@ -31,32 +31,31 @@ const std::string& project_key_id(const holder::model::Project& project) {
   return *project.project_key_id;
 }
 
-std::string encode_manifest(
-    const holder::model::Project& project,
-    const std::string& plaintext
-) {
+std::string encode_manifest(const holder::model::Project& project, const std::string& plaintext) {
   if (project.privacy_mode != "encrypted_git") return plaintext;
   return holder::privacy::encrypt_project_blob(
-      project.project_id, project_key_id(project), plaintext
+      project.project_id,
+      project_key_id(project),
+      plaintext
   );
 }
 
-std::string decode_manifest(
-    const holder::model::Project& project,
-    const std::string& raw
-) {
+std::string decode_manifest(const holder::model::Project& project, const std::string& raw) {
   if (project.privacy_mode != "encrypted_git") return raw;
   // project_key_id() itself is exercised by the missing-key removal test; GCC
   // assigns no counter to this split argument line.
   return holder::privacy::decrypt_project_blob(
-      project.project_id, project_key_id(project), raw // LCOV_EXCL_LINE
+      project.project_id,
+      project_key_id(project),
+      raw // LCOV_EXCL_LINE
   ); // LCOV_EXCL_LINE
 }
 
 long long now_epoch_seconds() {
   return std::chrono::duration_cast<std::chrono::seconds>(
              std::chrono::system_clock::now().time_since_epoch()
-  ).count();
+  )
+      .count();
 }
 
 } // namespace
@@ -104,8 +103,7 @@ void ResourceStore::put(const holder::model::ResourceBundle& bundle) {
   }
 }
 
-std::optional<holder::model::ResourceBundle> ResourceStore::get(
-    const std::string& resource_id
+std::optional<holder::model::ResourceBundle> ResourceStore::get(const std::string& resource_id
 ) const {
   return resource_repo_.get_bundle(resource_id);
 }
@@ -130,15 +128,20 @@ void ResourceStore::remove(const std::string& resource_id) {
     if (!card.has_value() || card->deleted_at.has_value()) continue;
     changed_cards.insert(backlink.from_card_id);
     const auto card_path = holder::core::card_rel_path(card->card_id);
-    if (card->rel_path != card_path) throw std::runtime_error("card rel_path does not match card_id");
+    if (card->rel_path != card_path)
+      throw std::runtime_error("card rel_path does not match card_id");
     const auto parsed = holder::core::parse_card_file(
         decode_manifest(project, fs_->read_file(git_->repo_dir() / card_path))
     );
     auto kept = parsed.links;
     kept.erase(
-        std::remove_if(kept.begin(), kept.end(), [&](const auto& link) {
-          return link.to_type == "resource" && link.to_card_id == resource_id;
-        }),
+        std::remove_if(
+            kept.begin(),
+            kept.end(),
+            [&](const auto& link) {
+              return link.to_type == "resource" && link.to_card_id == resource_id;
+            }
+        ),
         kept.end()
     );
     auto updated = *card;
@@ -164,7 +167,8 @@ void ResourceStore::remove(const std::string& resource_id) {
   try {
     holder::platform::Tx tx(db_);
     links.delete_links_to_typed(project.project_id, resource_id, "resource");
-    for (const auto& card_id : changed_cards) cards.touch_updated(card_id, now);
+    for (const auto& card_id : changed_cards)
+      cards.touch_updated(card_id, now);
     resource_repo_.remove(resource_id);
     tx.commit();
   } catch (...) {

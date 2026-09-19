@@ -12,8 +12,7 @@ namespace holder::sync {
 namespace {
 
 bool push_succeeded(holder::git::PushStatus status) {
-  return status == holder::git::PushStatus::Pushed ||
-         status == holder::git::PushStatus::UpToDate;
+  return status == holder::git::PushStatus::Pushed || status == holder::git::PushStatus::UpToDate;
 }
 
 std::optional<std::string> nonempty(const std::string& value) {
@@ -150,9 +149,8 @@ ProjectSyncResult run_project_sync(
     refresh_activity_best_effort(db, project, request.now);
   }
 
-  if (request.push &&
-      (!request.pull || result.pull.status == PullPhaseStatus::Succeeded ||
-       request.push_after_failed_pull)) {
+  if (request.push && (!request.pull || result.pull.status == PullPhaseStatus::Succeeded ||
+                       request.push_after_failed_pull)) {
     result.push.attempted = true;
     try {
       git.open_or_init(project.root_path);

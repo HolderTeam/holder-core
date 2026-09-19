@@ -22,7 +22,7 @@ std::vector<std::string> extract_tags(const std::string& markdown_body);
 struct TagOccurrence {
   std::string tag;
   std::size_t byte_start = 0; // Inclusive, at '#'.
-  std::size_t byte_end = 0;   // Exclusive, after the tag name.
+  std::size_t byte_end = 0; // Exclusive, after the tag name.
 };
 
 // Every valid occurrence, including repeats, with UTF-8 byte offsets into markdown_body.

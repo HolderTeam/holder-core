@@ -287,18 +287,24 @@ TEST_CASE("ProjectSyncRepo throws when sqlite handle is closed", "[sync][repo]")
 
   REQUIRE_THROWS_WITH(
       sync.get("proj-1"),
-      Catch::Matchers::ContainsSubstring("prepare get project sync state failed: unknown sqlite error")
+      Catch::Matchers::ContainsSubstring(
+          "prepare get project sync state failed: unknown sqlite error"
+      )
   );
   REQUIRE_THROWS_WITH(
       sync.update_activity_counts(
           "proj-1",
           {.uncommitted_changes_count = 1, .unpushed_commits_count = 1, .updated_at = 1}
       ),
-      Catch::Matchers::ContainsSubstring("prepare get project sync state failed: unknown sqlite error")
+      Catch::Matchers::ContainsSubstring(
+          "prepare get project sync state failed: unknown sqlite error"
+      )
   );
   REQUIRE_THROWS_WITH(
       sync.remove("proj-1"),
-      Catch::Matchers::ContainsSubstring("prepare delete project sync state failed: unknown sqlite error")
+      Catch::Matchers::ContainsSubstring(
+          "prepare delete project sync state failed: unknown sqlite error"
+      )
   );
 }
 

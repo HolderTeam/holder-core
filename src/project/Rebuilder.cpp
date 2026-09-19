@@ -2,8 +2,8 @@
 
 #include "ai/AiMessageFrontMatter.h"
 #include "ai/AiMessagePaths.h"
-#include "ai/AiThreadRepo.h"
 #include "ai/AiThreadManifest.h"
+#include "ai/AiThreadRepo.h"
 #include "card/CardFrontMatter.h"
 #include "card/CardPaths.h"
 #include "card/CardRepo.h"
@@ -141,8 +141,8 @@ struct CardRecord {
 
 bool is_sha256(const std::string& value) {
   return value.size() == 64 && std::all_of(value.begin(), value.end(), [](unsigned char ch) {
-    return std::isxdigit(ch) != 0;
-  });
+           return std::isxdigit(ch) != 0;
+         });
 }
 
 } // namespace
@@ -193,9 +193,15 @@ Rebuilder::RebuildStats Rebuilder::rebuild_project(const holder::model::Project&
       project.project_id
   );
   exec_delete_project(db_.handle(), "DELETE FROM ai_fts WHERE project_id = ?;", project.project_id);
-  exec_delete_project(db_.handle(), "DELETE FROM resources WHERE project_id = ?;", project.project_id);
   exec_delete_project(
-      db_.handle(), "DELETE FROM storage_locations WHERE project_id = ?;", project.project_id
+      db_.handle(),
+      "DELETE FROM resources WHERE project_id = ?;",
+      project.project_id
+  );
+  exec_delete_project(
+      db_.handle(),
+      "DELETE FROM storage_locations WHERE project_id = ?;",
+      project.project_id
   );
 
   holder::card::CardRepo card_repo(db_);
@@ -311,7 +317,8 @@ Rebuilder::RebuildStats Rebuilder::rebuild_project(const holder::model::Project&
     resource_repo.put_bundle(bundle);
     ++stats.resources;
     stats.assets += bundle.assets.size();
-    for (const auto& asset : bundle.assets) stats.placements += asset.placements.size();
+    for (const auto& asset : bundle.assets)
+      stats.placements += asset.placements.size();
   }
 
   const auto card_files = collect_files(root / "cards", ".md");
@@ -419,14 +426,16 @@ Rebuilder::RebuildStats Rebuilder::rebuild_project(const holder::model::Project&
         }
         const auto extracted_tags = holder::core::extract_tags(record.body);
         tag_repo.set_tags_for_card(
-            record.card.project_id, record.card.card_id, extracted_tags, record.card.created_at
+            record.card.project_id,
+            record.card.card_id,
+            extracted_tags,
+            record.card.created_at
         );
         stats.tags += extracted_tags.size();
 
         if (!record.milestones.empty()) {
-          milestone_repo.replace_for_card(
-              record.card.project_id, record.card.card_id, record.milestones
-          );
+          milestone_repo
+              .replace_for_card(record.card.project_id, record.card.card_id, record.milestones);
           stats.milestones += record.milestones.size();
         }
       }
@@ -568,7 +577,9 @@ Rebuilder::RebuildStats Rebuilder::rebuild_project(const holder::model::Project&
     for (const auto& [thread_id, times] : thread_times) {
       (void)times;
       if (durable_threads.find(thread_id) == durable_threads.end()) {
-        throw std::runtime_error("AI message refers to thread without durable manifest: " + thread_id);
+        throw std::runtime_error(
+            "AI message refers to thread without durable manifest: " + thread_id
+        );
       }
     }
     std::vector<std::string> ids;

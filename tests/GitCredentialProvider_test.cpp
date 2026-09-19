@@ -49,7 +49,8 @@ std::vector<unsigned char> dummy_p256_ssh_pubkey_blob() {
   EVP_PKEY_get_octet_string_param(key, OSSL_PKEY_PARAM_PUB_KEY, q.data(), q.size(), &q_len);
   EVP_PKEY_free(key);
 
-  auto append_ssh_string = [](std::vector<unsigned char>& out, const unsigned char* data, size_t len) {
+  auto append_ssh_string = [](std::vector<unsigned char>& out, const unsigned char* data, size_t len
+                           ) {
     out.push_back(static_cast<unsigned char>((len >> 24) & 0xFF));
     out.push_back(static_cast<unsigned char>((len >> 16) & 0xFF));
     out.push_back(static_cast<unsigned char>((len >> 8) & 0xFF));
@@ -68,7 +69,10 @@ std::vector<unsigned char> dummy_p256_ssh_pubkey_blob() {
 
 } // namespace
 
-TEST_CASE("EcdsaDerSigningCredentialProvider reshapes DER signature to SSH mpint wire format", "[git]") {
+TEST_CASE(
+    "EcdsaDerSigningCredentialProvider reshapes DER signature to SSH mpint wire format",
+    "[git]"
+) {
   using holder::git::EcdsaDerSigningCredentialProvider;
 
   SECTION("both r and s fit without padding") {
@@ -76,8 +80,24 @@ TEST_CASE("EcdsaDerSigningCredentialProvider reshapes DER signature to SSH mpint
     const auto wire = EcdsaDerSigningCredentialProvider::der_to_ssh_wire_signature_for_tests(der);
 
     const std::vector<unsigned char> expected = {
-        0x00, 0x00, 0x00, 0x05, 0x01, 0x02, 0x03, 0x04, 0x05, // mpint(r), no padding needed
-        0x00, 0x00, 0x00, 0x05, 0x06, 0x05, 0x04, 0x03, 0x02, // mpint(s), no padding needed
+        0x00,
+        0x00,
+        0x00,
+        0x05,
+        0x01,
+        0x02,
+        0x03,
+        0x04,
+        0x05, // mpint(r), no padding needed
+        0x00,
+        0x00,
+        0x00,
+        0x05,
+        0x06,
+        0x05,
+        0x04,
+        0x03,
+        0x02, // mpint(s), no padding needed
     };
     REQUIRE(wire == expected);
   }
@@ -89,20 +109,36 @@ TEST_CASE("EcdsaDerSigningCredentialProvider reshapes DER signature to SSH mpint
     const auto wire = EcdsaDerSigningCredentialProvider::der_to_ssh_wire_signature_for_tests(der);
 
     const std::vector<unsigned char> expected = {
-        0x00, 0x00, 0x00, 0x05, 0x00, 0x80, 0x01, 0x02, 0x03, // mpint(r), padded
-        0x00, 0x00, 0x00, 0x01, 0x01, // mpint(s), no padding needed
+        0x00,
+        0x00,
+        0x00,
+        0x05,
+        0x00,
+        0x80,
+        0x01,
+        0x02,
+        0x03, // mpint(r), padded
+        0x00,
+        0x00,
+        0x00,
+        0x01,
+        0x01, // mpint(s), no padding needed
     };
     REQUIRE(wire == expected);
   }
 
   SECTION("malformed DER yields an empty result") {
     const std::vector<unsigned char> not_der = {0xDE, 0xAD, 0xBE, 0xEF};
-    const auto wire = EcdsaDerSigningCredentialProvider::der_to_ssh_wire_signature_for_tests(not_der);
+    const auto wire = EcdsaDerSigningCredentialProvider::der_to_ssh_wire_signature_for_tests(not_der
+    );
     REQUIRE(wire.empty());
   }
 }
 
-TEST_CASE("EcdsaDerSigningCredentialProvider::sign_trampoline bridges sign_raw_ to libssh2's callback contract", "[git]") {
+TEST_CASE(
+    "EcdsaDerSigningCredentialProvider::sign_trampoline bridges sign_raw_ to libssh2's callback contract",
+    "[git]"
+) {
   // sign_trampoline never dereferences its LIBSSH2_SESSION* (the type is opaque -- see the
   // header's forward declaration), so it can be called directly without a real libssh2 session.
   using holder::git::EcdsaDerSigningCredentialProvider;
@@ -110,16 +146,19 @@ TEST_CASE("EcdsaDerSigningCredentialProvider::sign_trampoline bridges sign_raw_ 
   const unsigned char data[] = {0xAA};
 
   SECTION("converts a valid signature to SSH wire format and mallocs the output") {
-    EcdsaDerSigningCredentialProvider provider(
-        "git",
-        {0x01},
-        [](const unsigned char*, size_t) { return der_signature_from_hex_rs("0102030405", "0605040302"); }
-    );
+    EcdsaDerSigningCredentialProvider provider("git", {0x01}, [](const unsigned char*, size_t) {
+      return der_signature_from_hex_rs("0102030405", "0605040302");
+    });
     void* abstract = &provider;
     unsigned char* sig = nullptr;
     size_t sig_len = 0;
-    const int rc =
-        EcdsaDerSigningCredentialProvider::sign_trampoline_for_tests(&sig, &sig_len, data, sizeof(data), &abstract);
+    const int rc = EcdsaDerSigningCredentialProvider::sign_trampoline_for_tests(
+        &sig,
+        &sig_len,
+        data,
+        sizeof(data),
+        &abstract
+    );
     REQUIRE(rc == 0);
     REQUIRE(sig != nullptr);
     REQUIRE(sig_len > 0);
@@ -137,8 +176,13 @@ TEST_CASE("EcdsaDerSigningCredentialProvider::sign_trampoline bridges sign_raw_ 
     void* abstract = &provider;
     unsigned char* sig = nullptr;
     size_t sig_len = 0;
-    const int rc =
-        EcdsaDerSigningCredentialProvider::sign_trampoline_for_tests(&sig, &sig_len, data, sizeof(data), &abstract);
+    const int rc = EcdsaDerSigningCredentialProvider::sign_trampoline_for_tests(
+        &sig,
+        &sig_len,
+        data,
+        sizeof(data),
+        &abstract
+    );
     REQUIRE(rc == -1);
   }
 
@@ -146,13 +190,20 @@ TEST_CASE("EcdsaDerSigningCredentialProvider::sign_trampoline bridges sign_raw_ 
     EcdsaDerSigningCredentialProvider provider(
         "git",
         {0x01},
-        [](const unsigned char*, size_t) -> std::vector<unsigned char> { return {}; }
+        [](const unsigned char*, size_t) -> std::vector<unsigned char> {
+          return {};
+        }
     );
     void* abstract = &provider;
     unsigned char* sig = nullptr;
     size_t sig_len = 0;
-    const int rc =
-        EcdsaDerSigningCredentialProvider::sign_trampoline_for_tests(&sig, &sig_len, data, sizeof(data), &abstract);
+    const int rc = EcdsaDerSigningCredentialProvider::sign_trampoline_for_tests(
+        &sig,
+        &sig_len,
+        data,
+        sizeof(data),
+        &abstract
+    );
     REQUIRE(rc == -1);
   }
 
@@ -160,13 +211,20 @@ TEST_CASE("EcdsaDerSigningCredentialProvider::sign_trampoline bridges sign_raw_ 
     EcdsaDerSigningCredentialProvider provider(
         "git",
         {0x01},
-        [](const unsigned char*, size_t) -> std::vector<unsigned char> { return {0xDE, 0xAD, 0xBE, 0xEF}; }
+        [](const unsigned char*, size_t) -> std::vector<unsigned char> {
+          return {0xDE, 0xAD, 0xBE, 0xEF};
+        }
     );
     void* abstract = &provider;
     unsigned char* sig = nullptr;
     size_t sig_len = 0;
-    const int rc =
-        EcdsaDerSigningCredentialProvider::sign_trampoline_for_tests(&sig, &sig_len, data, sizeof(data), &abstract);
+    const int rc = EcdsaDerSigningCredentialProvider::sign_trampoline_for_tests(
+        &sig,
+        &sig_len,
+        data,
+        sizeof(data),
+        &abstract
+    );
     REQUIRE(rc == -1);
   }
 }
@@ -191,7 +249,8 @@ TEST_CASE("EcdsaDerSigningCredentialProvider only handles GIT_CREDENTIAL_SSH_CUS
 
   SECTION("declines when SSH_CUSTOM is not offered") {
     git_credential* cred = nullptr;
-    const bool produced = provider.acquire(&cred, "ssh://example.invalid/repo.git", "git", GIT_CREDENTIAL_SSH_KEY);
+    const bool produced =
+        provider.acquire(&cred, "ssh://example.invalid/repo.git", "git", GIT_CREDENTIAL_SSH_KEY);
     REQUIRE_FALSE(produced);
     REQUIRE(cred == nullptr);
     REQUIRE_FALSE(sign_called);
@@ -203,12 +262,16 @@ TEST_CASE("EcdsaDerSigningCredentialProvider only handles GIT_CREDENTIAL_SSH_CUS
         provider.acquire(&cred, "ssh://example.invalid/repo.git", "git", GIT_CREDENTIAL_SSH_CUSTOM);
     REQUIRE(produced);
     REQUIRE(cred != nullptr);
-    REQUIRE_FALSE(sign_called); // acquire() only builds the credential; signing happens later, during auth.
+    REQUIRE_FALSE(sign_called
+    ); // acquire() only builds the credential; signing happens later, during auth.
     git_credential_free(cred);
   }
 }
 
-TEST_CASE("EcdsaDerSigningCredentialProvider prefers the URL's username over its default", "[git]") {
+TEST_CASE(
+    "EcdsaDerSigningCredentialProvider prefers the URL's username over its default",
+    "[git]"
+) {
   // See the identical comment in the "only handles GIT_CREDENTIAL_SSH_CUSTOM" test above.
   git_libgit2_init();
   using holder::git::EcdsaDerSigningCredentialProvider;
@@ -216,32 +279,46 @@ TEST_CASE("EcdsaDerSigningCredentialProvider prefers the URL's username over its
   EcdsaDerSigningCredentialProvider provider(
       "git",
       dummy_p256_ssh_pubkey_blob(),
-      [](const unsigned char*, size_t) -> std::vector<unsigned char> { return {}; }
+      [](const unsigned char*, size_t) -> std::vector<unsigned char> {
+        return {};
+      }
   );
 
   SECTION("URL supplies a username") {
     git_credential* cred = nullptr;
-    REQUIRE(provider.acquire(&cred, "ssh://zeth@example.invalid/repo.git", "zeth", GIT_CREDENTIAL_SSH_CUSTOM));
+    REQUIRE(provider.acquire(
+        &cred,
+        "ssh://zeth@example.invalid/repo.git",
+        "zeth",
+        GIT_CREDENTIAL_SSH_CUSTOM
+    ));
     REQUIRE(std::string(git_credential_get_username(cred)) == "zeth");
     git_credential_free(cred);
   }
 
   SECTION("URL has no username: falls back to the provider's default") {
     git_credential* cred = nullptr;
-    REQUIRE(provider.acquire(&cred, "ssh://example.invalid/repo.git", "", GIT_CREDENTIAL_SSH_CUSTOM));
+    REQUIRE(provider.acquire(&cred, "ssh://example.invalid/repo.git", "", GIT_CREDENTIAL_SSH_CUSTOM)
+    );
     REQUIRE(std::string(git_credential_get_username(cred)) == "git");
     git_credential_free(cred);
   }
 
   SECTION("URL username is null: falls back to the provider's default") {
     git_credential* cred = nullptr;
-    REQUIRE(provider.acquire(&cred, "ssh://example.invalid/repo.git", nullptr, GIT_CREDENTIAL_SSH_CUSTOM));
+    REQUIRE(
+        provider
+            .acquire(&cred, "ssh://example.invalid/repo.git", nullptr, GIT_CREDENTIAL_SSH_CUSTOM)
+    );
     REQUIRE(std::string(git_credential_get_username(cred)) == "git");
     git_credential_free(cred);
   }
 }
 
-TEST_CASE("GitRepo defaults to an SshAgentAndFileCredentialProvider and honors set_credential_provider", "[git]") {
+TEST_CASE(
+    "GitRepo defaults to an SshAgentAndFileCredentialProvider and honors set_credential_provider",
+    "[git]"
+) {
   holder::git::GitRepo repo;
   REQUIRE(repo.credential_provider_for_tests() != nullptr);
 

@@ -29,9 +29,7 @@ static std::runtime_error git_err(const std::string& what, int rc) {
   return std::runtime_error(msg);
 }
 
-static std::string oid_to_hex(const git_oid& oid) {
-  return std::string(git_oid_tostr_s(&oid));
-}
+static std::string oid_to_hex(const git_oid& oid) { return std::string(git_oid_tostr_s(&oid)); }
 
 static const git_oid* tree_entry_oid_or_null(
     git_tree* tree,
@@ -72,9 +70,9 @@ static bool commit_changes_path(
   git_tree_entry* parent_entry = nullptr;
   const git_oid* oid = tree_entry_oid_or_null(tree, relative_path, &entry);
   const git_oid* parent_oid = tree_entry_oid_or_null(parent_tree, relative_path, &parent_entry);
-  const bool changed =
-      (oid == nullptr) != (parent_oid == nullptr) ||
-      (oid != nullptr && parent_oid != nullptr && git_oid_equal(oid, parent_oid) == 0);
+  const bool changed = (oid == nullptr) != (parent_oid == nullptr) ||
+                       (oid != nullptr && parent_oid != nullptr &&
+                        git_oid_equal(oid, parent_oid) == 0);
 
   git_tree_entry_free(entry);
   git_tree_entry_free(parent_entry);
@@ -85,10 +83,7 @@ static bool commit_changes_path(
   return changed;
 }
 
-static std::vector<std::string> commit_changed_paths(
-    git_repository* repo,
-    git_commit* commit
-) {
+static std::vector<std::string> commit_changed_paths(git_repository* repo, git_commit* commit) {
   git_tree* tree = nullptr;
   int rc = git_commit_tree(&tree, commit);
   if (rc != 0) throw git_err("git_commit_tree failed", rc);
@@ -120,7 +115,8 @@ static std::vector<std::string> commit_changed_paths(
     const auto* delta = git_diff_get_delta(diff, i);
     if (delta->old_file.path != nullptr) paths.emplace_back(delta->old_file.path);
     if (delta->new_file.path != nullptr &&
-        (delta->old_file.path == nullptr || std::string_view(delta->new_file.path) != delta->old_file.path)) {
+        (delta->old_file.path == nullptr ||
+         std::string_view(delta->new_file.path) != delta->old_file.path)) {
       // Rename detection is not requested for this diff, so libgit2 emits
       // separate add/delete deltas. Keep support for rename-enabled backends.
       paths.emplace_back(delta->new_file.path); // LCOV_EXCL_LINE
@@ -132,7 +128,11 @@ static std::vector<std::string> commit_changed_paths(
   return paths;
 } // LCOV_EXCL_LINE - excluded rename arm leaves a synthetic end counter.
 
-static GitHistoryCommit history_commit_from(git_repository* repo, git_commit* commit, const git_oid& oid) {
+static GitHistoryCommit history_commit_from(
+    git_repository* repo,
+    git_commit* commit,
+    const git_oid& oid
+) {
   GitHistoryCommit item;
   item.oid = oid_to_hex(oid);
   const auto parent_count = git_commit_parentcount(commit);
@@ -334,14 +334,17 @@ struct PushCallbackPayload {
 static git_remote_callbacks make_push_callbacks(PushCallbackPayload& payload) {
   auto callbacks = make_remote_callbacks(payload.credentials);
   callbacks.payload = &payload;
-  callbacks.credentials = [](git_credential** out, // LCOV_EXCL_START - thin adapter over the covered git_credential_acquire_cb; libgit2 only calls it when a push transport asks for credentials, which local file remotes never do.
-                             const char* url,
-                             const char* username,
-                             unsigned int allowed_types,
-                             void* data) {
-    auto& push = *static_cast<PushCallbackPayload*>(data);
-    return git_credential_acquire_cb(out, url, username, allowed_types, push.credentials);
-  }; // LCOV_EXCL_STOP
+  callbacks.credentials =
+      [](git_credential** out, // LCOV_EXCL_START - thin adapter over the covered
+                               // git_credential_acquire_cb; libgit2 only calls it when a push
+                               // transport asks for credentials, which local file remotes never do.
+         const char* url,
+         const char* username,
+         unsigned int allowed_types,
+         void* data) {
+        auto& push = *static_cast<PushCallbackPayload*>(data);
+        return git_credential_acquire_cb(out, url, username, allowed_types, push.credentials);
+      }; // LCOV_EXCL_STOP
   callbacks.push_negotiation = [](const git_push_update** updates, size_t count, void* data) {
     auto& push = *static_cast<PushCallbackPayload*>(data);
     // Negotiation compares actual remote refs with the requested refs, without
@@ -468,7 +471,8 @@ static std::vector<ChangedPath> diff_changed_paths(
   for (size_t i = 0; i < n; ++i) {
     const git_diff_delta* delta = git_diff_get_delta(diff, i);
     const char* path = delta->new_file.path ? delta->new_file.path : delta->old_file.path;
-    const auto type = delta->status == GIT_DELTA_DELETED ? ChangeType::Deleted : ChangeType::AddedOrModified;
+    const auto type = delta->status == GIT_DELTA_DELETED ? ChangeType::Deleted
+                                                         : ChangeType::AddedOrModified;
     result.push_back({std::string(path), type});
   }
   git_diff_free(diff);
@@ -491,7 +495,8 @@ void ensure_libgit2_initialized() {
 
 } // namespace
 
-GitRepo::GitRepo() : credential_provider_(std::make_shared<SshAgentAndFileCredentialProvider>()) {
+GitRepo::GitRepo()
+    : credential_provider_(std::make_shared<SshAgentAndFileCredentialProvider>()) {
   ensure_libgit2_initialized();
 }
 
@@ -831,7 +836,8 @@ static RemoteProbeResult probe_connection(git_remote* remote, GitCredentialProvi
   const git_remote_head** heads = nullptr;
   size_t heads_len = 0;
   const int ls_rc = git_remote_ls(&heads, &heads_len, remote);
-  if (ls_rc != 0) { // LCOV_EXCL_START - transport failure classification needs libgit2 transport injection.
+  if (ls_rc !=
+      0) { // LCOV_EXCL_START - transport failure classification needs libgit2 transport injection.
     const std::string error = git_error_message_or_default("git_remote_ls failed");
     const auto status = classify_remote_probe_error(error);
     git_remote_disconnect(remote);
@@ -872,7 +878,8 @@ RemoteProbeResult GitRepo::probe_remote(const std::string& name) {
 RemoteProbeResult GitRepo::probe_remote_url(const std::string& url) {
   if (url.empty()) return {RemoteProbeStatus::RemoteUnset, false, "Remote URL is not configured."};
   git_remote* remote = nullptr;
-  if (git_remote_create_detached(&remote, url.c_str()) != 0) { // LCOV_EXCL_START - libgit2 parser failure needs backend injection.
+  if (git_remote_create_detached(&remote, url.c_str()) !=
+      0) { // LCOV_EXCL_START - libgit2 parser failure needs backend injection.
     return {
         RemoteProbeStatus::InvalidRemoteUrl,
         false,
@@ -911,7 +918,8 @@ PushResult GitRepo::push_branch(
         .behind_count = 0,
         .local_head_commit = local_head_commit,
         .error_message = "Remote not configured: " + name,
-    }; // LCOV_EXCL_LINE - gcov artefact: designated-initializer closer is executed but never counted.
+    }; // LCOV_EXCL_LINE - gcov artefact: designated-initializer closer is executed but never
+       // counted.
   }
   if (lookup != 0) {
     return {
@@ -933,7 +941,8 @@ PushResult GitRepo::push_branch(
         .behind_count = 0,
         .local_head_commit = local_head_commit,
         .error_message = {},
-    }; // LCOV_EXCL_LINE - gcov artefact: designated-initializer closer is executed but never counted.
+    }; // LCOV_EXCL_LINE - gcov artefact: designated-initializer closer is executed but never
+       // counted.
   }
   if (rc != 0) {
     return push_head_error_result(remote, local_head_commit); // LCOV_EXCL_LINE
@@ -960,7 +969,8 @@ PushResult GitRepo::push_branch(
         .behind_count = 0,
         .local_head_commit = local_head_commit,
         .error_message = error,
-    }; // LCOV_EXCL_LINE - gcov artefact: designated-initializer closer is executed but never counted.
+    }; // LCOV_EXCL_LINE - gcov artefact: designated-initializer closer is executed but never
+       // counted.
   }
 
   if (set_upstream) {
@@ -1119,7 +1129,8 @@ GitRepo::DivergedMergeResult GitRepo::merge_remote_taking_theirs_for_conflicts(
   const auto remote_changes = diff_changed_paths(repo, merge_base_oid, remote_oid);
 
   std::set<std::string> remote_changed_set;
-  for (const auto& c : remote_changes) remote_changed_set.insert(c.path);
+  for (const auto& c : remote_changes)
+    remote_changed_set.insert(c.path);
 
   std::vector<std::string> conflicted;
   std::vector<ChangedPath> local_only;
@@ -1138,7 +1149,8 @@ GitRepo::DivergedMergeResult GitRepo::merge_remote_taking_theirs_for_conflicts(
   checkout_commit_oid(repo, remote_oid);
 
   const char* wd = git_repository_workdir(repo);
-  if (!wd) throw std::runtime_error("Repository has no working directory (bare?)"); // LCOV_EXCL_LINE
+  if (!wd)
+    throw std::runtime_error("Repository has no working directory (bare?)"); // LCOV_EXCL_LINE
 
   for (const auto& c : local_only) {
     if (c.type == ChangeType::Deleted) {
@@ -1200,7 +1212,7 @@ GitRepo::DivergedMergeResult GitRepo::merge_remote_taking_theirs_for_conflicts(
   make_signature(reinterpret_cast<void**>(&sig));
 
   const std::string message = "Merge " + name + ": keep remote for " +
-      std::to_string(conflicted.size()) + " conflicting card(s)";
+                              std::to_string(conflicted.size()) + " conflicting card(s)";
 
   git_oid merge_commit_oid{};
   rc = git_commit_create_v(
@@ -1289,7 +1301,8 @@ std::vector<std::string> GitRepo::commit_parent_oids(const std::string& commit_o
   auto* repo = reinterpret_cast<git_repository*>(repo_);
 
   git_oid oid{};
-  if (git_oid_fromstr(&oid, commit_oid_hex.c_str()) != 0) { // LCOV_EXCL_START - invalid OIDs are rejected at API boundary.
+  if (git_oid_fromstr(&oid, commit_oid_hex.c_str()) !=
+      0) { // LCOV_EXCL_START - invalid OIDs are rejected at API boundary.
     throw std::invalid_argument("commit_oid_hex is invalid");
   } // LCOV_EXCL_STOP
 
@@ -1323,8 +1336,7 @@ GitHistoryPage GitRepo::history_for_paths(
   if (rc != 0) throw git_err("git_revwalk_new failed", rc);
   git_revwalk_sorting(walk, GIT_SORT_TOPOLOGICAL | GIT_SORT_TIME);
   rc = git_revwalk_push_head(walk);
-  if (rc == GIT_EUNBORNBRANCH || rc == GIT_ENOTFOUND ||
-      git_repository_is_empty(repo) == 1) {
+  if (rc == GIT_EUNBORNBRANCH || rc == GIT_ENOTFOUND || git_repository_is_empty(repo) == 1) {
     git_revwalk_free(walk);
     return page;
   }
@@ -1354,7 +1366,7 @@ GitHistoryPage GitRepo::history_for_paths(
     if (lookup_rc != 0) {
       // A successful revwalk_next has already resolved this object. Lookup can
       // fail only if another process deletes/corrupts it between the two calls.
-      git_revwalk_free(walk);                              // LCOV_EXCL_LINE
+      git_revwalk_free(walk); // LCOV_EXCL_LINE
       throw git_err("git_commit_lookup failed", lookup_rc); // LCOV_EXCL_LINE
     }
 
@@ -1395,7 +1407,8 @@ GitHistoryPage GitRepo::history_for_paths(
       item.authored_at = static_cast<long long>(author->when.time);
     }
     item.committed_at = static_cast<long long>(git_commit_time(commit));
-    if (const auto* message = git_commit_message(commit); message != nullptr) item.message = message;
+    if (const auto* message = git_commit_message(commit); message != nullptr)
+      item.message = message;
     page.commits.push_back(std::move(item));
     git_commit_free(commit);
   }
@@ -1423,8 +1436,7 @@ GitHistoryPage GitRepo::history_all(
   if (rc != 0) throw git_err("git_revwalk_new failed", rc);
   git_revwalk_sorting(walk, GIT_SORT_TOPOLOGICAL | GIT_SORT_TIME);
   rc = git_revwalk_push_head(walk);
-  if (rc == GIT_EUNBORNBRANCH || rc == GIT_ENOTFOUND ||
-      git_repository_is_empty(repo) == 1) {
+  if (rc == GIT_EUNBORNBRANCH || rc == GIT_ENOTFOUND || git_repository_is_empty(repo) == 1) {
     git_revwalk_free(walk);
     return page;
   }
@@ -1453,7 +1465,7 @@ GitHistoryPage GitRepo::history_all(
     const int lookup_rc = git_commit_lookup(&commit, repo, &oid);
     if (lookup_rc != 0) {
       // Same atomic object-database invariant as history_for_paths above.
-      git_revwalk_free(walk);                              // LCOV_EXCL_LINE
+      git_revwalk_free(walk); // LCOV_EXCL_LINE
       throw git_err("git_commit_lookup failed", lookup_rc); // LCOV_EXCL_LINE
     }
     if (page.commits.size() == limit) {

@@ -9,8 +9,8 @@
 #include <string>
 #include <vector>
 
-using holder::core::extract_tags;
 using holder::core::extract_tag_occurrences;
+using holder::core::extract_tags;
 
 TEST_CASE("extract_tags finds a single bare tag", "[tag_extractor]") {
   REQUIRE(extract_tags("#todo") == std::vector<std::string>{"todo"});
@@ -32,9 +32,15 @@ TEST_CASE("extract_tag_occurrences returns exact byte ranges and repeats", "[tag
   const auto occurrences = extract_tag_occurrences(body);
   REQUIRE(occurrences.size() == 3);
   REQUIRE(occurrences[0].tag == "todo");
-  REQUIRE(body.substr(occurrences[0].byte_start, occurrences[0].byte_end - occurrences[0].byte_start) == "#Todo");
+  REQUIRE(
+      body.substr(occurrences[0].byte_start, occurrences[0].byte_end - occurrences[0].byte_start) ==
+      "#Todo"
+  );
   REQUIRE(occurrences[1].tag == "sync");
-  REQUIRE(body.substr(occurrences[1].byte_start, occurrences[1].byte_end - occurrences[1].byte_start) == "#sync");
+  REQUIRE(
+      body.substr(occurrences[1].byte_start, occurrences[1].byte_end - occurrences[1].byte_start) ==
+      "#sync"
+  );
   REQUIRE(occurrences[2].tag == "todo");
 }
 
@@ -43,7 +49,10 @@ TEST_CASE("extract_tag_occurrences omits Markdown code and other hash uses", "[t
   const auto occurrences = extract_tag_occurrences(body);
   REQUIRE(occurrences.size() == 1);
   REQUIRE(occurrences[0].tag == "yes");
-  REQUIRE(body.substr(occurrences[0].byte_start, occurrences[0].byte_end - occurrences[0].byte_start) == "#yes");
+  REQUIRE(
+      body.substr(occurrences[0].byte_start, occurrences[0].byte_end - occurrences[0].byte_start) ==
+      "#yes"
+  );
 }
 
 TEST_CASE("extract_tags does not treat an ATX heading marker as a tag", "[tag_extractor]") {
@@ -95,7 +104,10 @@ TEST_CASE("extract_tags rejects hex-color-length all-hex-digit candidates", "[ta
   REQUIRE(extract_tags("#FFFFFFFF").empty());
 }
 
-TEST_CASE("extract_tags keeps a tag that merely happens to be hex-charset but wrong length", "[tag_extractor]") {
+TEST_CASE(
+    "extract_tags keeps a tag that merely happens to be hex-charset but wrong length",
+    "[tag_extractor]"
+) {
   // 5 hex-looking characters -- not a valid CSS color length, so it's a real tag.
   REQUIRE(extract_tags("#deadb") == std::vector<std::string>{"deadb"});
 }
@@ -104,11 +116,17 @@ TEST_CASE("extract_tags ignores a tag-looking string inside inline code", "[tag_
   REQUIRE(extract_tags("`#not-a-tag`").empty());
 }
 
-TEST_CASE("extract_tags ignores a tag-looking string inside a fenced code block", "[tag_extractor]") {
+TEST_CASE(
+    "extract_tags ignores a tag-looking string inside a fenced code block",
+    "[tag_extractor]"
+) {
   REQUIRE(extract_tags("```\n#not-a-tag\n```").empty());
 }
 
-TEST_CASE("extract_tags ignores a tag-looking string inside an indented code block", "[tag_extractor]") {
+TEST_CASE(
+    "extract_tags ignores a tag-looking string inside an indented code block",
+    "[tag_extractor]"
+) {
   REQUIRE(extract_tags("    #not-a-tag").empty());
 }
 
@@ -140,7 +158,10 @@ TEST_CASE("is_valid_tag accepts a plain lowercase tag", "[tag_extractor]") {
   REQUIRE(is_valid_tag("android"));
 }
 
-TEST_CASE("is_valid_tag accepts hyphens, underscores and digits after the first letter", "[tag_extractor]") {
+TEST_CASE(
+    "is_valid_tag accepts hyphens, underscores and digits after the first letter",
+    "[tag_extractor]"
+) {
   REQUIRE(is_valid_tag("work_in-progress2"));
 }
 
@@ -157,7 +178,10 @@ TEST_CASE("is_valid_tag rejects characters outside the tag alphabet", "[tag_extr
   REQUIRE_FALSE(is_valid_tag("has.dot"));
 }
 
-TEST_CASE("is_valid_tag rejects hex-color-length candidates, matching extract_tags", "[tag_extractor]") {
+TEST_CASE(
+    "is_valid_tag rejects hex-color-length candidates, matching extract_tags",
+    "[tag_extractor]"
+) {
   REQUIRE_FALSE(is_valid_tag("ff8800"));
   REQUIRE_FALSE(is_valid_tag("deadbeef"));
 }

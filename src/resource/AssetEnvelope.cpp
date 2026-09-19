@@ -27,7 +27,8 @@ constexpr std::size_t kChunkSize = 64 * 1024;
 
 class Sha256 {
  public:
-  Sha256() : context_(EVP_MD_CTX_new(), EVP_MD_CTX_free) {
+  Sha256()
+      : context_(EVP_MD_CTX_new(), EVP_MD_CTX_free) {
     // OpenSSL's SHA-256 implementation accepts this fixed digest and null
     // engine; failures here are allocation/provider failures outside our
     // injectable boundary.
@@ -50,7 +51,8 @@ class Sha256 {
     }
     std::ostringstream out;
     out << std::hex << std::setfill('0');
-    for (unsigned int index = 0; index < size; ++index) out << std::setw(2) << +digest[index];
+    for (unsigned int index = 0; index < size; ++index)
+      out << std::setw(2) << +digest[index];
     return out.str();
   }
 
@@ -75,7 +77,13 @@ void make_private(const std::filesystem::path& path) {
 #endif
 }
 
-void write_bytes(std::ofstream& out, Sha256& hash, long long& size, const void* data, std::size_t n) {
+void write_bytes(
+    std::ofstream& out,
+    Sha256& hash,
+    long long& size,
+    const void* data,
+    std::size_t n
+) {
   out.write(static_cast<const char*>(data), static_cast<std::streamsize>(n));
   if (!out) throw std::runtime_error("failed to write staged asset");
   hash.update(data, n);
@@ -162,7 +170,8 @@ StagedAsset stage_asset_file(
   if (!input) throw std::runtime_error("failed to open asset source: " + source.string());
   std::filesystem::create_directories(destination.parent_path());
   std::ofstream output(destination, std::ios::binary | std::ios::trunc);
-  if (!output) throw std::runtime_error("failed to open asset staging file: " + destination.string());
+  if (!output)
+    throw std::runtime_error("failed to open asset staging file: " + destination.string());
   make_private(destination);
 
   Sha256 plain_hash;
@@ -177,7 +186,13 @@ StagedAsset stage_asset_file(
       const auto count = input.gcount();
       if (count > 0) {
         plain_hash.update(buffer.data(), static_cast<std::size_t>(count));
-        write_bytes(output, stored_hash, stored_size, buffer.data(), static_cast<std::size_t>(count));
+        write_bytes(
+            output,
+            stored_hash,
+            stored_size,
+            buffer.data(),
+            static_cast<std::size_t>(count)
+        );
         plain_size += count;
       }
     }
@@ -188,10 +203,12 @@ StagedAsset stage_asset_file(
 
   ensure_sodium();
   const auto header_json = authenticated_header(project, resource_id, asset_id).dump();
-  const auto key = holder::privacy::load_project_key_bytes(project.project_id, require_key_id(project));
+  const auto key =
+      holder::privacy::load_project_key_bytes(project.project_id, require_key_id(project));
   crypto_secretstream_xchacha20poly1305_state state{};
   std::array<unsigned char, crypto_secretstream_xchacha20poly1305_HEADERBYTES> stream_header{};
-  if (crypto_secretstream_xchacha20poly1305_init_push(&state, stream_header.data(), key.data()) != 0) {
+  if (crypto_secretstream_xchacha20poly1305_init_push(&state, stream_header.data(), key.data()) !=
+      0) {
     // libsodium documents init_push failure only for invalid runtime state;
     // state/header/key sizes here are compile-time library constants.
     throw std::runtime_error("failed to initialise HolderAsset1 encryption"); // LCOV_EXCL_LINE
@@ -204,9 +221,7 @@ StagedAsset stage_asset_file(
 
   std::vector<unsigned char> current(kChunkSize);
   std::vector<unsigned char> next(kChunkSize);
-  input.read(
-      reinterpret_cast<char*>(current.data()), static_cast<std::streamsize>(current.size())
-  );
+  input.read(reinterpret_cast<char*>(current.data()), static_cast<std::streamsize>(current.size()));
   std::size_t current_size = static_cast<std::size_t>(input.gcount());
   if (current_size == 0) {
     std::array<unsigned char, crypto_secretstream_xchacha20poly1305_ABYTES> cipher{};
@@ -225,9 +240,7 @@ StagedAsset stage_asset_file(
     write_bytes(output, stored_hash, stored_size, cipher.data(), cipher_size);
   } else {
     while (true) {
-      input.read(
-          reinterpret_cast<char*>(next.data()), static_cast<std::streamsize>(next.size())
-      );
+      input.read(reinterpret_cast<char*>(next.data()), static_cast<std::streamsize>(next.size()));
       const std::size_t next_size = static_cast<std::size_t>(input.gcount());
       const bool final = next_size == 0;
       plain_hash.update(current.data(), current_size);
@@ -260,7 +273,8 @@ StagedAsset stage_asset_file(
   if (!input.eof()) throw std::runtime_error("failed while reading asset source");
   output.close();
   return {
-      "holder_asset_v1", // LCOV_EXCL_LINE - gcov artefact: aggregate return initializer is executed but never counted.
+      "holder_asset_v1", // LCOV_EXCL_LINE - gcov artefact: aggregate return initializer is executed
+                         // but never counted.
       {plain_size, plain_hash.finish()},
       {stored_size, stored_hash.finish()},
   };
@@ -311,7 +325,8 @@ void recover_asset_file(
     if (input.gcount() != static_cast<std::streamsize>(header_json.size())) {
       throw std::runtime_error("truncated HolderAsset1 metadata");
     }
-    if (nlohmann::json::parse(header_json) != authenticated_header(project, resource_id, asset_id)) {
+    if (nlohmann::json::parse(header_json) !=
+        authenticated_header(project, resource_id, asset_id)) {
       throw std::runtime_error("HolderAsset1 identity mismatch");
     }
     std::array<unsigned char, crypto_secretstream_xchacha20poly1305_HEADERBYTES> stream_header{};
@@ -319,9 +334,11 @@ void recover_asset_file(
     if (input.gcount() != static_cast<std::streamsize>(stream_header.size())) {
       throw std::runtime_error("truncated HolderAsset1 stream header");
     }
-    const auto key = holder::privacy::load_project_key_bytes(project.project_id, require_key_id(project));
+    const auto key =
+        holder::privacy::load_project_key_bytes(project.project_id, require_key_id(project));
     crypto_secretstream_xchacha20poly1305_state state{};
-    if (crypto_secretstream_xchacha20poly1305_init_pull(&state, stream_header.data(), key.data()) != 0) {
+    if (crypto_secretstream_xchacha20poly1305_init_pull(&state, stream_header.data(), key.data()) !=
+        0) {
       // init_pull has no content-validation failure for correctly-sized inputs;
       // authentication is checked by pull below.
       throw std::runtime_error("failed to initialise HolderAsset1 decryption"); // LCOV_EXCL_LINE
@@ -335,7 +352,8 @@ void recover_asset_file(
       }
       std::vector<unsigned char> cipher(cipher_size);
       input.read(
-          reinterpret_cast<char*>(cipher.data()), static_cast<std::streamsize>(cipher.size())
+          reinterpret_cast<char*>(cipher.data()),
+          static_cast<std::streamsize>(cipher.size())
       );
       if (input.gcount() != static_cast<std::streamsize>(cipher.size())) {
         throw std::runtime_error("truncated HolderAsset1 chunk");
@@ -361,7 +379,8 @@ void recover_asset_file(
         throw std::runtime_error("unsupported HolderAsset1 stream tag"); // LCOV_EXCL_LINE
       }
       output.write(
-          reinterpret_cast<const char*>(plain.data()), static_cast<std::streamsize>(plain_count)
+          reinterpret_cast<const char*>(plain.data()),
+          static_cast<std::streamsize>(plain_count)
       );
       if (!output) throw std::runtime_error("failed to write recovered asset");
       plain_hash.update(plain.data(), static_cast<std::size_t>(plain_count));

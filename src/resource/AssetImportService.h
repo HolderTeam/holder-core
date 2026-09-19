@@ -45,10 +45,7 @@ class AssetImportService {
       std::function<void(AssetImportStage)> on_stage = {}
   );
 
-  AssetImportResult import_file(
-      const AssetImportRequest& request,
-      StorageProvider& provider
-  );
+  AssetImportResult import_file(const AssetImportRequest& request, StorageProvider& provider);
 
   void retrieve(
       const std::string& resource_id,
