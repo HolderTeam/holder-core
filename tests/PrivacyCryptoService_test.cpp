@@ -115,6 +115,38 @@ TEST_CASE("PrivacyCryptoService rejects invalid key base64 length", "[privacy]")
   REQUIRE_THROWS_AS(holder::privacy::key_from_base64("AQ=="), holder::privacy::PrivacyError);
 }
 
+TEST_CASE("PrivacyCryptoService rejects malformed base64 as an invalid envelope", "[privacy]") {
+  const auto key = holder::privacy::generate_random_key();
+  const auto expect_invalid_base64 = [](const auto& call) {
+    try {
+      call();
+      FAIL("Expected privacy error");
+    } catch (const holder::privacy::PrivacyError& ex) {
+      REQUIRE(ex.code() == holder::privacy::PrivacyErrorCode::EnvelopeInvalid);
+      REQUIRE(std::string(ex.what()) == "invalid base64 in privacy envelope");
+    }
+  };
+
+  // '!' is outside the Base64 alphabet, so this is malformed input rather than a wrong-length key
+  // (which "AQ==" above covers). It is reachable from user-supplied keys and checked-out files, so
+  // it must be reported as an invalid envelope, not treated as an internal crypto failure.
+  expect_invalid_base64([] { (void)holder::privacy::key_from_base64("!"); });
+
+  auto bad_iv = split_lines3(holder::privacy::encrypt_envelope_v1("hello", key, "key-1"));
+  auto meta = nlohmann::json::parse(bad_iv[1]);
+  meta["iv_b64"] = "!!!!";
+  bad_iv[1] = meta.dump();
+  expect_invalid_base64([&] {
+    (void)holder::privacy::decrypt_envelope_v1(join_lines3(bad_iv), key, "");
+  });
+
+  auto bad_ciphertext = split_lines3(holder::privacy::encrypt_envelope_v1("hello", key, "key-1"));
+  bad_ciphertext[2] = "!!!!";
+  expect_invalid_base64([&] {
+    (void)holder::privacy::decrypt_envelope_v1(join_lines3(bad_ciphertext), key, "");
+  });
+}
+
 TEST_CASE("PrivacyCryptoService rejects empty key_id on encrypt", "[privacy]") {
   const auto key = holder::privacy::generate_random_key();
   REQUIRE_THROWS_AS(

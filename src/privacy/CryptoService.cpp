@@ -53,12 +53,12 @@ std::vector<unsigned char> b64_decode(const std::string& text) {
           &out_len,
           nullptr,
           sodium_base64_VARIANT_ORIGINAL
-      ) != 0) { // LCOV_EXCL_START - libsodium only returns this on internal crypto failure.
+      ) != 0) {
     throw holder::privacy::PrivacyError(
         holder::privacy::PrivacyErrorCode::EnvelopeInvalid,
         "invalid base64 in privacy envelope"
     );
-  } // LCOV_EXCL_STOP
+  }
   out.resize(out_len);
   return out;
 }
