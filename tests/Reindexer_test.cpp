@@ -169,7 +169,9 @@ TEST_CASE("Reindexer throws when cards scan is interrupted", "[reindex]") {
   holder::index::Reindexer reindexer(db);
   REQUIRE_THROWS_WITH(
       reindexer.run(),
-      Catch::Matchers::ContainsSubstring("insert cards_fts failed: interrupted")
+      // Which cards_fts statement is running when the step budget runs out depends on the SQLite
+      // build (insert on some, delete on others); either way it must name the index.
+      Catch::Matchers::ContainsSubstring("cards_fts failed: interrupted")
   );
   sqlite3_progress_handler(db.handle(), 0, nullptr, nullptr);
 }
@@ -201,7 +203,8 @@ TEST_CASE("Reindexer throws when ai messages scan is interrupted", "[reindex]") 
   holder::index::Reindexer reindexer(db);
   REQUIRE_THROWS_WITH(
       reindexer.run(),
-      Catch::Matchers::ContainsSubstring("delete ai_fts failed: interrupted")
+      // As above: insert or delete depending on the SQLite build, but always the ai_fts index.
+      Catch::Matchers::ContainsSubstring("ai_fts failed: interrupted")
   );
   sqlite3_progress_handler(db.handle(), 0, nullptr, nullptr);
 }

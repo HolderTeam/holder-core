@@ -506,7 +506,9 @@ TEST_CASE("Database rebuild rejects unsafe inputs before replacing the database"
   std::filesystem::create_directory(request.database_path);
   REQUIRE_THROWS_WITH(
       holder::platform::rebuild_database_projection(request),
-      Catch::Matchers::ContainsSubstring("database I/O failure is not safe to rebuild: disk I/O error")
+      // SQLite's own wording for opening a directory varies by OS ("disk I/O error" on Linux,
+      // "unable to open database file" on macOS and Windows); the prefix is this project's.
+      Catch::Matchers::ContainsSubstring("database I/O failure is not safe to rebuild")
   );
 
   const auto corrupt = dir / "corrupt.db";
