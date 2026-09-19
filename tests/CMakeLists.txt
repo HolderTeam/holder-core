@@ -67,6 +67,7 @@ add_executable(holder_core_tests
   ResourceRepo_test.cpp
   SecretStore_test.cpp
   StartupRecovery_test.cpp
+  StorageProviderLifetime_test.cpp
   TagExtractor_test.cpp
   TagLineEditor_test.cpp
   TagRepo_test.cpp

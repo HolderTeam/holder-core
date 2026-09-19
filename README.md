@@ -70,10 +70,10 @@ Optional compiler caching and coverage tools:
 sudo dnf install -y ccache lcov gcovr
 ```
 
-Optional memory checks and LLVM 18 analysis/formatting tools:
+Optional memory checks, static analysis, and LLVM 18 formatting tools:
 
 ```sh
-sudo dnf install -y valgrind libasan libubsan libtsan clang18-tools-extra
+sudo dnf install -y valgrind libasan libubsan libtsan clang-tools-extra clang18-tools-extra
 ```
 
 ### Ubuntu / Debian
@@ -121,8 +121,16 @@ ThreadSanitizer suite runs through `setarch -R`, as in holder-daemon.
 with unversioned tools as a fallback. Set `HOLDER_CLANG_TIDY` and
 `HOLDER_RUN_CLANG_TIDY` to select another installed version. On this Fedora 45
 setup, Clang 18 reports errors in GCC 16's standard-library headers; use a
-compatible newer Clang toolchain for analysis. Formatting requires
-`clang-format-18`.
+compatible newer Clang toolchain for analysis. Fedora's `clang-tools-extra`
+package supplies current, unversioned tools; run them with:
+
+```sh
+HOLDER_CLANG_TIDY=clang-tidy HOLDER_RUN_CLANG_TIDY=run-clang-tidy ./make.sh tidy
+```
+
+The repository's `.clang-tidy` enables analyzer and selected bug checks explicitly
+and treats their warnings as errors. Formatting requires `clang-format-18`,
+provided separately by `clang18-tools-extra` on Fedora.
 
 ### Moving an existing checkout between systems
 

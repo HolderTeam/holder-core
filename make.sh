@@ -45,6 +45,7 @@ Environment:
   HOLDER_SAN_DETECT_LEAKS     Set to 1 to enable ASan leak detection
   HOLDER_CLANG_TIDY          Override the clang-tidy executable
   HOLDER_RUN_CLANG_TIDY      Override the run-clang-tidy executable
+  HOLDER_TSAN_SUPPRESSIONS   Optional ThreadSanitizer suppression file
 EOF
 }
 
@@ -212,6 +213,11 @@ san_all() {
   local tsan_use_setarch="OFF"
   local test_timeout="${HOLDER_CTEST_TIMEOUT:-30}"
   local test_jobs=8
+  local tsan_options="halt_on_error=1:second_deadlock_stack=1"
+
+  if [ -n "${HOLDER_TSAN_SUPPRESSIONS:-}" ]; then
+    tsan_options+=":suppressions=${HOLDER_TSAN_SUPPRESSIONS}"
+  fi
 
   case ",${sanitizers}," in
     *",thread,"*)
@@ -236,7 +242,7 @@ san_all() {
 
   ASAN_OPTIONS="detect_leaks=${detect_leaks}:halt_on_error=1" \
     UBSAN_OPTIONS="print_stacktrace=1:halt_on_error=1" \
-    TSAN_OPTIONS="halt_on_error=1:second_deadlock_stack=1" \
+    TSAN_OPTIONS="${tsan_options}" \
     ctest --test-dir "${build_dir}" --output-on-failure --no-tests=error \
       --parallel "${test_jobs}" --timeout "${test_timeout}"
 }

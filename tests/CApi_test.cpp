@@ -5319,6 +5319,8 @@ TEST_CASE(
   json = nullptr;
   REQUIRE(holder_card_list(peer_b, "project-1", &json, &error) == HOLDER_OK);
   const auto cards = nlohmann::json::parse(json);
+  holder_string_free(json);
+  json = nullptr;
   REQUIRE(cards.size() == 4);
 
   std::optional<std::string> conflicted_copy_id;
@@ -5516,6 +5518,7 @@ TEST_CASE(
     REQUIRE(first_destroy_count == 1); // unchanged
   }
 
+  holder_error_destroy(error);
   if (context != nullptr) {
     holder_context_destroy(context);
   }
@@ -6002,6 +6005,7 @@ TEST_CASE(
       ) == HOLDER_ERROR_INVALID_ARGUMENT
   );
   REQUIRE(destroy_count == 1);
+  holder_error_destroy(error);
 
   holder::privacy::platform_keyring_clear_external_provider();
 }
@@ -6385,6 +6389,7 @@ TEST_CASE(
   }
 
   REQUIRE(destroy_count == 1);
+  holder_error_destroy(error);
 }
 
 TEST_CASE(
@@ -7018,6 +7023,8 @@ TEST_CASE(
       holder_recovery_token_export(context, "project-1", "", &json, &error) ==
       HOLDER_ERROR_INVALID_ARGUMENT
   );
+  holder_error_destroy(error);
+  error = nullptr;
 
   REQUIRE(
       holder_recovery_token_export(context, "project-1", "1234", &json, &error) ==
