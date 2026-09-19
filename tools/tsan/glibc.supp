@@ -1,0 +1,6 @@
+# Fedora's uninstrumented glibc protects tzset_internal with its private tzset_lock,
+# which TSan cannot see. Reports observed here are malloc/free of glibc's old_tz
+# during concurrent libgit2 git_signature_now calls, not accesses to Holder data.
+# Source: https://github.com/bminor/glibc/blob/master/time/tzset.c
+# Limitation: https://github.com/google/sanitizers/wiki/ThreadSanitizerCppManual#non-instrumented-code
+race:tzset_internal
