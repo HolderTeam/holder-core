@@ -81,7 +81,7 @@ class ProjectHistoryService {
   ProjectHistoryPage list(
       const holder::model::Project& project,
       std::size_t limit = 50,
-      const std::optional<std::string>& cursor = std::nullopt,
+      const std::optional<std::string>& cursor = std::nullopt, // LCOV_EXCL_LINE - gcov artefact: default argument is executed but never counted.
       const std::optional<ProjectHistoryObjectKind>& kind_filter = std::nullopt
   ) const;
 

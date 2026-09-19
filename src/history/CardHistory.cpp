@@ -190,7 +190,7 @@ std::vector<CardDiffLine> line_diff(
       append_diff_line(out, '+', line, -1, new_no++, truncated);
     }
     return out;
-  }
+  } // LCOV_EXCL_LINE - gcov artefact: function exit is executed but never counted.
 
   std::vector<std::vector<std::size_t>> lcs(
       old_lines.size() + 1, std::vector<std::size_t>(new_lines.size() + 1, 0)

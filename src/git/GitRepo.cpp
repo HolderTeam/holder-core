@@ -911,7 +911,7 @@ PushResult GitRepo::push_branch(
         .behind_count = 0,
         .local_head_commit = local_head_commit,
         .error_message = "Remote not configured: " + name,
-    };
+    }; // LCOV_EXCL_LINE - gcov artefact: designated-initializer closer is executed but never counted.
   }
   if (lookup != 0) {
     return {
@@ -933,7 +933,7 @@ PushResult GitRepo::push_branch(
         .behind_count = 0,
         .local_head_commit = local_head_commit,
         .error_message = {},
-    };
+    }; // LCOV_EXCL_LINE - gcov artefact: designated-initializer closer is executed but never counted.
   }
   if (rc != 0) {
     return push_head_error_result(remote, local_head_commit); // LCOV_EXCL_LINE
@@ -960,7 +960,7 @@ PushResult GitRepo::push_branch(
         .behind_count = 0,
         .local_head_commit = local_head_commit,
         .error_message = error,
-    };
+    }; // LCOV_EXCL_LINE - gcov artefact: designated-initializer closer is executed but never counted.
   }
 
   if (set_upstream) {
@@ -981,7 +981,7 @@ PushResult GitRepo::push_branch(
       .behind_count = 0,
       .local_head_commit = local_head_commit,
       .error_message = {},
-  };
+  }; // LCOV_EXCL_LINE - gcov artefact: designated-initializer closer is executed but never counted.
 }
 
 void GitRepo::pull_remote_ff_only(const std::string& name) {

@@ -36,7 +36,7 @@ std::string format_uuid(const unsigned char bytes[16]) {
   }
 
   return out;
-}
+} // LCOV_EXCL_LINE - gcov artefact: function exit is executed but never counted.
 
 }  // namespace
 

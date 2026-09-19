@@ -28,7 +28,7 @@ BodySplit split_trailing_whitespace(const std::string& body) {
   while (end > 0 && (body[end - 1] == '\n' || is_line_whitespace(body[end - 1]))) {
     --end;
   }
-  return {body.substr(0, end), body.substr(end)};
+  return {body.substr(0, end), body.substr(end)}; // LCOV_EXCL_LINE - gcov artefact: braced return value is executed but never counted.
 }
 
 // Start offset (within `content`) of content's last line -- the character right after the
@@ -120,19 +120,19 @@ RemoveTagLineResult remove_from_trailing_tag_line(const std::string& body, const
   const auto& content = split.content;
 
   if (content.empty()) {
-    return {body, RemoveTagLineOutcome::NotOnTrailingLine};
+    return {body, RemoveTagLineOutcome::NotOnTrailingLine}; // LCOV_EXCL_LINE - gcov artefact: braced return value is executed but never counted.
   }
 
   const auto line_start = last_line_start(content);
   const std::string last_line = content.substr(line_start);
   auto existing = parse_pure_tag_line(last_line);
   if (!existing.has_value()) {
-    return {body, RemoveTagLineOutcome::NotOnTrailingLine};
+    return {body, RemoveTagLineOutcome::NotOnTrailingLine}; // LCOV_EXCL_LINE - gcov artefact: braced return value is executed but never counted.
   }
 
   const auto it = std::find(existing->begin(), existing->end(), tag);
   if (it == existing->end()) {
-    return {body, RemoveTagLineOutcome::NotOnTrailingLine};
+    return {body, RemoveTagLineOutcome::NotOnTrailingLine}; // LCOV_EXCL_LINE - gcov artefact: braced return value is executed but never counted.
   }
   existing->erase(it);
 
@@ -143,7 +143,7 @@ RemoveTagLineResult remove_from_trailing_tag_line(const std::string& body, const
     while (!before.empty() && before.back() == '\n') {
       before.pop_back();
     }
-    return {before + split.trailing_ws, RemoveTagLineOutcome::Removed};
+    return {before + split.trailing_ws, RemoveTagLineOutcome::Removed}; // LCOV_EXCL_LINE - gcov artefact: braced return value is executed but never counted.
   }
 
   return {
