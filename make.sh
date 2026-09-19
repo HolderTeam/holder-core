@@ -11,26 +11,40 @@ CCACHE_STATE="unchecked"
 print_usage() {
   cat <<'EOF'
 Usage:
-  ./make.sh [command] [BuildType]
+  ./make.sh [command] [args...]
 
 Commands:
-  test          Configure, build libholder, and run CTest
-  build         Configure and build libholder
-  coverage      Build, run tests, and generate coverage reports
-  install       Build and install libholder into out/install/local
-  format        Format C++ source, header, and test files
-  format-check  Check C++ source, header, and test formatting
-  clean         Remove local build and install output
-  help          Show this help
+  test [BuildType]             Configure, build libholder, and run CTest
+  build [BuildType]            Configure and build libholder
+  coverage                    Build, run tests, and generate coverage reports
+  warnings [BuildType]         Build libholder with warnings as errors
+  memcheck [test-regex]         Run Valgrind memcheck tests
+  san [sanitizers] [BuildType]  Run sanitizer build and tests
+  tidy                        Run clang-tidy through run-clang-tidy
+  install [BuildType]          Build and install libholder into out/install/local
+  format                      Format C++ source, header, and test files
+  format-check                Check C++ source, header, and test formatting
+  clean                       Remove local build and install output
+  help                        Show this help
 
 Examples:
   ./make.sh
   ./make.sh coverage
   ./make.sh build Debug
+  ./make.sh warnings Debug
+  ./make.sh memcheck 'UUID'
+  ./make.sh san address,undefined
+  ./make.sh san thread
+  HOLDER_SAN_DETECT_LEAKS=1 ./make.sh san
   INSTALL_PREFIX=/tmp/holder-core ./make.sh install
 
 Environment:
-  HOLDER_CCACHE  auto (default), 1 to require, or 0 to disable ccache
+  HOLDER_CCACHE              auto (default), 1 to require, or 0 to disable ccache
+  HOLDER_CTEST_TIMEOUT       Per-test timeout for memcheck and sanitizer runs
+  HOLDER_MEMCHECK_BUILD_TYPE Build type for memcheck, default Debug
+  HOLDER_SAN_DETECT_LEAKS     Set to 1 to enable ASan leak detection
+  HOLDER_CLANG_TIDY          Override the clang-tidy executable
+  HOLDER_RUN_CLANG_TIDY      Override the run-clang-tidy executable
 EOF
 }
 
@@ -143,6 +157,129 @@ run_tests() {
   configure
   cmake_build "${BUILD_DIR}" --parallel "$(jobs)"
   ctest --test-dir "${BUILD_DIR}" --output-on-failure
+}
+
+require_tool() {
+  if ! command -v "${1}" >/dev/null 2>&1; then
+    echo "Missing dependency: ${1} is required for ./make.sh ${MODE}." >&2
+    echo "See README.md for diagnostic tool packages." >&2
+    exit 1
+  fi
+}
+
+warnings_all() {
+  local build_dir="build-warnings"
+  local build_type="${1:-Debug}"
+
+  cmake_configure -S . -B "${build_dir}" -G Ninja \
+    -DCMAKE_BUILD_TYPE="${build_type}" \
+    -DHOLDER_CORE_WARNINGS_AS_ERRORS=ON
+  cmake_build "${build_dir}" --target holder --parallel "$(jobs)"
+}
+
+memcheck_all() {
+  local build_dir="build-memcheck"
+  local build_type="${HOLDER_MEMCHECK_BUILD_TYPE:-Debug}"
+  local test_regex="${1:-}"
+  local valgrind_bin
+  local valgrind_options
+  local -a test_args=()
+
+  require_tool valgrind
+  valgrind_bin="$(command -v valgrind)"
+  valgrind_options="--leak-check=full --show-leak-kinds=definite,possible --errors-for-leak-kinds=definite,possible --track-origins=yes --error-exitcode=1"
+
+  cmake_configure -S . -B "${build_dir}" -G Ninja \
+    -DCMAKE_BUILD_TYPE="${build_type}" \
+    -DBUILD_TESTING=ON \
+    -DMEMORYCHECK_COMMAND="${valgrind_bin}" \
+    -DMEMORYCHECK_COMMAND_OPTIONS="${valgrind_options}"
+  cmake_build "${build_dir}" --parallel "$(jobs)"
+
+  if [ -n "${test_regex}" ]; then
+    test_args+=(-R "${test_regex}")
+  fi
+  ctest --test-dir "${build_dir}" -T memcheck --output-on-failure --no-tests=error \
+    --timeout "${HOLDER_CTEST_TIMEOUT:-300}" "${test_args[@]}"
+}
+
+san_all() {
+  local build_dir="build-san"
+  local sanitizers="${1:-address}"
+  local build_type="${2:-Debug}"
+  local detect_leaks="${HOLDER_SAN_DETECT_LEAKS:-0}"
+  local catch_discovery="ON"
+  local tsan_use_setarch="OFF"
+  local test_timeout="${HOLDER_CTEST_TIMEOUT:-30}"
+  local test_jobs=8
+
+  case ",${sanitizers}," in
+    *",thread,"*)
+      catch_discovery="OFF"
+      tsan_use_setarch="ON"
+      test_timeout="${HOLDER_CTEST_TIMEOUT:-300}"
+      test_jobs=1
+      ;;
+  esac
+
+  cmake_configure -S . -B "${build_dir}" -G Ninja \
+    -DCMAKE_BUILD_TYPE="${build_type}" \
+    -DBUILD_TESTING=ON \
+    -DCMAKE_CXX_FLAGS="-O1 -g" \
+    -DHOLDER_CORE_SANITIZE="${sanitizers}" \
+    -DHOLDER_CORE_CATCH_DISCOVER_TESTS="${catch_discovery}" \
+    -DHOLDER_CORE_TSAN_USE_SETARCH="${tsan_use_setarch}"
+
+  ASAN_OPTIONS="detect_leaks=${detect_leaks}:halt_on_error=1" \
+    UBSAN_OPTIONS="print_stacktrace=1:halt_on_error=1" \
+    cmake_build "${build_dir}" --parallel "$(jobs)"
+
+  ASAN_OPTIONS="detect_leaks=${detect_leaks}:halt_on_error=1" \
+    UBSAN_OPTIONS="print_stacktrace=1:halt_on_error=1" \
+    TSAN_OPTIONS="halt_on_error=1:second_deadlock_stack=1" \
+    ctest --test-dir "${build_dir}" --output-on-failure --no-tests=error \
+      --parallel "${test_jobs}" --timeout "${test_timeout}"
+}
+
+tidy_all() {
+  local build_dir="build-tidy"
+  local source_regex
+  local tidy_bin="clang-tidy"
+  local tidy_runner="run-clang-tidy"
+  local gcc_version gcc_major
+  local -a tidy_extra_args=()
+
+  source_regex="^${PWD}/(src|include|tests)/.*\\.(cpp|cc|cxx|h|hpp)$"
+
+  if command -v clang-tidy-18 >/dev/null 2>&1; then
+    tidy_bin="clang-tidy-18"
+    if command -v run-clang-tidy-18 >/dev/null 2>&1; then
+      tidy_runner="run-clang-tidy-18"
+    fi
+  fi
+  tidy_bin="${HOLDER_CLANG_TIDY:-${tidy_bin}}"
+  tidy_runner="${HOLDER_RUN_CLANG_TIDY:-${tidy_runner}}"
+  require_tool "${tidy_bin}"
+  require_tool "${tidy_runner}"
+
+  if command -v g++ >/dev/null 2>&1; then
+    gcc_version="$(g++ -dumpfullversion -dumpversion)"
+    gcc_major="${gcc_version%%.*}"
+    if [ -d "/usr/include/c++/${gcc_major}" ]; then
+      tidy_extra_args+=(-extra-arg="-isystem/usr/include/c++/${gcc_major}")
+    fi
+    if [ -d "/usr/include/x86_64-linux-gnu/c++/${gcc_major}" ]; then
+      tidy_extra_args+=(-extra-arg="-isystem/usr/include/x86_64-linux-gnu/c++/${gcc_major}")
+    fi
+  fi
+
+  cmake_configure -S . -B "${build_dir}" -G Ninja \
+    -DCMAKE_BUILD_TYPE=Debug \
+    -DBUILD_TESTING=ON \
+    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+  "${tidy_runner}" -clang-tidy-binary "${tidy_bin}" -p "${build_dir}" \
+    -quiet "${tidy_extra_args[@]}" "${source_regex}"
 }
 
 coverage_all() {
@@ -265,6 +402,18 @@ case "${MODE}" in
     ;;
   coverage)
     coverage_all
+    ;;
+  warnings)
+    warnings_all "${2:-Debug}"
+    ;;
+  memcheck)
+    memcheck_all "${2:-}"
+    ;;
+  san)
+    san_all "${2:-address}" "${3:-Debug}"
+    ;;
+  tidy)
+    tidy_all
     ;;
   install)
     install_core
