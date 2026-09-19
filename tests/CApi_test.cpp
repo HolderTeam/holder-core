@@ -31,6 +31,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <string>
@@ -6390,13 +6391,14 @@ TEST_CASE(
     "C API storage_provider_register destroys user_data exactly once on replace",
     "[capi][resource]"
 ) {
-  int first_destroy_count = 0;
-  int second_destroy_count = 0;
-  auto destroy_first = [](void* user_data) {
-    *static_cast<int*>(user_data) += 1;
-  };
-  auto destroy_second = [](void* user_data) {
-    *static_cast<int*>(user_data) += 1;
+  // The registry can retain a provider until process exit, even if an assertion fails.
+  // Give each provider shared ownership of its counter instead of a pointer into this stack.
+  auto first_destroy_count = std::make_shared<int>(0);
+  auto second_destroy_count = std::make_shared<int>(0);
+  auto destroy = [](void* user_data) {
+    const std::unique_ptr<std::shared_ptr<int>> count(static_cast<std::shared_ptr<int>*>(user_data)
+    );
+    ++**count;
   };
   holder_error* error = nullptr;
 
@@ -6407,12 +6409,12 @@ TEST_CASE(
           fake_storage_get,
           fake_storage_exists,
           fake_storage_remove,
-          &first_destroy_count,
-          destroy_first,
+          new std::shared_ptr<int>(first_destroy_count),
+          destroy,
           &error
       ) == HOLDER_OK
   );
-  REQUIRE(first_destroy_count == 0);
+  REQUIRE(*first_destroy_count == 0);
 
   REQUIRE(
       holder_storage_provider_register(
@@ -6421,13 +6423,13 @@ TEST_CASE(
           fake_storage_get,
           fake_storage_exists,
           fake_storage_remove,
-          &second_destroy_count,
-          destroy_second,
+          new std::shared_ptr<int>(second_destroy_count),
+          destroy,
           &error
       ) == HOLDER_OK
   );
-  REQUIRE(first_destroy_count == 1);
-  REQUIRE(second_destroy_count == 0);
+  REQUIRE(*first_destroy_count == 1);
+  REQUIRE(*second_destroy_count == 0);
 }
 
 TEST_CASE(
