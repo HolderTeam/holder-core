@@ -71,8 +71,15 @@ TEST_CASE("encrypted AI thread manifest hides title", "[ai][thread][manifest][pr
   projects.create(project);
   holder::git::RealGitOps git;
   holder::privacy::ensure_encrypted_project_ready(
-      git, projects, project.project_id, project.root_path, std::nullopt, 1,
-      [] { return std::string("thread-key"); }
+      git,
+      projects,
+      project.project_id,
+      project.root_path,
+      std::nullopt,
+      1,
+      [] {
+        return std::string("thread-key");
+      }
   );
   project = *projects.get(project.project_id);
 
@@ -92,7 +99,10 @@ TEST_CASE("encrypted AI thread manifest hides title", "[ai][thread][manifest][pr
   REQUIRE(holder::ai::read_ai_thread_manifest(project, path).title == thread.title);
 }
 
-TEST_CASE("AI thread manifests reject invalid identity and durable input", "[ai][thread][manifest]") {
+TEST_CASE(
+    "AI thread manifests reject invalid identity and durable input",
+    "[ai][thread][manifest]"
+) {
   const auto dir = holder::test::make_temp_dir();
   holder::model::Project project;
   project.project_id = "project-thread";
@@ -124,8 +134,9 @@ TEST_CASE("AI thread manifests reject invalid identity and durable input", "[ai]
       holder::ai::parse_ai_thread_manifest(
           project,
           R"({"version":1,"thread_id":"thread-1234","project_id":"other","title":"Title","created_at":1,"updated_at":2})"
-      )
-  , Catch::Matchers::ContainsSubstring("AI thread manifest does not match project"));
+      ),
+      Catch::Matchers::ContainsSubstring("AI thread manifest does not match project")
+  );
 
   auto encrypted = project;
   encrypted.privacy_mode = "encrypted_git";

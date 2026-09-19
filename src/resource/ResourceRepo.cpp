@@ -123,8 +123,7 @@ std::optional<holder::model::Resource> ResourceRepo::get(const std::string& reso
   return resource;
 }
 
-std::optional<holder::model::ResourceBundle> ResourceRepo::get_bundle(
-    const std::string& resource_id
+std::optional<holder::model::ResourceBundle> ResourceRepo::get_bundle(const std::string& resource_id
 ) const {
   const auto resource = get(resource_id);
   if (!resource.has_value()) return std::nullopt;
@@ -201,7 +200,9 @@ std::optional<holder::model::ResourceBundle> ResourceRepo::find_by_asset_hash(
   const int rc = sqlite3_step(stmt.get());
   if (rc == SQLITE_DONE) return std::nullopt;
   if (rc != SQLITE_ROW) {
-    throw std::runtime_error(std::string("find asset hash failed: ") + sqlite3_errmsg(db_.handle()));
+    throw std::runtime_error(
+        std::string("find asset hash failed: ") + sqlite3_errmsg(db_.handle())
+    );
   }
   return get_bundle(text_column(stmt.get(), 0));
 }
@@ -309,19 +310,26 @@ std::vector<holder::model::Resource> ResourceRepo::list(const std::string& proje
   while (true) {
     const int rc = sqlite3_step(stmt.get());
     if (rc == SQLITE_DONE) break;
-    if (rc != SQLITE_ROW) { // LCOV_EXCL_START - SQLite step failure requires engine fault injection.
-      throw std::runtime_error(std::string("list resources failed: ") + sqlite3_errmsg(db_.handle()));
+    if (rc !=
+        SQLITE_ROW) { // LCOV_EXCL_START - SQLite step failure requires engine fault injection.
+      throw std::runtime_error(
+          std::string("list resources failed: ") + sqlite3_errmsg(db_.handle())
+      );
     } // LCOV_EXCL_STOP
     ids.push_back(text_column(stmt.get(), 0));
   }
   std::vector<holder::model::Resource> resources;
   resources.reserve(ids.size());
-  for (const auto& id : ids) resources.push_back(get(id).value());
+  for (const auto& id : ids)
+    resources.push_back(get(id).value());
   return resources;
 }
 
 std::vector<holder::model::Resource> ResourceRepo::list_for_card(
-    const std::string& project_id, const std::string& card_id, int limit, int offset
+    const std::string& project_id,
+    const std::string& card_id,
+    int limit,
+    int offset
 ) const {
   if (limit < 1 || limit > 1000 || offset < 0) {
     throw std::invalid_argument("attachment limit must be 1..1000 and offset nonnegative");
@@ -345,7 +353,9 @@ std::vector<holder::model::Resource> ResourceRepo::list_for_card(
     const int rc = sqlite3_step(stmt.get());
     if (rc == SQLITE_DONE) break;
     if (rc != SQLITE_ROW) {
-      throw std::runtime_error(std::string("list card resources failed: ") + sqlite3_errmsg(db_.handle())); // LCOV_EXCL_LINE - SQLite step fault requires engine injection.
+      throw std::runtime_error(
+          std::string("list card resources failed: ") + sqlite3_errmsg(db_.handle())
+      ); // LCOV_EXCL_LINE - SQLite step fault requires engine injection.
     }
     resources.push_back(get(text_column(stmt.get(), 0)).value());
   }
@@ -353,13 +363,21 @@ std::vector<holder::model::Resource> ResourceRepo::list_for_card(
 }
 
 void ResourceRepo::remove(const std::string& resource_id) {
-  Statement stmt(db_.handle(), "DELETE FROM resources WHERE resource_id = ?;", "prepare remove resource failed");
+  Statement stmt(
+      db_.handle(),
+      "DELETE FROM resources WHERE resource_id = ?;",
+      "prepare remove resource failed"
+  );
   bind_text(stmt.get(), 1, resource_id);
   expect_done(db_.handle(), stmt.get(), "remove resource failed");
 }
 
 void ResourceRepo::remove_project(const std::string& project_id) {
-  Statement stmt(db_.handle(), "DELETE FROM resources WHERE project_id = ?;", "prepare remove project resources failed");
+  Statement stmt(
+      db_.handle(),
+      "DELETE FROM resources WHERE project_id = ?;",
+      "prepare remove project resources failed"
+  );
   bind_text(stmt.get(), 1, project_id);
   expect_done(db_.handle(), stmt.get(), "remove project resources failed");
 }

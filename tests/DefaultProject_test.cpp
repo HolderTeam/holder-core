@@ -23,7 +23,10 @@ std::function<std::string()> counting_uuid_v4(const std::string& prefix) {
 
 } // namespace
 
-TEST_CASE("ensure_default_project creates a project and welcome card when empty", "[default_project]") {
+TEST_CASE(
+    "ensure_default_project creates a project and welcome card when empty",
+    "[default_project]"
+) {
   const auto dir = holder::test::make_temp_dir();
   auto db = holder::test::open_db_with_schema(dir / "holder.db");
 
@@ -52,7 +55,10 @@ TEST_CASE("ensure_default_project creates a project and welcome card when empty"
   REQUIRE(cards[0].title == "Welcome");
 }
 
-TEST_CASE("ensure_default_project does nothing when a project already exists", "[default_project]") {
+TEST_CASE(
+    "ensure_default_project does nothing when a project already exists",
+    "[default_project]"
+) {
   const auto dir = holder::test::make_temp_dir();
   auto db = holder::test::open_db_with_schema(dir / "holder.db");
 

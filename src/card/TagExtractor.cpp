@@ -160,8 +160,6 @@ bool is_valid_tag(const std::string& tag) {
   return !looks_like_hex_color(tag);
 }
 
-std::string normalize_tag(const std::string& tag) {
-  return to_lower(tag);
-}
+std::string normalize_tag(const std::string& tag) { return to_lower(tag); }
 
 } // namespace holder::core

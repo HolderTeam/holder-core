@@ -69,19 +69,27 @@ TEST_CASE("AiProviderSettingRepo throws when get prepare fails", "[db]") {
   holder::ai::AiProviderSettingRepo repo(db);
   REQUIRE_THROWS_WITH(
       repo.list(),
-      Catch::Matchers::ContainsSubstring("prepare list provider settings failed: no such table: ai_provider_settings")
+      Catch::Matchers::ContainsSubstring(
+          "prepare list provider settings failed: no such table: ai_provider_settings"
+      )
   );
   REQUIRE_THROWS_WITH(
       repo.get("switchyard"),
-      Catch::Matchers::ContainsSubstring("prepare get provider setting failed: no such table: ai_provider_settings")
+      Catch::Matchers::ContainsSubstring(
+          "prepare get provider setting failed: no such table: ai_provider_settings"
+      )
   );
   REQUIRE_THROWS_WITH(
       repo.upsert("switchyard", true, 1),
-      Catch::Matchers::ContainsSubstring("prepare upsert provider setting failed: no such table: ai_provider_settings")
+      Catch::Matchers::ContainsSubstring(
+          "prepare upsert provider setting failed: no such table: ai_provider_settings"
+      )
   );
   REQUIRE_THROWS_WITH(
       repo.remove("switchyard"),
-      Catch::Matchers::ContainsSubstring("prepare delete provider setting failed: no such table: ai_provider_settings")
+      Catch::Matchers::ContainsSubstring(
+          "prepare delete provider setting failed: no such table: ai_provider_settings"
+      )
   );
 }
 

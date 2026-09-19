@@ -140,8 +140,7 @@ void MilestoneRepo::replace_for_card(
 }
 
 void MilestoneRepo::delete_for_card(const std::string& project_id, const std::string& card_id) {
-  static constexpr const char* SQL =
-      "DELETE FROM milestones WHERE project_id = ? AND card_id = ?;";
+  static constexpr const char* SQL = "DELETE FROM milestones WHERE project_id = ? AND card_id = ?;";
   sqlite3_stmt* stmt = nullptr;
   if (sqlite3_prepare_v2(db_.handle(), SQL, -1, &stmt, nullptr) != SQLITE_OK) {
     throw_sqlite(db_.handle(), "prepare delete milestones failed");

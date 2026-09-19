@@ -71,19 +71,27 @@ TEST_CASE("AiProviderCredentialRepo throws when upsert prepare fails", "[db]") {
   holder::ai::AiProviderCredentialRepo repo(db);
   REQUIRE_THROWS_WITH(
       repo.list(),
-      Catch::Matchers::ContainsSubstring("prepare list provider credentials failed: no such table: ai_provider_credentials")
+      Catch::Matchers::ContainsSubstring(
+          "prepare list provider credentials failed: no such table: ai_provider_credentials"
+      )
   );
   REQUIRE_THROWS_WITH(
       repo.get("openai"),
-      Catch::Matchers::ContainsSubstring("prepare get provider credential failed: no such table: ai_provider_credentials")
+      Catch::Matchers::ContainsSubstring(
+          "prepare get provider credential failed: no such table: ai_provider_credentials"
+      )
   );
   REQUIRE_THROWS_WITH(
       repo.upsert("openai", "k", 1, 1),
-      Catch::Matchers::ContainsSubstring("prepare upsert provider credential failed: no such table: ai_provider_credentials")
+      Catch::Matchers::ContainsSubstring(
+          "prepare upsert provider credential failed: no such table: ai_provider_credentials"
+      )
   );
   REQUIRE_THROWS_WITH(
       repo.remove("openai"),
-      Catch::Matchers::ContainsSubstring("prepare delete provider credential failed: no such table: ai_provider_credentials")
+      Catch::Matchers::ContainsSubstring(
+          "prepare delete provider credential failed: no such table: ai_provider_credentials"
+      )
   );
 }
 

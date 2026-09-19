@@ -147,7 +147,10 @@ void CardStore::create(
     fts_->upsert_card(card.card_id, card.project_id, card.title, content);
   }
   tag_repo_.set_tags_for_card(
-      card.project_id, card.card_id, holder::core::extract_tags(content), card.created_at
+      card.project_id,
+      card.card_id,
+      holder::core::extract_tags(content),
+      card.created_at
   );
 
   git_->commit("Add card " + card.title);
@@ -233,7 +236,10 @@ void CardStore::create_batch(
       fts_->upsert_card(card.card_id, card.project_id, card.title, item.content);
     }
     tag_repo_.set_tags_for_card(
-        project_id, card.card_id, holder::core::extract_tags(item.content), card.updated_at
+        project_id,
+        card.card_id,
+        holder::core::extract_tags(item.content),
+        card.updated_at
     );
     if (!links.empty()) {
       link_repo_.upsert_links(project_id, card.card_id, links);
@@ -316,9 +322,8 @@ void CardStore::update_content(
   if (fts_) {
     fts_->upsert_card(card.card_id, card.project_id, fts_title, content);
   }
-  tag_repo_.set_tags_for_card(
-      card.project_id, card_id, holder::core::extract_tags(content), updated_at
-  );
+  tag_repo_
+      .set_tags_for_card(card.project_id, card_id, holder::core::extract_tags(content), updated_at);
 
   if (!unchanged) {
     const std::string commit_title = title.has_value() ? title.value() : card.title;
@@ -526,8 +531,7 @@ std::optional<holder::model::Milestone> CardStore::update_milestone(
   }
 
   const bool changed = updated.start_at != position->start_at ||
-                       updated.end_at != position->end_at ||
-                       updated.all_day != position->all_day ||
+                       updated.end_at != position->end_at || updated.all_day != position->all_day ||
                        updated.kind != position->kind ||
                        updated.description != position->description;
   if (!changed) return *position;
@@ -663,7 +667,10 @@ void CardStore::restore(const std::string& card_id, long long updated_at) {
     fts_->upsert_card(card.card_id, card.project_id, card.title, parsed.body);
   }
   tag_repo_.set_tags_for_card(
-      card.project_id, card_id, holder::core::extract_tags(parsed.body), updated_at
+      card.project_id,
+      card_id,
+      holder::core::extract_tags(parsed.body),
+      updated_at
   );
   milestone_repo_.replace_for_card(card.project_id, card_id, parsed.milestones);
   git_->remove_path(trash_rel);
@@ -716,7 +723,7 @@ void CardStore::restore_version(
   restored.created_at = current.created_at;
   restored.updated_at = updated_at;
   restored.deleted_at = historical_is_trash ? std::optional<long long>{updated_at}
-                                           : std::optional<long long>{};
+                                            : std::optional<long long>{};
   for (auto& link : parsed.links) {
     link.project_id = restored.project_id;
     link.from_card_id = restored.card_id;
@@ -728,19 +735,21 @@ void CardStore::restore_version(
   }
 
   const auto target_rel = restored.deleted_at.has_value()
-      ? holder::core::card_trash_rel_path(card_id)
-      : expected;
+                              ? holder::core::card_trash_rel_path(card_id)
+                              : expected;
   const auto other_rel = restored.deleted_at.has_value()
-      ? expected
-      : holder::core::card_trash_rel_path(card_id);
-  const auto restored_plain = holder::core::render_card_front_matter(
-      restored, parsed.links, parsed.milestones
-  ) + parsed.body;
+                             ? expected
+                             : holder::core::card_trash_rel_path(card_id);
+  const auto restored_plain =
+      holder::core::render_card_front_matter(restored, parsed.links, parsed.milestones) +
+      parsed.body;
   const auto restored_raw = project.privacy_mode == "encrypted_git"
-      ? holder::privacy::encrypt_project_blob(
-            project.project_id, require_project_key_id(project), restored_plain
-        )
-      : restored_plain;
+                                ? holder::privacy::encrypt_project_blob(
+                                      project.project_id,
+                                      require_project_key_id(project),
+                                      restored_plain
+                                  )
+                                : restored_plain;
 
   // Make every database write fail before the working tree or index changes. If any
   // repository update rejects the historical metadata, the transaction rolls back
@@ -753,7 +762,10 @@ void CardStore::restore_version(
   }
   milestone_repo_.replace_for_card(restored.project_id, restored.card_id, parsed.milestones);
   tag_repo_.set_tags_for_card(
-      restored.project_id, restored.card_id, holder::core::extract_tags(parsed.body), updated_at
+      restored.project_id,
+      restored.card_id,
+      holder::core::extract_tags(parsed.body),
+      updated_at
   );
   if (fts_) {
     if (restored.deleted_at.has_value()) {
@@ -830,7 +842,11 @@ std::optional<std::string> CardStore::get_content(const holder::model::Card& car
   return holder::core::parse_card_file(plain).body;
 }
 
-AddTagResult CardStore::add_tag(const std::string& card_id, const std::string& tag, long long updated_at) {
+AddTagResult CardStore::add_tag(
+    const std::string& card_id,
+    const std::string& tag,
+    long long updated_at
+) {
   if (!holder::core::is_valid_tag(tag)) {
     return AddTagResult::InvalidTag;
   }
@@ -854,7 +870,11 @@ AddTagResult CardStore::add_tag(const std::string& card_id, const std::string& t
   return AddTagResult::Added;
 }
 
-RemoveTagResult CardStore::remove_tag(const std::string& card_id, const std::string& tag, long long updated_at) {
+RemoveTagResult CardStore::remove_tag(
+    const std::string& card_id,
+    const std::string& tag,
+    long long updated_at
+) {
   if (!holder::core::is_valid_tag(tag)) {
     return RemoveTagResult::InvalidTag;
   }

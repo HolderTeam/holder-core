@@ -36,13 +36,13 @@ struct HistoricalDisplayMetadata {
   std::optional<std::string> detail;
 };
 
-std::optional<std::string> milestone_summary(
-    const std::vector<holder::model::Milestone>& milestones
+std::optional<std::string> milestone_summary(const std::vector<holder::model::Milestone>& milestones
 ) {
   if (milestones.empty()) return std::nullopt;
   constexpr std::size_t kShownMilestones = 3;
-  std::string summary = milestones.size() == 1 ? "Milestone: " :
-      "Milestones (" + std::to_string(milestones.size()) + "): ";
+  std::string summary = milestones.size() == 1
+                            ? "Milestone: "
+                            : "Milestones (" + std::to_string(milestones.size()) + "): ";
   for (std::size_t index = 0; index < milestones.size() && index < kShownMilestones; ++index) {
     if (index > 0) summary += ", ";
     const auto& milestone = milestones[index];
@@ -77,12 +77,15 @@ std::optional<HistoricalDisplayMetadata> card_display_at(
   }
 }
 
-std::optional<std::string> resource_attachment_summary(const holder::model::ResourceBundle& bundle) {
+std::optional<std::string> resource_attachment_summary(const holder::model::ResourceBundle& bundle
+) {
   if (bundle.assets.empty()) return std::nullopt;
   constexpr std::size_t kShownAttachmentNames = 3;
-  std::string summary = bundle.assets.size() == 1 ? "Attachment: " :
-      "Attachments (" + std::to_string(bundle.assets.size()) + "): ";
-  for (std::size_t index = 0; index < bundle.assets.size() && index < kShownAttachmentNames; ++index) {
+  std::string summary = bundle.assets.size() == 1
+                            ? "Attachment: "
+                            : "Attachments (" + std::to_string(bundle.assets.size()) + "): ";
+  for (std::size_t index = 0; index < bundle.assets.size() && index < kShownAttachmentNames;
+       ++index) {
     if (index > 0) summary += ", ";
     summary += bundle.assets[index].original_filename;
   }
@@ -98,11 +101,18 @@ std::string first_meaningful_line(const std::string& text) {
     const auto end = text.find('\n', start);
     auto line = text.substr(start, end == std::string::npos ? std::string::npos : end - start);
     line.erase(line.begin(), std::find_if(line.begin(), line.end(), [](unsigned char ch) {
-      return std::isspace(ch) == 0;
-    }));
-    line.erase(std::find_if(line.rbegin(), line.rend(), [](unsigned char ch) {
-      return std::isspace(ch) == 0;
-    }).base(), line.end());
+                 return std::isspace(ch) == 0;
+               }));
+    line.erase(
+        std::find_if(
+            line.rbegin(),
+            line.rend(),
+            [](unsigned char ch) {
+              return std::isspace(ch) == 0;
+            }
+        ).base(),
+        line.end()
+    );
     if (!line.empty()) {
       if (line.size() > 80) line = line.substr(0, 77) + "...";
       return line;
@@ -139,7 +149,8 @@ HistoricalDisplayMetadata ai_display_at(
     }
     const auto excerpt = first_meaningful_line(parsed.body);
     if (!excerpt.empty()) {
-      metadata.detail = (parsed.message.role.empty() ? "message" : parsed.message.role) + ": " + excerpt;
+      metadata.detail = (parsed.message.role.empty() ? "message" : parsed.message.role) + ": " +
+                        excerpt;
     }
   } catch (const std::exception&) {
     // AI data is optional enrichment; malformed or unavailable history stays path-only.
@@ -182,8 +193,8 @@ HistoricalDisplayMetadata project_settings_display_at(
     metadata.title = "Project settings";
     metadata.detail = "Project name: " + name;
     if (manifest.contains("git_provider") && manifest.at("git_provider").is_string()) {
-      metadata.detail = *metadata.detail + " · Git provider: " +
-          manifest.at("git_provider").get<std::string>();
+      metadata.detail = *metadata.detail +
+                        " · Git provider: " + manifest.at("git_provider").get<std::string>();
     }
   } catch (const std::exception&) {
     // Settings metadata is optional enrichment and never blocks project History.
@@ -255,12 +266,18 @@ ProjectHistoryObjectKind classify_project_history_path(std::string_view relative
 
 const char* project_history_object_kind_name(ProjectHistoryObjectKind kind) {
   switch (kind) {
-    case ProjectHistoryObjectKind::Card: return "card";
-    case ProjectHistoryObjectKind::Resource: return "resource";
-    case ProjectHistoryObjectKind::Location: return "location";
-    case ProjectHistoryObjectKind::AiData: return "ai_data";
-    case ProjectHistoryObjectKind::ProjectSettings: return "project_settings";
-    case ProjectHistoryObjectKind::Unknown: return "unknown";
+  case ProjectHistoryObjectKind::Card:
+    return "card";
+  case ProjectHistoryObjectKind::Resource:
+    return "resource";
+  case ProjectHistoryObjectKind::Location:
+    return "location";
+  case ProjectHistoryObjectKind::AiData:
+    return "ai_data";
+  case ProjectHistoryObjectKind::ProjectSettings:
+    return "project_settings";
+  case ProjectHistoryObjectKind::Unknown:
+    return "unknown";
   }
   return "unknown";
 }
@@ -290,7 +307,9 @@ ProjectHistoryActivity group_project_history_activity(
     auto found = std::find_if(
         activity.affected_objects.begin(),
         activity.affected_objects.end(),
-        [kind](const auto& object) { return object.kind == kind; }
+        [kind](const auto& object) {
+          return object.kind == kind;
+        }
     );
     if (found == activity.affected_objects.end()) {
       activity.affected_objects.push_back({kind, {{path, std::nullopt, std::nullopt}}});
@@ -309,7 +328,9 @@ bool project_history_activity_matches(
   return std::any_of(
       activity.affected_objects.begin(),
       activity.affected_objects.end(),
-      [&](const auto& object) { return object.kind == *kind_filter; }
+      [&](const auto& object) {
+        return object.kind == *kind_filter;
+      }
   );
 }
 
@@ -331,15 +352,14 @@ ProjectHistoryPage ProjectHistoryService::list(
   constexpr std::size_t kHistoryBatchSize = 64;
 
   while (true) {
-    const auto batch = repo.history_all(
-        std::max(kHistoryBatchSize, limit), raw_cursor, max_scanned_commits_
-    );
+    const auto batch =
+        repo.history_all(std::max(kHistoryBatchSize, limit), raw_cursor, max_scanned_commits_);
     if (batch.commits.empty()) {
       // history_all() returns every scanned commit. It therefore cannot report
       // a scan limit without also returning at least one commit; retain this
       // propagation for defensive compatibility with future Git backends.
       if (batch.scan_limited) { // LCOV_EXCL_LINE
-        page.scan_limited = true;             // LCOV_EXCL_LINE
+        page.scan_limited = true; // LCOV_EXCL_LINE
         page.next_cursor = batch.scan_cursor; // LCOV_EXCL_LINE
       }
       return page;

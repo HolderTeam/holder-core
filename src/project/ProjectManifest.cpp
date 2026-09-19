@@ -83,7 +83,8 @@ std::string render_project_manifest(const holder::model::Project& project) {
       {"version", 1}, // LCOV_EXCL_LINE - GCC assigns no counter to this executed initializer.
       {"project_id", project.project_id},
       {"name", project.name},
-      {"id_scheme", holder::model::to_string(project.id_scheme)}, // LCOV_EXCL_LINE - gcov artefact: multi-line initializer is executed but never counted.
+      {"id_scheme", holder::model::to_string(project.id_scheme)
+      }, // LCOV_EXCL_LINE - gcov artefact: multi-line initializer is executed but never counted.
       {"created_at", project.created_at},
       {"updated_at", project.updated_at},
   };
@@ -101,17 +102,10 @@ std::string render_project_manifest(const holder::model::Project& project) {
   if (!project.project_key_id.has_value() || project.project_key_id->empty()) {
     throw std::invalid_argument("encrypted project must have project_key_id");
   }
-  return holder::privacy::encrypt_project_blob(
-      project.project_id,
-      *project.project_key_id,
-      plain
-  );
+  return holder::privacy::encrypt_project_blob(project.project_id, *project.project_key_id, plain);
 }
 
-void write_project_manifest(
-    holder::git::GitOps& git,
-    const holder::model::Project& project
-) {
+void write_project_manifest(holder::git::GitOps& git, const holder::model::Project& project) {
   auto operation = git.lock_operation(project.root_path);
   git.open_or_init(project.root_path);
   git.write_file(kProjectBootstrapPath, render_project_bootstrap(project));
@@ -133,8 +127,8 @@ holder::model::Project read_project_manifest(const std::filesystem::path& root_p
   project.privacy_mode = required_nonempty_string(bootstrap, "mode", bootstrap_path);
   if (project.privacy_mode != "plain" && project.privacy_mode != "encrypted_git") {
     throw std::runtime_error(
-        "unsupported project privacy mode '" + project.privacy_mode + "': " +
-        bootstrap_path.string()
+        "unsupported project privacy mode '" + project.privacy_mode +
+        "': " + bootstrap_path.string()
     );
   }
   if (bootstrap.contains("key_id") && bootstrap.at("key_id").is_string() &&
@@ -160,7 +154,9 @@ holder::model::Project read_project_manifest(const std::filesystem::path& root_p
   require_version_one(manifest, manifest_path);
   const auto manifest_project_id = required_nonempty_string(manifest, "project_id", manifest_path);
   if (manifest_project_id != project.project_id) {
-    throw std::runtime_error("project manifest id does not match bootstrap: " + manifest_path.string());
+    throw std::runtime_error(
+        "project manifest id does not match bootstrap: " + manifest_path.string()
+    );
   }
   project.name = required_nonempty_string(manifest, "name", manifest_path);
   if (manifest.contains("id_scheme")) {
@@ -174,8 +170,8 @@ holder::model::Project read_project_manifest(const std::filesystem::path& root_p
     );
     if (!id_scheme.has_value()) {
       throw std::runtime_error(
-          "unsupported project id scheme '" +
-          manifest.at("id_scheme").get<std::string>() + "': " + manifest_path.string()
+          "unsupported project id scheme '" + manifest.at("id_scheme").get<std::string>() +
+          "': " + manifest_path.string()
       );
     }
     project.id_scheme = *id_scheme;

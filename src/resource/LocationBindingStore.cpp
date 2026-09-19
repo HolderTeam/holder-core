@@ -11,7 +11,8 @@ constexpr const char* kBindingService = "org.holder.StorageLocation";
 constexpr const char* kPreferredService = "org.holder.PreferredStorageLocation";
 
 std::string binding_account(const std::string& project_id, const std::string& location_id) {
-  if (project_id.empty() || location_id.empty()) throw std::invalid_argument("binding ids required");
+  if (project_id.empty() || location_id.empty())
+    throw std::invalid_argument("binding ids required");
   return project_id + ":" + location_id;
 }
 
@@ -34,7 +35,9 @@ void LocationBindingStore::bind(
   const auto existing = secrets_.get(kBindingService, account);
   const long long created_at = existing.has_value() ? existing->metadata.created_at : now;
   const nlohmann::json body = {
-      {"provider", binding.provider}, {"values", binding.values}, {"version", binding.version}
+      {"provider", binding.provider},
+      {"values", binding.values},
+      {"version", binding.version}
   };
   secrets_.set(kBindingService, account, body.dump(), safe_preview, created_at, now);
 }
@@ -73,7 +76,8 @@ void LocationBindingStore::set_preferred(
     const std::string& location_id,
     long long now
 ) {
-  if (project_id.empty() || location_id.empty()) throw std::invalid_argument("preferred ids required");
+  if (project_id.empty() || location_id.empty())
+    throw std::invalid_argument("preferred ids required");
   const auto existing = secrets_.get(kPreferredService, project_id);
   const long long created_at = existing.has_value() ? existing->metadata.created_at : now;
   secrets_.set(kPreferredService, project_id, location_id, location_id, created_at, now);

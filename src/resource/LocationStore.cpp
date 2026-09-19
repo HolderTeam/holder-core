@@ -15,16 +15,15 @@ holder::core::Fs& resolve_fs(holder::core::Fs* fs) {
   return fs ? *fs : real_fs;
 }
 
-std::string encode_manifest(
-    const holder::model::Project& project,
-    const std::string& plaintext
-) {
+std::string encode_manifest(const holder::model::Project& project, const std::string& plaintext) {
   if (project.privacy_mode != "encrypted_git") return plaintext;
   if (!project.project_key_id.has_value() || project.project_key_id->empty()) {
     throw std::runtime_error("encrypted project missing project_key_id");
   }
   return holder::privacy::encrypt_project_blob(
-      project.project_id, *project.project_key_id, plaintext
+      project.project_id,
+      *project.project_key_id,
+      plaintext
   );
 }
 

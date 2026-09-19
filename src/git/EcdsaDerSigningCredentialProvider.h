@@ -18,7 +18,8 @@ namespace holder::git {
 // Signature.getInstance("SHA256withECDSA") or OpenSSL's ECDSA_do_sign +
 // i2d_ECDSA_SIG. An empty vector, or a thrown exception, is treated as a
 // signing failure for that auth attempt.
-using EcdsaDerSignFn = std::function<std::vector<unsigned char>(const unsigned char* data, size_t data_len)>;
+using EcdsaDerSignFn =
+    std::function<std::vector<unsigned char>(const unsigned char* data, size_t data_len)>;
 
 // Credential provider for an SSH identity backed by a non-exportable ECDSA
 // P-256 private key (Android Keystore, a hardware token, etc). Bridges

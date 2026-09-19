@@ -175,7 +175,9 @@ class GitRepo {
   static RemoteProbeStatus classify_remote_probe_error_for_tests(const std::string& message);
   static PushStatus classify_push_error_for_tests(const std::string& message);
   static std::string configured_default_branch_name_for_tests();
-  GitCredentialProvider* credential_provider_for_tests() const { return credential_provider_.get(); }
+  GitCredentialProvider* credential_provider_for_tests() const {
+    return credential_provider_.get();
+  }
 
   std::filesystem::path repo_dir() const { return repo_dir_; }
 

@@ -61,12 +61,12 @@ std::string schema_sql() {
 
 fs::path make_temp_dir() {
   const auto base = fs::temp_directory_path();
-  const auto suffix = std::to_string(static_cast<unsigned long long>(
-      std::chrono::steady_clock::now().time_since_epoch().count()
-  ));
+  const auto suffix = std::to_string(
+      static_cast<unsigned long long>(std::chrono::steady_clock::now().time_since_epoch().count())
+  );
   static std::atomic<unsigned long long> counter{0};
-  auto dir = base / ("holder_git_concurrency_" + suffix + "_" +
-                     std::to_string(counter.fetch_add(1)));
+  auto dir = base /
+             ("holder_git_concurrency_" + suffix + "_" + std::to_string(counter.fetch_add(1)));
   fs::create_directories(dir);
   return dir;
 }
@@ -120,8 +120,10 @@ struct ErrorSink {
 
 } // namespace
 
-TEST_CASE("concurrent CardStore operations on one project keep the Git repo intact",
-          "[concurrency][git]") {
+TEST_CASE(
+    "concurrent CardStore operations on one project keep the Git repo intact",
+    "[concurrency][git]"
+) {
   const auto dir = make_temp_dir();
   const auto db_path = dir / "holder.db";
   const auto project_root = dir / "repo";
@@ -138,7 +140,10 @@ TEST_CASE("concurrent CardStore operations on one project keep the Git repo inta
     holder::index::FtsIndexer fts(*setup_db);
     holder::card::CardStore store(*setup_db, &fts);
     for (int i = 0; i < kCards; ++i) {
-      store.create(make_card("cccard" + std::to_string(i), project_id, i), "seed body " + std::to_string(i));
+      store.create(
+          make_card("cccard" + std::to_string(i), project_id, i),
+          "seed body " + std::to_string(i)
+      );
     }
   }
 
@@ -220,8 +225,10 @@ TEST_CASE("concurrent CardStore operations on one project keep the Git repo inta
   }
 }
 
-TEST_CASE("concurrent get_content and card writes on the same card never crash or throw",
-          "[concurrency][git]") {
+TEST_CASE(
+    "concurrent get_content and card writes on the same card never crash or throw",
+    "[concurrency][git]"
+) {
   const auto dir = make_temp_dir();
   const auto db_path = dir / "holder.db";
   const auto project_root = dir / "repo";
@@ -264,8 +271,10 @@ TEST_CASE("concurrent get_content and card writes on the same card never crash o
           holder::card::CardStore store(*dbs[t], ftses[t].get());
           if (is_writer) {
             store.update_content(
-                card_id, "rewrite " + std::to_string(t) + "/" + std::to_string(i),
-                std::nullopt, 5000 + t * 1000 + i
+                card_id,
+                "rewrite " + std::to_string(t) + "/" + std::to_string(i),
+                std::nullopt,
+                5000 + t * 1000 + i
             );
           } else {
             holder::card::CardRepo repo(*dbs[t]);
@@ -276,8 +285,8 @@ TEST_CASE("concurrent get_content and card writes on the same card never crash o
             }
             const auto body = store.get_content(card.value());
             const bool recognizable = body.has_value() &&
-                (body->find("body") != std::string::npos ||
-                 body->find("rewrite") != std::string::npos);
+                                      (body->find("body") != std::string::npos ||
+                                       body->find("rewrite") != std::string::npos);
             if (!recognizable) {
               sink.record("hot card body torn: '" + body.value_or("<null>") + "'");
               return;
@@ -298,8 +307,10 @@ TEST_CASE("concurrent get_content and card writes on the same card never crash o
   sink.require_empty();
 }
 
-TEST_CASE("per-project locks let independent projects run Git operations concurrently",
-          "[concurrency][git]") {
+TEST_CASE(
+    "per-project locks let independent projects run Git operations concurrently",
+    "[concurrency][git]"
+) {
   // If holder-core serialized all Git work behind one process-wide lock, only
   // one thread could hold a project open at a time. Each thread opens its own
   // project (which acquires that project's lock for the CardStore's lifetime)
@@ -351,7 +362,9 @@ TEST_CASE("per-project locks let independent projects run Git operations concurr
           released = true;
           cv.notify_all();
         } else {
-          const bool ok = cv.wait_for(lock, std::chrono::seconds(10), [&]() { return released; });
+          const bool ok = cv.wait_for(lock, std::chrono::seconds(10), [&]() {
+            return released;
+          });
           if (!ok) {
             sink.record("barrier timed out -- Git operations appear globally serialized");
           }

@@ -78,7 +78,9 @@ TEST_CASE(
       project.root_path,
       std::nullopt,
       1,
-      []() { return "test-key-1"; }
+      []() {
+        return "test-key-1";
+      }
   );
   const auto seeded_project = remote_projects.get(project_id).value();
 
@@ -124,7 +126,12 @@ TEST_CASE(
   auto stale_project = local_project;
   stale_project.id_scheme = holder::model::IdScheme::Uuid4;
   const int resolved = holder::sync::resolve_pull_conflicts(
-      local_db, &local_fts, stale_project, local_git, diverged, 3
+      local_db,
+      &local_fts,
+      stale_project,
+      local_git,
+      diverged,
+      3
   );
   REQUIRE(resolved == 1);
 
@@ -176,7 +183,9 @@ TEST_CASE(
       project.root_path,
       std::nullopt,
       1,
-      []() { return "test-key-1"; }
+      []() {
+        return "test-key-1";
+      }
   );
   const auto seeded_project = remote_projects.get(project_id).value();
 
@@ -222,7 +231,12 @@ TEST_CASE(
   REQUIRE(diverged_seen);
 
   const int resolved = holder::sync::resolve_pull_conflicts(
-      local_db, &local_fts, local_project, local_git, diverged, 3
+      local_db,
+      &local_fts,
+      local_project,
+      local_git,
+      diverged,
+      3
   );
   REQUIRE(resolved == 0);
 }
@@ -273,7 +287,12 @@ TEST_CASE("resolve_pull_conflicts creates UUIDv4 copies for UUIDv4 projects", "[
   REQUIRE(diverged_seen);
 
   const int resolved = holder::sync::resolve_pull_conflicts(
-      local_db, &local_fts, local_project, local_git, diverged, 3
+      local_db,
+      &local_fts,
+      local_project,
+      local_git,
+      diverged,
+      3
   );
   REQUIRE(resolved == 1);
 
@@ -302,7 +321,12 @@ TEST_CASE("resolve_pull_conflicts rejects a project that no longer exists", "[sy
 
   REQUIRE_THROWS_WITH(
       holder::sync::resolve_pull_conflicts(
-          db, &fts, project, git, holder::git::NonFastForwardPullError("", "", ""), 3
+          db,
+          &fts,
+          project,
+          git,
+          holder::git::NonFastForwardPullError("", "", ""),
+          3
       ),
       "project not found: proj-gone"
   );
@@ -363,7 +387,12 @@ TEST_CASE("resolve_pull_conflicts skips a conflict it cannot copy into the index
   int resolved = -1;
   REQUIRE_NOTHROW(
       resolved = holder::sync::resolve_pull_conflicts(
-          local_db, &local_fts, local_project, local_git, diverged, 3
+          local_db,
+          &local_fts,
+          local_project,
+          local_git,
+          diverged,
+          3
       )
   );
   REQUIRE(resolved == 0);

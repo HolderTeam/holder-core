@@ -51,8 +51,11 @@ void platform_keyring_remove_secret(const PlatformKeyringSecretRef& ref);
 // wrong) needs no allocation.
 using PlatformKeyringExternalLookupFn =
     std::function<PlatformKeyringLookupResult(const PlatformKeyringSecretRef&)>;
-using PlatformKeyringExternalStoreFn = std::function<
-    std::optional<std::string>(const PlatformKeyringSecretRef&, const std::string& label, const std::string& secret)>;
+using PlatformKeyringExternalStoreFn = std::function<std::optional<std::string>(
+    const PlatformKeyringSecretRef&,
+    const std::string& label,
+    const std::string& secret
+)>;
 using PlatformKeyringExternalRemoveFn =
     std::function<std::optional<std::string>(const PlatformKeyringSecretRef&)>;
 

@@ -151,16 +151,14 @@ std::vector<std::string> TagRepo::list_card_ids_with_tag(
   return out;
 } // LCOV_EXCL_LINE
 
-std::vector<std::pair<std::string, int>> TagRepo::list_project_tags(
-    const std::string& project_id
+std::vector<std::pair<std::string, int>> TagRepo::list_project_tags(const std::string& project_id
 ) const {
   // Same trashed-card guard as list_card_ids_with_tag -- a phantom row in card_tags for a
   // trashed card shouldn't inflate its tag's count here even though search wouldn't surface it.
-  static constexpr const char* SQL =
-      "SELECT ct.tag, COUNT(*) AS c FROM card_tags ct "
-      "JOIN cards c2 ON c2.card_id = ct.card_id "
-      "WHERE ct.project_id = ? AND c2.deleted_at IS NULL "
-      "GROUP BY ct.tag ORDER BY c DESC, ct.tag ASC;";
+  static constexpr const char* SQL = "SELECT ct.tag, COUNT(*) AS c FROM card_tags ct "
+                                     "JOIN cards c2 ON c2.card_id = ct.card_id "
+                                     "WHERE ct.project_id = ? AND c2.deleted_at IS NULL "
+                                     "GROUP BY ct.tag ORDER BY c DESC, ct.tag ASC;";
   sqlite3_stmt* stmt = nullptr;
   if (sqlite3_prepare_v2(db_.handle(), SQL, -1, &stmt, nullptr) != SQLITE_OK) {
     throw_sqlite(db_.handle(), "prepare list project tags failed");

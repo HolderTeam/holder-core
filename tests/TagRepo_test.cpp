@@ -31,7 +31,11 @@ void create_project(holder::platform::Db& db, const std::string& project_id) {
   repo.create(project);
 }
 
-void create_card(holder::platform::Db& db, const std::string& card_id, const std::string& project_id) {
+void create_card(
+    holder::platform::Db& db,
+    const std::string& card_id,
+    const std::string& project_id
+) {
   holder::card::CardRepo repo(db);
   holder::model::Card card;
   card.card_id = card_id;
@@ -46,7 +50,10 @@ void create_card(holder::platform::Db& db, const std::string& card_id, const std
 
 } // namespace
 
-TEST_CASE("TagRepo set_tags_for_card inserts and list_tags_for_card reads them back sorted", "[tagrepo]") {
+TEST_CASE(
+    "TagRepo set_tags_for_card inserts and list_tags_for_card reads them back sorted",
+    "[tagrepo]"
+) {
   const auto dir = holder::test::make_temp_dir();
   auto db = holder::test::open_db_with_schema(dir / "holder.db");
   create_project(db, "proj-1");
@@ -55,7 +62,9 @@ TEST_CASE("TagRepo set_tags_for_card inserts and list_tags_for_card reads them b
   holder::card::TagRepo repo(db);
   repo.set_tags_for_card("proj-1", "card-a", {"todo", "android"}, 10);
 
-  REQUIRE(repo.list_tags_for_card("proj-1", "card-a") == std::vector<std::string>{"android", "todo"});
+  REQUIRE(
+      repo.list_tags_for_card("proj-1", "card-a") == std::vector<std::string>{"android", "todo"}
+  );
 }
 
 TEST_CASE("TagRepo set_tags_for_card replaces the whole set, not upserts", "[tagrepo]") {
@@ -180,10 +189,7 @@ TEST_CASE("TagRepo list_project_tags counts distinct tags, most-used first", "[t
   REQUIRE(tags[1] == std::make_pair(std::string("urgent"), 1));
 }
 
-TEST_CASE(
-    "TagRepo list_project_tags excludes a trashed card's tags from the count",
-    "[tagrepo]"
-) {
+TEST_CASE("TagRepo list_project_tags excludes a trashed card's tags from the count", "[tagrepo]") {
   const auto dir = holder::test::make_temp_dir();
   auto db = holder::test::open_db_with_schema(dir / "holder.db");
   create_project(db, "proj-1");
@@ -269,7 +275,9 @@ TEST_CASE("TagRepo set_tags_for_card rejects a duplicate tag in the same call", 
   // this throws after the first "todo" insert already landed, not as an all-or-nothing rollback.
   REQUIRE_THROWS_WITH(
       repo.set_tags_for_card("proj-1", "card-a", {"todo", "todo"}, 10),
-      Catch::Matchers::ContainsSubstring("insert tag failed: UNIQUE constraint failed: card_tags.project_id, card_tags.card_id, card_tags.tag")
+      Catch::Matchers::ContainsSubstring(
+          "insert tag failed: UNIQUE constraint failed: card_tags.project_id, card_tags.card_id, card_tags.tag"
+      )
   );
   REQUIRE(repo.list_tags_for_card("proj-1", "card-a") == std::vector<std::string>{"todo"});
 }

@@ -62,7 +62,10 @@ CardPlacementRequest into_request(const std::string& target_card_id) {
   return request;
 }
 
-CardPlacementRequest before_after_request(CardPlacementIntent intent, const std::string& target_card_id) {
+CardPlacementRequest before_after_request(
+    CardPlacementIntent intent,
+    const std::string& target_card_id
+) {
   CardPlacementRequest request;
   request.intent = intent;
   request.target_card_id = target_card_id;
@@ -129,7 +132,10 @@ TEST_CASE("CardPlacementResolver Into targets a card with children", "[card][pla
   REQUIRE(result.moved_into_title == "B");
 }
 
-TEST_CASE("CardPlacementResolver Into rejects moving a card into its own descendant", "[card][placement]") {
+TEST_CASE(
+    "CardPlacementResolver Into rejects moving a card into its own descendant",
+    "[card][placement]"
+) {
   const auto dir = holder::test::make_temp_dir();
   auto db = holder::test::open_db_with_schema(dir / "holder.db");
   create_project(db, "proj-1");
@@ -222,7 +228,10 @@ TEST_CASE("CardPlacementResolver Before with self as target is invalid", "[card]
   );
 }
 
-TEST_CASE("CardPlacementResolver ToStart/ToEnd honor an explicit parent override", "[card][placement]") {
+TEST_CASE(
+    "CardPlacementResolver ToStart/ToEnd honor an explicit parent override",
+    "[card][placement]"
+) {
   const auto dir = holder::test::make_temp_dir();
   auto db = holder::test::open_db_with_schema(dir / "holder.db");
   create_project(db, "proj-1");
@@ -273,7 +282,10 @@ TEST_CASE("CardPlacementResolver ToStart/ToEnd honor an explicit parent override
   REQUIRE(to_end.sort_key == 16.0);
 }
 
-TEST_CASE("CardPlacementResolver ToStart/ToEnd no-op when the target parent has no other children", "[card][placement]") {
+TEST_CASE(
+    "CardPlacementResolver ToStart/ToEnd no-op when the target parent has no other children",
+    "[card][placement]"
+) {
   const auto dir = holder::test::make_temp_dir();
   auto db = holder::test::open_db_with_schema(dir / "holder.db");
   create_project(db, "proj-1");
@@ -306,8 +318,24 @@ TEST_CASE("CardPlacementResolver excludes deleted tied siblings", "[card][placem
 
   holder::card::CardRepo cards(db);
   CardPlacementResolver resolver(cards);
-  create_card(cards, "abababab-0000-4000-8000-000000000001", "proj-1", "Later", 20.0, std::nullopt, 2);
-  create_card(cards, "abababab-0000-4000-8000-000000000002", "proj-1", "Earlier", 20.0, std::nullopt, 3);
+  create_card(
+      cards,
+      "abababab-0000-4000-8000-000000000001",
+      "proj-1",
+      "Later",
+      20.0,
+      std::nullopt,
+      2
+  );
+  create_card(
+      cards,
+      "abababab-0000-4000-8000-000000000002",
+      "proj-1",
+      "Earlier",
+      20.0,
+      std::nullopt,
+      3
+  );
   create_card(
       cards,
       "abababab-0000-4000-8000-000000000004",
@@ -320,7 +348,9 @@ TEST_CASE("CardPlacementResolver excludes deleted tied siblings", "[card][placem
   );
 
   const auto ordered = resolver.resolve(
-      "proj-1", "abababab-0000-4000-8000-000000000001", simple_request(CardPlacementIntent::ToStart)
+      "proj-1",
+      "abababab-0000-4000-8000-000000000001",
+      simple_request(CardPlacementIntent::ToStart)
   );
   REQUIRE(ordered.sort_key == 19.0);
 }
@@ -373,7 +403,10 @@ TEST_CASE("CardPlacementResolver Left/Right move within siblings", "[card][place
   REQUIRE(right_last.sort_key == 30.0);
 }
 
-TEST_CASE("CardPlacementResolver UpLevel from a nested card sets moved_into_title", "[card][placement]") {
+TEST_CASE(
+    "CardPlacementResolver UpLevel from a nested card sets moved_into_title",
+    "[card][placement]"
+) {
   const auto dir = holder::test::make_temp_dir();
   auto db = holder::test::open_db_with_schema(dir / "holder.db");
   create_project(db, "proj-1");
@@ -407,7 +440,10 @@ TEST_CASE("CardPlacementResolver UpLevel from a nested card sets moved_into_titl
   REQUIRE(result.moved_into_title == "Grandparent");
 }
 
-TEST_CASE("CardPlacementResolver UpLevel from a root card is already_at_project_root", "[card][placement]") {
+TEST_CASE(
+    "CardPlacementResolver UpLevel from a root card is already_at_project_root",
+    "[card][placement]"
+) {
   const auto dir = holder::test::make_temp_dir();
   auto db = holder::test::open_db_with_schema(dir / "holder.db");
   create_project(db, "proj-1");
@@ -465,11 +501,7 @@ TEST_CASE("CardPlacementResolver rejects a missing or cross-project card", "[car
   );
 
   REQUIRE_THROWS_WITH(
-      resolver.resolve(
-          "proj-1",
-          "does-not-exist",
-          simple_request(CardPlacementIntent::UpLevel)
-      ),
+      resolver.resolve("proj-1", "does-not-exist", simple_request(CardPlacementIntent::UpLevel)),
       "card_not_found"
   );
   REQUIRE_THROWS_WITH(
@@ -498,7 +530,10 @@ TEST_CASE("CardPlacementResolver rejects a missing or cross-project card", "[car
   );
 }
 
-TEST_CASE("CardPlacementResolver handles tied siblings and parent edge cases", "[card][placement]") {
+TEST_CASE(
+    "CardPlacementResolver handles tied siblings and parent edge cases",
+    "[card][placement]"
+) {
   const auto dir = holder::test::make_temp_dir();
   auto db = holder::test::open_db_with_schema(dir / "holder.db");
   create_project(db, "proj-1");
@@ -514,18 +549,25 @@ TEST_CASE("CardPlacementResolver handles tied siblings and parent edge cases", "
   create_card(cards, title_last, "proj-1", "Z", 20.0, std::nullopt, 2);
   create_card(cards, deleted_parent, "proj-1", "Deleted parent", 30.0, std::nullopt, 1, 9);
 
-  REQUIRE(resolver.resolve("proj-1", source,
-                           simple_request(CardPlacementIntent::ToEnd)).sort_key == 21.0);
+  REQUIRE(
+      resolver.resolve("proj-1", source, simple_request(CardPlacementIntent::ToEnd)).sort_key ==
+      21.0
+  );
   // Siblings order as [A, Z], so "after A" sits in a zero-width gap and steps past it (21.0).
   // Were Z first, A would be last and the result would be the midpoint 20.5.
-  REQUIRE(resolver.resolve("proj-1", source,
-                           before_after_request(CardPlacementIntent::After, title_first))
-              .sort_key == 21.0);
-  REQUIRE(resolver.resolve("proj-1", source,
-                           before_after_request(CardPlacementIntent::Before, title_last))
-              .sort_key == 19.0);
+  REQUIRE(
+      resolver
+          .resolve("proj-1", source, before_after_request(CardPlacementIntent::After, title_first))
+          .sort_key == 21.0
+  );
+  REQUIRE(
+      resolver
+          .resolve("proj-1", source, before_after_request(CardPlacementIntent::Before, title_last))
+          .sort_key == 19.0
+  );
   REQUIRE_THROWS_WITH(
-      resolver.resolve("proj-1", source, simple_request(CardPlacementIntent::ToStart, deleted_parent)),
+      resolver
+          .resolve("proj-1", source, simple_request(CardPlacementIntent::ToStart, deleted_parent)),
       "target_not_found"
   );
   REQUIRE_THROWS_WITH(
@@ -539,7 +581,10 @@ TEST_CASE("CardPlacementResolver handles tied siblings and parent edge cases", "
   REQUIRE_FALSE(up.parent_card_id.has_value());
 }
 
-TEST_CASE("CardPlacementResolver treats a blank parent_card_id override as the project root", "[card][placement]") {
+TEST_CASE(
+    "CardPlacementResolver treats a blank parent_card_id override as the project root",
+    "[card][placement]"
+) {
   const auto dir = holder::test::make_temp_dir();
   auto db = holder::test::open_db_with_schema(dir / "holder.db");
   create_project(db, "proj-1");
@@ -560,8 +605,10 @@ TEST_CASE("CardPlacementResolver treats a blank parent_card_id override as the p
   REQUIRE(result.sort_key == 21.0);
 }
 
-TEST_CASE("CardPlacementResolver Into tolerates a target whose ancestor is in another project",
-          "[card][placement]") {
+TEST_CASE(
+    "CardPlacementResolver Into tolerates a target whose ancestor is in another project",
+    "[card][placement]"
+) {
   const auto dir = holder::test::make_temp_dir();
   auto db = holder::test::open_db_with_schema(dir / "holder.db");
   create_project(db, "proj-1");
@@ -582,8 +629,10 @@ TEST_CASE("CardPlacementResolver Into tolerates a target whose ancestor is in an
   REQUIRE(result.moved_into_title == "Target");
 }
 
-TEST_CASE("CardPlacementResolver Left/Right are no-ops under a parent override that isn't the card's own",
-          "[card][placement]") {
+TEST_CASE(
+    "CardPlacementResolver Left/Right are no-ops under a parent override that isn't the card's own",
+    "[card][placement]"
+) {
   const auto dir = holder::test::make_temp_dir();
   auto db = holder::test::open_db_with_schema(dir / "holder.db");
   create_project(db, "proj-1");
@@ -618,6 +667,7 @@ TEST_CASE("CardPlacementResolver rejects an out-of-range intent", "[card][placem
   CardPlacementRequest request;
   request.intent = static_cast<CardPlacementIntent>(99);
   REQUIRE_THROWS_WITH(
-      resolver.resolve("proj-1", "aaaaaaaa-1111-4000-8000-000000000001", request), "invalid_move_intent"
+      resolver.resolve("proj-1", "aaaaaaaa-1111-4000-8000-000000000001", request),
+      "invalid_move_intent"
   );
 }

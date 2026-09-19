@@ -448,7 +448,10 @@ TEST_CASE("AiMessageRepo trash throws for missing message and missing content", 
   );
 }
 
-TEST_CASE("AiMessageRepo remove falls back to deleting the row when its thread is absent", "[aimessagerepo]") {
+TEST_CASE(
+    "AiMessageRepo remove falls back to deleting the row when its thread is absent",
+    "[aimessagerepo]"
+) {
   const auto dir = make_temp_dir();
   holder::platform::Db db;
   db.open(dir / "holder.db");
@@ -601,19 +604,26 @@ TEST_CASE("AiMessageRepo sqlite prepare failures throw", "[aimessagerepo]") {
 
   REQUIRE_THROWS_WITH(
       repo.append(msg),
-      Catch::Matchers::ContainsSubstring("prepare insert ai message failed: no such table: ai_messages")
+      Catch::Matchers::ContainsSubstring(
+          "prepare insert ai message failed: no such table: ai_messages"
+      )
   );
   REQUIRE_THROWS_WITH(
       repo.get("anything"),
-      Catch::Matchers::ContainsSubstring("prepare get ai message failed: no such table: ai_messages")
+      Catch::Matchers::ContainsSubstring("prepare get ai message failed: no such table: ai_messages"
+      )
   );
   REQUIRE_THROWS_WITH(
       repo.list_by_thread("thread-1"),
-      Catch::Matchers::ContainsSubstring("prepare list ai messages failed: no such table: ai_messages")
+      Catch::Matchers::ContainsSubstring(
+          "prepare list ai messages failed: no such table: ai_messages"
+      )
   );
   REQUIRE_THROWS_WITH(
       repo.list_deleted_by_project("proj-1"),
-      Catch::Matchers::ContainsSubstring("prepare list deleted ai messages failed: no such table: ai_messages")
+      Catch::Matchers::ContainsSubstring(
+          "prepare list deleted ai messages failed: no such table: ai_messages"
+      )
   );
 
   holder::model::AiMessage update_msg;
@@ -625,7 +635,9 @@ TEST_CASE("AiMessageRepo sqlite prepare failures throw", "[aimessagerepo]") {
   update_msg.created_at = 99;
   REQUIRE_THROWS_WITH(
       repo.update(update_msg),
-      Catch::Matchers::ContainsSubstring("prepare update ai message failed: no such table: ai_messages")
+      Catch::Matchers::ContainsSubstring(
+          "prepare update ai message failed: no such table: ai_messages"
+      )
   );
 }
 

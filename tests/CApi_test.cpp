@@ -207,7 +207,9 @@ std::string seed_encrypted_project(
       project.root_path,
       std::nullopt,
       20,
-      [project_id]() { return "key-" + project_id; }
+      [project_id]() {
+        return "key-" + project_id;
+      }
   );
 
   return repo.get(project_id).value().project_key_id.value();
@@ -246,10 +248,12 @@ TEST_CASE("C API reports invalid context open arguments", "[capi]") {
 
   const auto data_dir = holder::test::make_temp_dir();
   std::filesystem::create_directories(data_dir / "server" / "holder.db");
-  holder_context *context = nullptr;
+  holder_context* context = nullptr;
   error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), nullptr, &context,
-                              &error) == HOLDER_ERROR_RUNTIME);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), nullptr, &context, &error) ==
+      HOLDER_ERROR_RUNTIME
+  );
   REQUIRE(context == nullptr);
   REQUIRE(error != nullptr);
   holder_error_destroy(error);
@@ -261,7 +265,9 @@ TEST_CASE("C API opens context and lists empty projects", "[capi]") {
 
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
   REQUIRE(context != nullptr);
   REQUIRE(error == nullptr);
 
@@ -275,19 +281,30 @@ TEST_CASE("C API opens context and lists empty projects", "[capi]") {
   holder_context_destroy(context);
 }
 
-TEST_CASE("C API validates database rebuild arguments and reports rebuild failures", "[capi][rebuild]") {
+TEST_CASE(
+    "C API validates database rebuild arguments and reports rebuild failures",
+    "[capi][rebuild]"
+) {
   const auto data_dir = holder::test::make_temp_dir();
   const auto schema = read_schema_sql();
   holder_error* error = nullptr;
   char* json = nullptr;
 
-  REQUIRE(holder_database_rebuild(data_dir.string().c_str(), schema.c_str(), 1, nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_database_rebuild(data_dir.string().c_str(), schema.c_str(), 1, nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
   holder_error_destroy(error);
   error = nullptr;
-  REQUIRE(holder_database_rebuild("", schema.c_str(), 1, &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_database_rebuild("", schema.c_str(), 1, &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
   holder_error_destroy(error);
   error = nullptr;
-  REQUIRE(holder_database_rebuild(data_dir.string().c_str(), "", 1, &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_database_rebuild(data_dir.string().c_str(), "", 1, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
   holder_error_destroy(error);
   error = nullptr;
   REQUIRE(
@@ -303,10 +320,15 @@ TEST_CASE("C API rebuilds its SQLite projection from managed project files", "[c
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* project_json = nullptr;
-  REQUIRE(holder_project_create(context, "Rebuild me", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_project_create(context, "Rebuild me", nullptr, nullptr, &project_json, &error) ==
+      HOLDER_OK
+  );
   const auto project = nlohmann::json::parse(project_json);
   const auto project_id = project.at("project_id").get<std::string>();
   holder_string_free(project_json);
@@ -314,8 +336,13 @@ TEST_CASE("C API rebuilds its SQLite projection from managed project files", "[c
   char* card_json = nullptr;
   REQUIRE(
       holder_card_create(
-          context, project_id.c_str(), "Durable card", "Body survives", nullptr,
-          &card_json, &error
+          context,
+          project_id.c_str(),
+          "Durable card",
+          "Body survives",
+          nullptr,
+          &card_json,
+          &error
       ) == HOLDER_OK
   );
   const auto card_id = nlohmann::json::parse(card_json).at("card_id").get<std::string>();
@@ -324,9 +351,8 @@ TEST_CASE("C API rebuilds its SQLite projection from managed project files", "[c
 
   char* report_json = nullptr;
   REQUIRE(
-      holder_database_rebuild(
-          data_dir.string().c_str(), schema.c_str(), 1, &report_json, &error
-      ) == HOLDER_OK
+      holder_database_rebuild(data_dir.string().c_str(), schema.c_str(), 1, &report_json, &error) ==
+      HOLDER_OK
   );
   const auto dry_run = nlohmann::json::parse(report_json);
   REQUIRE(dry_run.at("dry_run") == true);
@@ -345,9 +371,8 @@ TEST_CASE("C API rebuilds its SQLite projection from managed project files", "[c
   holder_error_destroy(error);
   error = nullptr;
   REQUIRE(
-      holder_database_rebuild(
-          data_dir.string().c_str(), schema.c_str(), 0, &report_json, &error
-      ) == HOLDER_OK
+      holder_database_rebuild(data_dir.string().c_str(), schema.c_str(), 0, &report_json, &error) ==
+      HOLDER_OK
   );
   const auto rebuilt = nlohmann::json::parse(report_json);
   REQUIRE(rebuilt.at("previous_health") == "missing");
@@ -360,7 +385,9 @@ TEST_CASE("C API rebuilds its SQLite projection from managed project files", "[c
   REQUIRE_FALSE(std::filesystem::exists(rebuild_temporary.string() + "-shm"));
 
   context = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
   char* projects_json = nullptr;
   REQUIRE(holder_project_list(context, &projects_json, &error) == HOLDER_OK);
   const auto recovered_projects = nlohmann::json::parse(projects_json);
@@ -397,18 +424,28 @@ TEST_CASE(
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* project_json = nullptr;
-  REQUIRE(holder_project_create(context, "Stale schema", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_project_create(context, "Stale schema", nullptr, nullptr, &project_json, &error) ==
+      HOLDER_OK
+  );
   const auto project_id = nlohmann::json::parse(project_json).at("project_id").get<std::string>();
   holder_string_free(project_json);
 
   char* card_json = nullptr;
   REQUIRE(
       holder_card_create(
-          context, project_id.c_str(), "Durable card", "Body survives an in-place app update",
-          nullptr, &card_json, &error
+          context,
+          project_id.c_str(),
+          "Durable card",
+          "Body survives an in-place app update",
+          nullptr,
+          &card_json,
+          &error
       ) == HOLDER_OK
   );
   const auto card_id = nlohmann::json::parse(card_json).at("card_id").get<std::string>();
@@ -428,7 +465,9 @@ TEST_CASE(
   }
 
   context = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
   char* content = nullptr;
   REQUIRE(holder_card_get_content(context, card_id.c_str(), &content, &error) == HOLDER_OK);
   REQUIRE(std::string(content) == "Body survives an in-place app update");
@@ -449,7 +488,9 @@ TEST_CASE("C API lists empty cards as JSON", "[capi]") {
 
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(holder_card_list(context, "project-1", &json, &error) == HOLDER_OK);
@@ -468,7 +509,9 @@ TEST_CASE("C API lists cards as JSON", "[capi]") {
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(holder_card_list(context, "project-1", &json, &error) == HOLDER_OK);
@@ -505,7 +548,9 @@ TEST_CASE("C API reports invalid card list arguments", "[capi]") {
   const auto data_dir = holder::test::make_temp_dir();
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   REQUIRE(holder_card_list(context, "", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
   REQUIRE(error != nullptr);
@@ -521,7 +566,9 @@ TEST_CASE("C API creates a plain project defaulting root_path and privacy_mode",
 
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(holder_project_create(context, "Home", nullptr, nullptr, &json, &error) == HOLDER_OK);
@@ -547,8 +594,15 @@ TEST_CASE("C API creates a plain project defaulting root_path and privacy_mode",
 
   char* card_json = nullptr;
   REQUIRE(
-      holder_card_create(context, project_id.c_str(), "Welcome", nullptr, nullptr, &card_json, &error) ==
-      HOLDER_OK
+      holder_card_create(
+          context,
+          project_id.c_str(),
+          "Welcome",
+          nullptr,
+          nullptr,
+          &card_json,
+          &error
+      ) == HOLDER_OK
   );
   holder_string_free(card_json);
   REQUIRE(std::filesystem::is_directory(std::filesystem::path(root_path) / ".git"));
@@ -565,7 +619,10 @@ TEST_CASE("C API reports invalid project create arguments", "[capi]") {
   holder_error* error = nullptr;
   char* json = nullptr;
 
-  REQUIRE(holder_project_create(nullptr, "Home", nullptr, nullptr, &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_project_create(nullptr, "Home", nullptr, nullptr, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
   REQUIRE(json == nullptr);
   REQUIRE(error != nullptr);
   holder_error_destroy(error);
@@ -574,9 +631,14 @@ TEST_CASE("C API reports invalid project create arguments", "[capi]") {
   const auto data_dir = holder::test::make_temp_dir();
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
-  REQUIRE(holder_project_create(context, "", nullptr, nullptr, &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_project_create(context, "", nullptr, nullptr, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
   REQUIRE(error != nullptr);
   REQUIRE(std::string(holder_error_message(error)).find("name") != std::string::npos);
 
@@ -590,15 +652,23 @@ TEST_CASE("C API renames a project", "[capi]") {
 
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* project_json = nullptr;
-  REQUIRE(holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
-  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>();
+  REQUIRE(
+      holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK
+  );
+  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>(
+  );
   holder_string_free(project_json);
 
   char* renamed_json = nullptr;
-  REQUIRE(holder_project_rename(context, project_id.c_str(), "Personal", &renamed_json, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_project_rename(context, project_id.c_str(), "Personal", &renamed_json, &error) ==
+      HOLDER_OK
+  );
   REQUIRE(nlohmann::json::parse(renamed_json)["name"] == "Personal");
   holder_string_free(renamed_json);
 
@@ -626,7 +696,9 @@ TEST_CASE("C API reports invalid project rename arguments", "[capi]") {
   const auto data_dir = holder::test::make_temp_dir();
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   REQUIRE(
       holder_project_rename(context, "missing-project", "New Name", &json, &error) ==
@@ -645,17 +717,29 @@ TEST_CASE("C API deletes a project and cascades its cards", "[capi]") {
 
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* project_json = nullptr;
-  REQUIRE(holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
-  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>();
+  REQUIRE(
+      holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK
+  );
+  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>(
+  );
   holder_string_free(project_json);
 
   char* card_json = nullptr;
   REQUIRE(
-      holder_card_create(context, project_id.c_str(), "Welcome", nullptr, nullptr, &card_json, &error) ==
-      HOLDER_OK
+      holder_card_create(
+          context,
+          project_id.c_str(),
+          "Welcome",
+          nullptr,
+          nullptr,
+          &card_json,
+          &error
+      ) == HOLDER_OK
   );
   holder_string_free(card_json);
 
@@ -680,7 +764,9 @@ TEST_CASE("C API reports invalid project delete arguments", "[capi]") {
   const auto data_dir = holder::test::make_temp_dir();
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   REQUIRE(holder_project_delete(context, "missing-project", &error) == HOLDER_ERROR_RUNTIME);
   REQUIRE(error != nullptr);
@@ -696,11 +782,16 @@ TEST_CASE("C API creates a card with generated id and rel_path", "[capi]") {
 
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* project_json = nullptr;
-  REQUIRE(holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
-  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>();
+  REQUIRE(
+      holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK
+  );
+  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>(
+  );
   holder_string_free(project_json);
 
   char* card_json = nullptr;
@@ -750,7 +841,9 @@ TEST_CASE("C API creates UUIDv4 card IDs for UUIDv4 projects", "[capi]") {
 
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* card_json = nullptr;
   REQUIRE(
@@ -779,11 +872,16 @@ TEST_CASE("C API gets a card's content", "[capi]") {
 
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* project_json = nullptr;
-  REQUIRE(holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
-  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>();
+  REQUIRE(
+      holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK
+  );
+  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>(
+  );
   holder_string_free(project_json);
 
   char* card_json = nullptr;
@@ -817,10 +915,14 @@ TEST_CASE("C API reports card not found for get_content", "[capi]") {
 
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* content = nullptr;
-  REQUIRE(holder_card_get_content(context, "missing-card", &content, &error) == HOLDER_ERROR_RUNTIME);
+  REQUIRE(
+      holder_card_get_content(context, "missing-card", &content, &error) == HOLDER_ERROR_RUNTIME
+  );
   REQUIRE(content == nullptr);
   REQUIRE(error != nullptr);
   REQUIRE(std::string(holder_error_message(error)).find("not found") != std::string::npos);
@@ -844,11 +946,11 @@ TEST_CASE("C API reports invalid card get_content arguments", "[capi]") {
   const auto data_dir = holder::test::make_temp_dir();
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
-
   REQUIRE(
-      holder_card_get_content(context, "", &content, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
   );
+
+  REQUIRE(holder_card_get_content(context, "", &content, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
   REQUIRE(error != nullptr);
   REQUIRE(std::string(holder_error_message(error)).find("card_id") != std::string::npos);
 
@@ -862,25 +964,43 @@ TEST_CASE("C API resolves a card reference by full id", "[capi]") {
 
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* project_json = nullptr;
-  REQUIRE(holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
-  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>();
+  REQUIRE(
+      holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK
+  );
+  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>(
+  );
   holder_string_free(project_json);
 
   char* card_json = nullptr;
   REQUIRE(
-      holder_card_create(context, project_id.c_str(), "Sourdough Notes", "body", nullptr, &card_json, &error) ==
-      HOLDER_OK
+      holder_card_create(
+          context,
+          project_id.c_str(),
+          "Sourdough Notes",
+          "body",
+          nullptr,
+          &card_json,
+          &error
+      ) == HOLDER_OK
   );
   const std::string card_id = nlohmann::json::parse(card_json)["card_id"].get<std::string>();
   holder_string_free(card_json);
 
   char* json = nullptr;
   REQUIRE(
-      holder_card_reference_resolve(context, project_id.c_str(), card_id.c_str(), 0, &json, &error) ==
-      HOLDER_OK
+      holder_card_reference_resolve(
+          context,
+          project_id.c_str(),
+          card_id.c_str(),
+          0,
+          &json,
+          &error
+      ) == HOLDER_OK
   );
   REQUIRE(error == nullptr);
   const auto result = nlohmann::json::parse(json);
@@ -898,17 +1018,29 @@ TEST_CASE("C API resolves a card reference by unambiguous id prefix", "[capi]") 
 
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* project_json = nullptr;
-  REQUIRE(holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
-  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>();
+  REQUIRE(
+      holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK
+  );
+  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>(
+  );
   holder_string_free(project_json);
 
   char* card_json = nullptr;
   REQUIRE(
-      holder_card_create(context, project_id.c_str(), "Sourdough Notes", "body", nullptr, &card_json, &error) ==
-      HOLDER_OK
+      holder_card_create(
+          context,
+          project_id.c_str(),
+          "Sourdough Notes",
+          "body",
+          nullptr,
+          &card_json,
+          &error
+      ) == HOLDER_OK
   );
   const std::string card_id = nlohmann::json::parse(card_json)["card_id"].get<std::string>();
   holder_string_free(card_json);
@@ -916,8 +1048,14 @@ TEST_CASE("C API resolves a card reference by unambiguous id prefix", "[capi]") 
   const std::string prefix = card_id.substr(0, 8);
   char* json = nullptr;
   REQUIRE(
-      holder_card_reference_resolve(context, project_id.c_str(), prefix.c_str(), 0, &json, &error) ==
-      HOLDER_OK
+      holder_card_reference_resolve(
+          context,
+          project_id.c_str(),
+          prefix.c_str(),
+          0,
+          &json,
+          &error
+      ) == HOLDER_OK
   );
   REQUIRE(error == nullptr);
   const auto result = nlohmann::json::parse(json);
@@ -935,17 +1073,29 @@ TEST_CASE("C API resolves a card reference by exact title", "[capi]") {
 
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* project_json = nullptr;
-  REQUIRE(holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
-  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>();
+  REQUIRE(
+      holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK
+  );
+  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>(
+  );
   holder_string_free(project_json);
 
   char* card_json = nullptr;
   REQUIRE(
-      holder_card_create(context, project_id.c_str(), "Sourdough Notes", "body", nullptr, &card_json, &error) ==
-      HOLDER_OK
+      holder_card_create(
+          context,
+          project_id.c_str(),
+          "Sourdough Notes",
+          "body",
+          nullptr,
+          &card_json,
+          &error
+      ) == HOLDER_OK
   );
   const std::string card_id = nlohmann::json::parse(card_json)["card_id"].get<std::string>();
   holder_string_free(card_json);
@@ -953,7 +1103,12 @@ TEST_CASE("C API resolves a card reference by exact title", "[capi]") {
   char* json = nullptr;
   REQUIRE(
       holder_card_reference_resolve(
-          context, project_id.c_str(), "Sourdough Notes", 0, &json, &error
+          context,
+          project_id.c_str(),
+          "Sourdough Notes",
+          0,
+          &json,
+          &error
       ) == HOLDER_OK
   );
   REQUIRE(error == nullptr);
@@ -972,25 +1127,44 @@ TEST_CASE("C API reports ambiguous card reference for duplicate titles", "[capi]
 
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* project_json = nullptr;
-  REQUIRE(holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
-  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>();
+  REQUIRE(
+      holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK
+  );
+  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>(
+  );
   holder_string_free(project_json);
 
   char* card_json = nullptr;
   REQUIRE(
-      holder_card_create(context, project_id.c_str(), "Duplicate", "first", nullptr, &card_json, &error) ==
-      HOLDER_OK
+      holder_card_create(
+          context,
+          project_id.c_str(),
+          "Duplicate",
+          "first",
+          nullptr,
+          &card_json,
+          &error
+      ) == HOLDER_OK
   );
   const std::string first_id = nlohmann::json::parse(card_json)["card_id"].get<std::string>();
   holder_string_free(card_json);
 
   card_json = nullptr;
   REQUIRE(
-      holder_card_create(context, project_id.c_str(), "Duplicate", "second", nullptr, &card_json, &error) ==
-      HOLDER_OK
+      holder_card_create(
+          context,
+          project_id.c_str(),
+          "Duplicate",
+          "second",
+          nullptr,
+          &card_json,
+          &error
+      ) == HOLDER_OK
   );
   const std::string second_id = nlohmann::json::parse(card_json)["card_id"].get<std::string>();
   holder_string_free(card_json);
@@ -1022,17 +1196,28 @@ TEST_CASE("C API reports not_found for an unresolved card reference", "[capi]") 
 
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* project_json = nullptr;
-  REQUIRE(holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
-  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>();
+  REQUIRE(
+      holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK
+  );
+  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>(
+  );
   holder_string_free(project_json);
 
   char* json = nullptr;
   REQUIRE(
-      holder_card_reference_resolve(context, project_id.c_str(), "Nonexistent Card", 0, &json, &error) ==
-      HOLDER_OK
+      holder_card_reference_resolve(
+          context,
+          project_id.c_str(),
+          "Nonexistent Card",
+          0,
+          &json,
+          &error
+      ) == HOLDER_OK
   );
   REQUIRE(error == nullptr);
   const auto result = nlohmann::json::parse(json);
@@ -1058,10 +1243,13 @@ TEST_CASE("C API reports invalid card_reference_resolve arguments", "[capi]") {
   const auto data_dir = holder::test::make_temp_dir();
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   REQUIRE(
-      holder_card_reference_resolve(context, "", "ref", 0, &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+      holder_card_reference_resolve(context, "", "ref", 0, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
   );
   REQUIRE(error != nullptr);
   REQUIRE(std::string(holder_error_message(error)).find("project_id") != std::string::npos);
@@ -1094,28 +1282,45 @@ TEST_CASE("C API moves a card into another card", "[capi]") {
 
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* project_json = nullptr;
-  REQUIRE(holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
-  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>();
+  REQUIRE(
+      holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK
+  );
+  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>(
+  );
   holder_string_free(project_json);
 
   char* a_json = nullptr;
-  REQUIRE(holder_card_create(context, project_id.c_str(), "A", "body", nullptr, &a_json, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_card_create(context, project_id.c_str(), "A", "body", nullptr, &a_json, &error) ==
+      HOLDER_OK
+  );
   const std::string a_id = nlohmann::json::parse(a_json)["card_id"].get<std::string>();
   holder_string_free(a_json);
 
   char* b_json = nullptr;
-  REQUIRE(holder_card_create(context, project_id.c_str(), "B", "body", nullptr, &b_json, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_card_create(context, project_id.c_str(), "B", "body", nullptr, &b_json, &error) ==
+      HOLDER_OK
+  );
   const std::string b_id = nlohmann::json::parse(b_json)["card_id"].get<std::string>();
   holder_string_free(b_json);
 
   char* move_json = nullptr;
   const std::string request = R"({"intent":"into","target_card_id":")" + b_id + "\"}";
   REQUIRE(
-      holder_card_move_json(context, project_id.c_str(), a_id.c_str(), request.c_str(), &move_json, &error) ==
-      HOLDER_OK
+      holder_card_move_json(
+          context,
+          project_id.c_str(),
+          a_id.c_str(),
+          request.c_str(),
+          &move_json,
+          &error
+      ) == HOLDER_OK
   );
   REQUIRE(error == nullptr);
   const auto result = nlohmann::json::parse(move_json);
@@ -1135,21 +1340,30 @@ TEST_CASE("C API move rejects a cycle, an unknown target, and an unknown intent"
 
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* project_json = nullptr;
-  REQUIRE(holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
-  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>();
+  REQUIRE(
+      holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK
+  );
+  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>(
+  );
   holder_string_free(project_json);
 
   char* a_json = nullptr;
-  REQUIRE(holder_card_create(context, project_id.c_str(), "A", "body", nullptr, &a_json, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_card_create(context, project_id.c_str(), "A", "body", nullptr, &a_json, &error) ==
+      HOLDER_OK
+  );
   const std::string a_id = nlohmann::json::parse(a_json)["card_id"].get<std::string>();
   holder_string_free(a_json);
 
   char* b_json = nullptr;
   REQUIRE(
-      holder_card_create(context, project_id.c_str(), "B", "body", a_id.c_str(), &b_json, &error) == HOLDER_OK
+      holder_card_create(context, project_id.c_str(), "B", "body", a_id.c_str(), &b_json, &error) ==
+      HOLDER_OK
   );
   const std::string b_id = nlohmann::json::parse(b_json)["card_id"].get<std::string>();
   holder_string_free(b_json);
@@ -1158,7 +1372,12 @@ TEST_CASE("C API move rejects a cycle, an unknown target, and an unknown intent"
   const std::string cycle_request = R"({"intent":"into","target_card_id":")" + b_id + "\"}";
   REQUIRE(
       holder_card_move_json(
-          context, project_id.c_str(), a_id.c_str(), cycle_request.c_str(), &cycle_json, &error
+          context,
+          project_id.c_str(),
+          a_id.c_str(),
+          cycle_request.c_str(),
+          &cycle_json,
+          &error
       ) == HOLDER_ERROR_RUNTIME
   );
   REQUIRE(cycle_json == nullptr);
@@ -1208,8 +1427,14 @@ TEST_CASE("C API reports invalid card move arguments", "[capi]") {
   char* json = nullptr;
 
   REQUIRE(
-      holder_card_move_json(nullptr, "project-1", "card-1", R"({"intent":"up_level"})", &json, &error) ==
-      HOLDER_ERROR_INVALID_ARGUMENT
+      holder_card_move_json(
+          nullptr,
+          "project-1",
+          "card-1",
+          R"({"intent":"up_level"})",
+          &json,
+          &error
+      ) == HOLDER_ERROR_INVALID_ARGUMENT
   );
   REQUIRE(json == nullptr);
   REQUIRE(error != nullptr);
@@ -1219,7 +1444,9 @@ TEST_CASE("C API reports invalid card move arguments", "[capi]") {
   const auto data_dir = holder::test::make_temp_dir();
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   REQUIRE(
       holder_card_move_json(context, "", "card-1", R"({"intent":"up_level"})", &json, &error) ==
@@ -1266,7 +1493,9 @@ TEST_CASE("C API reports invalid card create arguments", "[capi]") {
   const auto data_dir = holder::test::make_temp_dir();
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   REQUIRE(
       holder_card_create(context, "project-1", "", nullptr, nullptr, &json, &error) ==
@@ -1285,25 +1514,43 @@ TEST_CASE("C API updates a card's content and title", "[capi]") {
 
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* project_json = nullptr;
-  REQUIRE(holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
-  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>();
+  REQUIRE(
+      holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK
+  );
+  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>(
+  );
   holder_string_free(project_json);
 
   char* card_json = nullptr;
   REQUIRE(
-      holder_card_create(context, project_id.c_str(), "Welcome", "Original body", nullptr, &card_json, &error) ==
-      HOLDER_OK
+      holder_card_create(
+          context,
+          project_id.c_str(),
+          "Welcome",
+          "Original body",
+          nullptr,
+          &card_json,
+          &error
+      ) == HOLDER_OK
   );
   const std::string card_id = nlohmann::json::parse(card_json)["card_id"].get<std::string>();
   holder_string_free(card_json);
 
   char* updated_json = nullptr;
   REQUIRE(
-      holder_card_update_content(context, card_id.c_str(), "New body", "Renamed", &updated_json, &error) ==
-      HOLDER_OK
+      holder_card_update_content(
+          context,
+          card_id.c_str(),
+          "New body",
+          "Renamed",
+          &updated_json,
+          &error
+      ) == HOLDER_OK
   );
   REQUIRE(nlohmann::json::parse(updated_json)["title"] == "Renamed");
   holder_string_free(updated_json);
@@ -1332,7 +1579,9 @@ TEST_CASE("C API reports invalid card update_content arguments", "[capi]") {
   const auto data_dir = holder::test::make_temp_dir();
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   REQUIRE(
       holder_card_update_content(context, "missing-card", "content", nullptr, &json, &error) ==
@@ -1350,17 +1599,29 @@ TEST_CASE("C API deletes (trashes) a card so it stops appearing in the list", "[
 
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* project_json = nullptr;
-  REQUIRE(holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
-  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>();
+  REQUIRE(
+      holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK
+  );
+  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>(
+  );
   holder_string_free(project_json);
 
   char* card_json = nullptr;
   REQUIRE(
-      holder_card_create(context, project_id.c_str(), "Welcome", nullptr, nullptr, &card_json, &error) ==
-      HOLDER_OK
+      holder_card_create(
+          context,
+          project_id.c_str(),
+          "Welcome",
+          nullptr,
+          nullptr,
+          &card_json,
+          &error
+      ) == HOLDER_OK
   );
   const std::string card_id = nlohmann::json::parse(card_json)["card_id"].get<std::string>();
   holder_string_free(card_json);
@@ -1386,7 +1647,9 @@ TEST_CASE("C API reports invalid card delete arguments", "[capi]") {
   const auto data_dir = holder::test::make_temp_dir();
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   REQUIRE(holder_card_delete(context, "missing-card", &error) == HOLDER_ERROR_RUNTIME);
   REQUIRE(error != nullptr);
@@ -1399,7 +1662,9 @@ TEST_CASE("C API reports invalid card list_trashed/restore/purge arguments", "[c
   holder_error* error = nullptr;
   char* json = nullptr;
 
-  REQUIRE(holder_card_list_trashed(nullptr, "project-1", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_card_list_trashed(nullptr, "project-1", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
   REQUIRE(json == nullptr);
   REQUIRE(error != nullptr);
   holder_error_destroy(error);
@@ -1416,7 +1681,10 @@ TEST_CASE("C API reports invalid card list_trashed/restore/purge arguments", "[c
   holder_error_destroy(error);
   error = nullptr;
 
-  REQUIRE(holder_card_list_trashed(nullptr, "project-1", nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_card_list_trashed(nullptr, "project-1", nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
   REQUIRE(error != nullptr);
   holder_error_destroy(error);
   error = nullptr;
@@ -1429,7 +1697,9 @@ TEST_CASE("C API reports invalid card list_trashed/restore/purge arguments", "[c
   const auto data_dir = holder::test::make_temp_dir();
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   REQUIRE(holder_card_list_trashed(context, "", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
   REQUIRE(error != nullptr);
@@ -1464,7 +1734,9 @@ TEST_CASE("C API card_query_json reports invalid arguments", "[capi]") {
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
   char* json = nullptr;
   const auto clear_expected_error = [&]() {
     REQUIRE(error != nullptr);
@@ -1488,7 +1760,8 @@ TEST_CASE("C API card_query_json reports invalid arguments", "[capi]") {
   );
   clear_expected_error();
   REQUIRE(
-      holder_card_query_json(context, "project-1", "", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+      holder_card_query_json(context, "project-1", "", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
   );
   clear_expected_error();
   REQUIRE(
@@ -1512,7 +1785,11 @@ TEST_CASE("C API card_query_json reports invalid arguments", "[capi]") {
   clear_expected_error();
   REQUIRE(
       holder_card_query_json(
-          context, "project-1", R"({"view": "children", "parent_card_id": ""})", &json, &error
+          context,
+          "project-1",
+          R"({"view": "children", "parent_card_id": ""})",
+          &json,
+          &error
       ) == HOLDER_ERROR_INVALID_ARGUMENT
   );
   clear_expected_error();
@@ -1524,13 +1801,23 @@ TEST_CASE("C API card_query_json reports invalid arguments", "[capi]") {
   );
   clear_expected_error();
   REQUIRE(
-      holder_card_query_json(context, "project-1", R"({"view": "recent", "limit": 0})", &json, &error) ==
-      HOLDER_ERROR_INVALID_ARGUMENT
+      holder_card_query_json(
+          context,
+          "project-1",
+          R"({"view": "recent", "limit": 0})",
+          &json,
+          &error
+      ) == HOLDER_ERROR_INVALID_ARGUMENT
   );
   clear_expected_error();
   REQUIRE(
-      holder_card_query_json(context, "project-1", R"({"view": "recent", "limit": -1})", &json, &error) ==
-      HOLDER_ERROR_INVALID_ARGUMENT
+      holder_card_query_json(
+          context,
+          "project-1",
+          R"({"view": "recent", "limit": -1})",
+          &json,
+          &error
+      ) == HOLDER_ERROR_INVALID_ARGUMENT
   );
   clear_expected_error();
 
@@ -1543,14 +1830,23 @@ TEST_CASE("C API card_query_json roots/children/all views return the expected ca
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
-  const auto create_card =
-      [&](const std::string& title, const char* parent_card_id) -> std::string {
+  const auto create_card = [&](const std::string& title,
+                               const char* parent_card_id) -> std::string {
     char* json = nullptr;
     REQUIRE(
-        holder_card_create(context, "project-1", title.c_str(), "body", parent_card_id, &json, &error) ==
-        HOLDER_OK
+        holder_card_create(
+            context,
+            "project-1",
+            title.c_str(),
+            "body",
+            parent_card_id,
+            &json,
+            &error
+        ) == HOLDER_OK
     );
     const auto card_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
     holder_string_free(json);
@@ -1564,13 +1860,15 @@ TEST_CASE("C API card_query_json roots/children/all views return the expected ca
 
   const auto titles_of = [](const nlohmann::json& cards) {
     std::set<std::string> titles;
-    for (const auto& card : cards) titles.insert(card["title"].get<std::string>());
+    for (const auto& card : cards)
+      titles.insert(card["title"].get<std::string>());
     return titles;
   };
 
   char* json = nullptr;
   REQUIRE(
-      holder_card_query_json(context, "project-1", R"({"view": "roots"})", &json, &error) == HOLDER_OK
+      holder_card_query_json(context, "project-1", R"({"view": "roots"})", &json, &error) ==
+      HOLDER_OK
   );
   auto roots = nlohmann::json::parse(json)["cards"];
   holder_string_free(json);
@@ -1578,16 +1876,18 @@ TEST_CASE("C API card_query_json roots/children/all views return the expected ca
   REQUIRE(titles_of(roots) == std::set<std::string>{"Root 1", "Root 2"});
 
   json = nullptr;
-  const std::string children_request =
-      R"({"view": "children", "parent_card_id": ")" + root1 + "\"}";
+  const std::string children_request = R"({"view": "children", "parent_card_id": ")" + root1 +
+                                       "\"}";
   REQUIRE(
-      holder_card_query_json(context, "project-1", children_request.c_str(), &json, &error) == HOLDER_OK
+      holder_card_query_json(context, "project-1", children_request.c_str(), &json, &error) ==
+      HOLDER_OK
   );
   auto children = nlohmann::json::parse(json)["cards"];
   holder_string_free(json);
   REQUIRE(children.size() == 2);
   REQUIRE(titles_of(children) == std::set<std::string>{"Child 1", "Child 2"});
-  for (const auto& card : children) REQUIRE(card["parent_card_id"] == root1);
+  for (const auto& card : children)
+    REQUIRE(card["parent_card_id"] == root1);
 
   json = nullptr;
   REQUIRE(
@@ -1596,15 +1896,13 @@ TEST_CASE("C API card_query_json roots/children/all views return the expected ca
   auto all = nlohmann::json::parse(json)["cards"];
   holder_string_free(json);
   REQUIRE(all.size() == 4);
-  REQUIRE(
-      titles_of(all) == std::set<std::string>{"Root 1", "Root 2", "Child 1", "Child 2"}
-  );
+  REQUIRE(titles_of(all) == std::set<std::string>{"Root 1", "Root 2", "Child 1", "Child 2"});
 
   // A parent with no children (view="children") comes back empty rather than throwing --
   // matches CardRepo::list_children's own behavior for a nonexistent/childless parent_card_id.
   json = nullptr;
-  const std::string empty_children_request =
-      R"({"view": "children", "parent_card_id": ")" + child1 + "\"}";
+  const std::string empty_children_request = R"({"view": "children", "parent_card_id": ")" +
+                                             child1 + "\"}";
   REQUIRE(
       holder_card_query_json(context, "project-1", empty_children_request.c_str(), &json, &error) ==
       HOLDER_OK
@@ -1621,7 +1919,9 @@ TEST_CASE("C API card_query_json recent view paginates by cursor with no overlap
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   std::vector<std::string> card_ids;
   for (const std::string& title : {"Oldest", "Middle", "Newest"}) {
@@ -1645,8 +1945,13 @@ TEST_CASE("C API card_query_json recent view paginates by cursor with no overlap
 
   char* json = nullptr;
   REQUIRE(
-      holder_card_query_json(context, "project-1", R"({"view": "recent", "limit": 2})", &json, &error) ==
-      HOLDER_OK
+      holder_card_query_json(
+          context,
+          "project-1",
+          R"({"view": "recent", "limit": 2})",
+          &json,
+          &error
+      ) == HOLDER_OK
   );
   auto page1 = nlohmann::json::parse(json)["cards"];
   holder_string_free(json);
@@ -1659,10 +1964,11 @@ TEST_CASE("C API card_query_json recent view paginates by cursor with no overlap
 
   json = nullptr;
   const std::string page2_request = R"({"view": "recent", "limit": 2, "before_updated_at": )" +
-                                     std::to_string(cursor_updated_at) + R"(, "before_card_id": ")" +
-                                     cursor_card_id + "\"}";
+                                    std::to_string(cursor_updated_at) + R"(, "before_card_id": ")" +
+                                    cursor_card_id + "\"}";
   REQUIRE(
-      holder_card_query_json(context, "project-1", page2_request.c_str(), &json, &error) == HOLDER_OK
+      holder_card_query_json(context, "project-1", page2_request.c_str(), &json, &error) ==
+      HOLDER_OK
   );
   auto page2 = nlohmann::json::parse(json)["cards"];
   holder_string_free(json);
@@ -1670,8 +1976,10 @@ TEST_CASE("C API card_query_json recent view paginates by cursor with no overlap
   REQUIRE(page2[0]["title"] == "Oldest");
 
   std::set<std::string> page1_ids;
-  for (const auto& card : page1) page1_ids.insert(card["card_id"].get<std::string>());
-  for (const auto& card : page2) REQUIRE(page1_ids.count(card["card_id"].get<std::string>()) == 0);
+  for (const auto& card : page1)
+    page1_ids.insert(card["card_id"].get<std::string>());
+  for (const auto& card : page2)
+    REQUIRE(page1_ids.count(card["card_id"].get<std::string>()) == 0);
 
   holder_context_destroy(context);
 }
@@ -1682,14 +1990,23 @@ TEST_CASE("C API card_query_json include_child_counts adds child_count per card"
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
-  const auto create_card =
-      [&](const std::string& title, const char* parent_card_id) -> std::string {
+  const auto create_card = [&](const std::string& title,
+                               const char* parent_card_id) -> std::string {
     char* json = nullptr;
     REQUIRE(
-        holder_card_create(context, "project-1", title.c_str(), "body", parent_card_id, &json, &error) ==
-        HOLDER_OK
+        holder_card_create(
+            context,
+            "project-1",
+            title.c_str(),
+            "body",
+            parent_card_id,
+            &json,
+            &error
+        ) == HOLDER_OK
     );
     const auto card_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
     holder_string_free(json);
@@ -1704,7 +2021,11 @@ TEST_CASE("C API card_query_json include_child_counts adds child_count per card"
   char* json = nullptr;
   REQUIRE(
       holder_card_query_json(
-          context, "project-1", R"({"view": "roots", "include_child_counts": true})", &json, &error
+          context,
+          "project-1",
+          R"({"view": "roots", "include_child_counts": true})",
+          &json,
+          &error
       ) == HOLDER_OK
   );
   auto roots = nlohmann::json::parse(json)["cards"];
@@ -1722,11 +2043,13 @@ TEST_CASE("C API card_query_json include_child_counts adds child_count per card"
   // Default (omitted include_child_counts) never adds the field.
   json = nullptr;
   REQUIRE(
-      holder_card_query_json(context, "project-1", R"({"view": "roots"})", &json, &error) == HOLDER_OK
+      holder_card_query_json(context, "project-1", R"({"view": "roots"})", &json, &error) ==
+      HOLDER_OK
   );
   auto roots_no_counts = nlohmann::json::parse(json)["cards"];
   holder_string_free(json);
-  for (const auto& card : roots_no_counts) REQUIRE_FALSE(card.contains("child_count"));
+  for (const auto& card : roots_no_counts)
+    REQUIRE_FALSE(card.contains("child_count"));
 
   // list_all includes trashed rows at repository level; the C API must omit them.
   REQUIRE(holder_card_delete(context, child_a.c_str(), &error) == HOLDER_OK);
@@ -1737,7 +2060,8 @@ TEST_CASE("C API card_query_json include_child_counts adds child_count per card"
   const auto all_live = nlohmann::json::parse(json)["cards"];
   holder_string_free(json);
   REQUIRE(all_live.size() == 3);
-  for (const auto& card : all_live) REQUIRE(card["card_id"] != child_a);
+  for (const auto& card : all_live)
+    REQUIRE(card["card_id"] != child_a);
 
   holder_context_destroy(context);
 }
@@ -1753,13 +2077,25 @@ TEST_CASE(
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   // Three plain cards via the C ABI, same as any normal card creation.
   std::vector<std::string> card_ids;
   for (const std::string& title : {"Oldest", "Middle", "Newest"}) {
     char* json = nullptr;
-    REQUIRE(holder_card_create(context, "project-1", title.c_str(), "body text", nullptr, &json, &error) == HOLDER_OK);
+    REQUIRE(
+        holder_card_create(
+            context,
+            "project-1",
+            title.c_str(),
+            "body text",
+            nullptr,
+            &json,
+            &error
+        ) == HOLDER_OK
+    );
     card_ids.push_back(nlohmann::json::parse(json)["card_id"].get<std::string>());
     holder_string_free(json);
   }
@@ -1777,20 +2113,33 @@ TEST_CASE(
 
     holder::card::LinkRepo link_repo(db);
     link_repo.upsert_links(
-        "project-1", card_ids[2],
+        "project-1",
+        card_ids[2],
         {{"project-1", card_ids[2], card_ids[0], "card", "related", std::string("see also"), 300}}
     );
 
     holder::card::MilestoneRepo milestone_repo(db);
     milestone_repo.replace_for_card(
-        "project-1", card_ids[2],
-        {{"m1", "project-1", card_ids[2], 999, 1'111, true,
-          std::string("Deadline"), std::string("ship it"), 300, 300}});
+        "project-1",
+        card_ids[2],
+        {{"m1",
+          "project-1",
+          card_ids[2],
+          999,
+          1'111,
+          true,
+          std::string("Deadline"),
+          std::string("ship it"),
+          300,
+          300}}
+    );
   }
 
   // First page: the two most recently updated cards, newest first.
   char* json = nullptr;
-  REQUIRE(holder_backup_snapshot_page(context, "project-1", 0, nullptr, 2, &json, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_backup_snapshot_page(context, "project-1", 0, nullptr, 2, &json, &error) == HOLDER_OK
+  );
   auto page1 = nlohmann::json::parse(json);
   holder_string_free(json);
 
@@ -1815,7 +2164,13 @@ TEST_CASE(
   json = nullptr;
   REQUIRE(
       holder_backup_snapshot_page(
-          context, "project-1", cursor_updated_at, cursor_card_id.c_str(), 2, &json, &error
+          context,
+          "project-1",
+          cursor_updated_at,
+          cursor_card_id.c_str(),
+          2,
+          &json,
+          &error
       ) == HOLDER_OK
   );
   auto page2 = nlohmann::json::parse(json);
@@ -1834,7 +2189,9 @@ TEST_CASE("C API validates backup snapshot and restore arguments", "[capi]") {
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
   char* json = nullptr;
   const auto clear_expected_error = [&]() {
     REQUIRE(error != nullptr);
@@ -1842,26 +2199,56 @@ TEST_CASE("C API validates backup snapshot and restore arguments", "[capi]") {
     error = nullptr;
   };
 
-  REQUIRE(holder_backup_snapshot_page(context, "project-1", 0, nullptr, 1, nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_backup_snapshot_page(context, "project-1", 0, nullptr, 1, nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
   clear_expected_error();
-  REQUIRE(holder_backup_snapshot_page(nullptr, "project-1", 0, nullptr, 1, &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_backup_snapshot_page(nullptr, "project-1", 0, nullptr, 1, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
   clear_expected_error();
-  REQUIRE(holder_backup_snapshot_page(context, "", 0, nullptr, 1, &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_backup_snapshot_page(context, "", 0, nullptr, 1, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
   clear_expected_error();
-  REQUIRE(holder_backup_snapshot_page(context, "project-1", 0, nullptr, 0, &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_backup_snapshot_page(context, "project-1", 0, nullptr, 0, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
   clear_expected_error();
-  REQUIRE(holder_backup_snapshot_page(context, "missing", 0, nullptr, 1, &json, &error) == HOLDER_ERROR_RUNTIME);
+  REQUIRE(
+      holder_backup_snapshot_page(context, "missing", 0, nullptr, 1, &json, &error) ==
+      HOLDER_ERROR_RUNTIME
+  );
   clear_expected_error();
 
-  REQUIRE(holder_backup_restore(context, "Restored", "plain", "[]", "Restore", nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_backup_restore(context, "Restored", "plain", "[]", "Restore", nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
   clear_expected_error();
-  REQUIRE(holder_backup_restore(nullptr, "Restored", "plain", "[]", "Restore", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_backup_restore(nullptr, "Restored", "plain", "[]", "Restore", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
   clear_expected_error();
-  REQUIRE(holder_backup_restore(context, "", "plain", "[]", "Restore", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_backup_restore(context, "", "plain", "[]", "Restore", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
   clear_expected_error();
-  REQUIRE(holder_backup_restore(context, "Restored", "plain", nullptr, "Restore", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_backup_restore(context, "Restored", "plain", nullptr, "Restore", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
   clear_expected_error();
-  REQUIRE(holder_backup_restore(context, "Restored", "plain", "[]", "", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_backup_restore(context, "Restored", "plain", "[]", "", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
   clear_expected_error();
 
   holder_context_destroy(context);
@@ -1877,7 +2264,9 @@ TEST_CASE(
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   // Same source setup as the backup_snapshot_page test above: three cards, one card-to-card
   // link, one milestone -- so this test proves the actual round trip, not just a hand-built
@@ -1885,7 +2274,17 @@ TEST_CASE(
   std::vector<std::string> card_ids;
   for (const std::string& title : {"Oldest", "Middle", "Newest"}) {
     char* json = nullptr;
-    REQUIRE(holder_card_create(context, "project-1", title.c_str(), "body text", nullptr, &json, &error) == HOLDER_OK);
+    REQUIRE(
+        holder_card_create(
+            context,
+            "project-1",
+            title.c_str(),
+            "body text",
+            nullptr,
+            &json,
+            &error
+        ) == HOLDER_OK
+    );
     card_ids.push_back(nlohmann::json::parse(json)["card_id"].get<std::string>());
     holder_string_free(json);
   }
@@ -1900,20 +2299,33 @@ TEST_CASE(
 
     holder::card::LinkRepo link_repo(db);
     link_repo.upsert_links(
-        "project-1", card_ids[2],
+        "project-1",
+        card_ids[2],
         {{"project-1", card_ids[2], card_ids[0], "card", "related", std::string("see also"), 300}}
     );
 
     holder::card::MilestoneRepo milestone_repo(db);
     milestone_repo.replace_for_card(
-        "project-1", card_ids[2],
-        {{"m1", "project-1", card_ids[2], 999, std::nullopt, true, std::string("Deadline"),
-          std::string("ship it"), 300, 300}}
+        "project-1",
+        card_ids[2],
+        {{"m1",
+          "project-1",
+          card_ids[2],
+          999,
+          std::nullopt,
+          true,
+          std::string("Deadline"),
+          std::string("ship it"),
+          300,
+          300}}
     );
   }
 
   char* page_json = nullptr;
-  REQUIRE(holder_backup_snapshot_page(context, "project-1", 0, nullptr, 10, &page_json, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_backup_snapshot_page(context, "project-1", 0, nullptr, 10, &page_json, &error) ==
+      HOLDER_OK
+  );
   const auto page = nlohmann::json::parse(page_json);
   holder_string_free(page_json);
   REQUIRE(page["cards"].size() == 3);
@@ -1921,10 +2333,16 @@ TEST_CASE(
 
   char* restored_json = nullptr;
   const int restore_rc = holder_backup_restore(
-      context, "Restored Project", "plain", cards_json.c_str(), "Restored from Android backup",
-      &restored_json, &error
+      context,
+      "Restored Project",
+      "plain",
+      cards_json.c_str(),
+      "Restored from Android backup",
+      &restored_json,
+      &error
   );
-  const std::string restore_error_message = error != nullptr ? holder_error_message(error) : "no error";
+  const std::string restore_error_message = error != nullptr ? holder_error_message(error)
+                                                             : "no error";
   INFO(restore_error_message);
   REQUIRE(restore_rc == HOLDER_OK);
   const auto restored_project = nlohmann::json::parse(restored_json);
@@ -1963,7 +2381,13 @@ TEST_CASE(
   char* restored_page_json = nullptr;
   REQUIRE(
       holder_backup_snapshot_page(
-          context, new_project_id.c_str(), 0, nullptr, 10, &restored_page_json, &error
+          context,
+          new_project_id.c_str(),
+          0,
+          nullptr,
+          10,
+          &restored_page_json,
+          &error
       ) == HOLDER_OK
   );
   const auto restored_page = nlohmann::json::parse(restored_page_json);
@@ -1991,16 +2415,15 @@ TEST_CASE(
   holder_context_destroy(context);
 }
 
-TEST_CASE(
-    "C API backup_restore rolls back the new project if the batch fails partway",
-    "[capi]"
-) {
+TEST_CASE("C API backup_restore rolls back the new project if the batch fails partway", "[capi]") {
   const auto data_dir = holder::test::make_temp_dir();
 
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* list_before_json = nullptr;
   REQUIRE(holder_project_list(context, &list_before_json, &error) == HOLDER_OK);
@@ -2029,8 +2452,13 @@ TEST_CASE(
 
   char* restored_json = nullptr;
   const int rc = holder_backup_restore(
-      context, "Restored Project", "plain", cards_json.dump().c_str(), "Restored from Android backup",
-      &restored_json, &error
+      context,
+      "Restored Project",
+      "plain",
+      cards_json.dump().c_str(),
+      "Restored from Android backup",
+      &restored_json,
+      &error
   );
   REQUIRE(rc == HOLDER_ERROR_RUNTIME);
   REQUIRE(restored_json == nullptr);
@@ -2047,16 +2475,15 @@ TEST_CASE(
   holder_context_destroy(context);
 }
 
-TEST_CASE(
-    "C API backup_restore stays a single commit at realistic snapshot scale",
-    "[capi]"
-) {
+TEST_CASE("C API backup_restore stays a single commit at realistic snapshot scale", "[capi]") {
   const auto data_dir = holder::test::make_temp_dir();
 
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   // Exercise a substantial end-to-end restore without turning filesystem speed into a unit-test
   // assertion. CardStore_test directly verifies that a batch uses one bulk stage and one commit;
@@ -2076,8 +2503,13 @@ TEST_CASE(
   char* restored_json = nullptr;
   REQUIRE(
       holder_backup_restore(
-          context, "Restored Project", "plain", cards_json.dump().c_str(), "Restored from Android backup",
-          &restored_json, &error
+          context,
+          "Restored Project",
+          "plain",
+          cards_json.dump().c_str(),
+          "Restored from Android backup",
+          &restored_json,
+          &error
       ) == HOLDER_OK
   );
   const auto restored_project = nlohmann::json::parse(restored_json);
@@ -2086,7 +2518,10 @@ TEST_CASE(
   char* list_json = nullptr;
   REQUIRE(
       holder_card_list(
-          context, restored_project["project_id"].get<std::string>().c_str(), &list_json, &error
+          context,
+          restored_project["project_id"].get<std::string>().c_str(),
+          &list_json,
+          &error
       ) == HOLDER_OK
   );
   REQUIRE(nlohmann::json::parse(list_json).size() == kCardCount);
@@ -2105,17 +2540,21 @@ TEST_CASE("C API card_list_trashed lists only soft-deleted cards", "[capi]") {
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(
-      holder_card_create(context, "project-1", "Keep", "keep me", nullptr, &json, &error) == HOLDER_OK
+      holder_card_create(context, "project-1", "Keep", "keep me", nullptr, &json, &error) ==
+      HOLDER_OK
   );
   holder_string_free(json);
 
   json = nullptr;
   REQUIRE(
-      holder_card_create(context, "project-1", "Trash me", "bye", nullptr, &json, &error) == HOLDER_OK
+      holder_card_create(context, "project-1", "Trash me", "bye", nullptr, &json, &error) ==
+      HOLDER_OK
   );
   const std::string trashed_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
   holder_string_free(json);
@@ -2148,12 +2587,21 @@ TEST_CASE("C API card_restore brings a trashed card back with its content intact
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(
-      holder_card_create(context, "project-1", "Undo me", "original content", nullptr, &json, &error) ==
-      HOLDER_OK
+      holder_card_create(
+          context,
+          "project-1",
+          "Undo me",
+          "original content",
+          nullptr,
+          &json,
+          &error
+      ) == HOLDER_OK
   );
   const std::string card_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
   holder_string_free(json);
@@ -2199,12 +2647,21 @@ TEST_CASE("C API card_purge permanently removes a trashed card", "[capi]") {
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(
-      holder_card_create(context, "project-1", "Gone for good", "content", nullptr, &json, &error) ==
-      HOLDER_OK
+      holder_card_create(
+          context,
+          "project-1",
+          "Gone for good",
+          "content",
+          nullptr,
+          &json,
+          &error
+      ) == HOLDER_OK
   );
   const std::string card_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
   holder_string_free(json);
@@ -2224,7 +2681,9 @@ TEST_CASE("C API card_purge permanently removes a trashed card", "[capi]") {
   holder_string_free(json);
 
   char* content = nullptr;
-  REQUIRE(holder_card_get_content(context, card_id.c_str(), &content, &error) == HOLDER_ERROR_RUNTIME);
+  REQUIRE(
+      holder_card_get_content(context, card_id.c_str(), &content, &error) == HOLDER_ERROR_RUNTIME
+  );
   REQUIRE(error != nullptr);
   holder_error_destroy(error);
   error = nullptr;
@@ -2245,11 +2704,14 @@ TEST_CASE("C API card_restore reports missing trash content", "[capi]") {
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(
-      holder_card_create(context, "project-1", "Doomed", "content", nullptr, &json, &error) == HOLDER_OK
+      holder_card_create(context, "project-1", "Doomed", "content", nullptr, &json, &error) ==
+      HOLDER_OK
   );
   const std::string card_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
   holder_string_free(json);
@@ -2271,7 +2733,9 @@ TEST_CASE("C API reports invalid card link arguments", "[capi]") {
   holder_error* error = nullptr;
   char* json = nullptr;
 
-  REQUIRE(holder_card_list_links(nullptr, "card-1", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_card_list_links(nullptr, "card-1", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
   REQUIRE(json == nullptr);
   REQUIRE(error != nullptr);
   holder_error_destroy(error);
@@ -2298,7 +2762,9 @@ TEST_CASE("C API reports invalid card link arguments", "[capi]") {
   seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   REQUIRE(holder_card_list_links(context, "", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
   holder_error_destroy(error);
@@ -2334,7 +2800,8 @@ TEST_CASE("C API reports invalid card link arguments", "[capi]") {
   holder_error_destroy(error);
   error = nullptr;
   REQUIRE(
-      holder_card_link_remove(context, "card-1", "card-2", "", &error) == HOLDER_ERROR_INVALID_ARGUMENT
+      holder_card_link_remove(context, "card-1", "card-2", "", &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
   );
   holder_error_destroy(error);
   error = nullptr;
@@ -2344,8 +2811,15 @@ TEST_CASE("C API reports invalid card link arguments", "[capi]") {
   error = nullptr;
 
   REQUIRE(
-      holder_card_link_add(context, "missing-card", "also-missing", "ref", nullptr, &json, &error) ==
-      HOLDER_ERROR_RUNTIME
+      holder_card_link_add(
+          context,
+          "missing-card",
+          "also-missing",
+          "ref",
+          nullptr,
+          &json,
+          &error
+      ) == HOLDER_ERROR_RUNTIME
   );
   holder_error_destroy(error);
   error = nullptr;
@@ -2357,7 +2831,9 @@ TEST_CASE("C API reports invalid card link arguments", "[capi]") {
   holder_error_destroy(error);
   error = nullptr;
 
-  REQUIRE(holder_card_list_links(context, "card-1", nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_card_list_links(context, "card-1", nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
   holder_error_destroy(error);
   error = nullptr;
   REQUIRE(
@@ -2377,8 +2853,15 @@ TEST_CASE("C API reports invalid card link arguments", "[capi]") {
 
   json = nullptr;
   REQUIRE(
-      holder_card_link_add(context, real_card_id.c_str(), "no-such-target", "ref", nullptr, &json, &error) ==
-      HOLDER_ERROR_RUNTIME
+      holder_card_link_add(
+          context,
+          real_card_id.c_str(),
+          "no-such-target",
+          "ref",
+          nullptr,
+          &json,
+          &error
+      ) == HOLDER_ERROR_RUNTIME
   );
   REQUIRE(std::string(holder_error_message(error)).find("no-such-target") != std::string::npos);
   holder_error_destroy(error);
@@ -2386,23 +2869,31 @@ TEST_CASE("C API reports invalid card link arguments", "[capi]") {
   holder_context_destroy(context);
 }
 
-TEST_CASE("C API card link functions report the underlying sqlite error when card_links is missing", "[capi]") {
+TEST_CASE(
+    "C API card link functions report the underlying sqlite error when card_links is missing",
+    "[capi]"
+) {
   const auto data_dir = holder::test::make_temp_dir();
   seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(
-      holder_card_create(context, "project-1", "From", "content", nullptr, &json, &error) == HOLDER_OK
+      holder_card_create(context, "project-1", "From", "content", nullptr, &json, &error) ==
+      HOLDER_OK
   );
   const std::string from_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
   holder_string_free(json);
 
   json = nullptr;
-  REQUIRE(holder_card_create(context, "project-1", "To", "content", nullptr, &json, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_card_create(context, "project-1", "To", "content", nullptr, &json, &error) == HOLDER_OK
+  );
   const std::string to_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
   holder_string_free(json);
 
@@ -2418,8 +2909,15 @@ TEST_CASE("C API card link functions report the underlying sqlite error when car
   error = nullptr;
 
   REQUIRE(
-      holder_card_link_add(context, from_id.c_str(), to_id.c_str(), "ref", nullptr, &json, &error) ==
-      HOLDER_ERROR_RUNTIME
+      holder_card_link_add(
+          context,
+          from_id.c_str(),
+          to_id.c_str(),
+          "ref",
+          nullptr,
+          &json,
+          &error
+      ) == HOLDER_ERROR_RUNTIME
   );
   holder_error_destroy(error);
   error = nullptr;
@@ -2439,7 +2937,9 @@ TEST_CASE("C API card_link_add/remove round-trips connections with title enrichm
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(
@@ -2451,8 +2951,15 @@ TEST_CASE("C API card_link_add/remove round-trips connections with title enrichm
 
   json = nullptr;
   REQUIRE(
-      holder_card_create(context, "project-1", "Blocking task", "content", nullptr, &json, &error) ==
-      HOLDER_OK
+      holder_card_create(
+          context,
+          "project-1",
+          "Blocking task",
+          "content",
+          nullptr,
+          &json,
+          &error
+      ) == HOLDER_OK
   );
   const std::string blocking_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
   holder_string_free(json);
@@ -2469,7 +2976,13 @@ TEST_CASE("C API card_link_add/remove round-trips connections with title enrichm
   json = nullptr;
   REQUIRE(
       holder_card_link_add(
-          context, blocked_id.c_str(), blocking_id.c_str(), "blocked_by", "waiting on this", &json, &error
+          context,
+          blocked_id.c_str(),
+          blocking_id.c_str(),
+          "blocked_by",
+          "waiting on this",
+          &json,
+          &error
       ) == HOLDER_OK
   );
   auto outgoing = nlohmann::json::parse(json);
@@ -2484,7 +2997,13 @@ TEST_CASE("C API card_link_add/remove round-trips connections with title enrichm
   json = nullptr;
   REQUIRE(
       holder_card_link_add(
-          context, blocked_id.c_str(), blocking_id.c_str(), "blocked_by", "still waiting", &json, &error
+          context,
+          blocked_id.c_str(),
+          blocking_id.c_str(),
+          "blocked_by",
+          "still waiting",
+          &json,
+          &error
       ) == HOLDER_OK
   );
   auto updated_outgoing = nlohmann::json::parse(json);
@@ -2519,7 +3038,15 @@ TEST_CASE("C API card_link_add/remove round-trips connections with title enrichm
   REQUIRE(rebuilt["outgoing"][0]["to_card_id"] == blocking_id);
   holder_string_free(json);
 
-  REQUIRE(holder_card_link_remove(context, blocked_id.c_str(), blocking_id.c_str(), "blocked_by", &error) == HOLDER_OK);
+  REQUIRE(
+      holder_card_link_remove(
+          context,
+          blocked_id.c_str(),
+          blocking_id.c_str(),
+          "blocked_by",
+          &error
+      ) == HOLDER_OK
+  );
 
   json = nullptr;
   REQUIRE(holder_card_list_links(context, blocked_id.c_str(), &json, &error) == HOLDER_OK);
@@ -2532,7 +3059,15 @@ TEST_CASE("C API card_link_add/remove round-trips connections with title enrichm
   holder_string_free(json);
 
   // Removing an already-removed connection is a harmless no-op, not an error.
-  REQUIRE(holder_card_link_remove(context, blocked_id.c_str(), blocking_id.c_str(), "blocked_by", &error) == HOLDER_OK);
+  REQUIRE(
+      holder_card_link_remove(
+          context,
+          blocked_id.c_str(),
+          blocking_id.c_str(),
+          "blocked_by",
+          &error
+      ) == HOLDER_OK
+  );
 
   holder_context_destroy(context);
 }
@@ -2543,7 +3078,9 @@ TEST_CASE("C API card_list_links reflects parent/child hierarchy automatically",
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(
@@ -2556,7 +3093,13 @@ TEST_CASE("C API card_list_links reflects parent/child hierarchy automatically",
   json = nullptr;
   REQUIRE(
       holder_card_create(
-          context, "project-1", "Child card", "content", parent_id.c_str(), &json, &error
+          context,
+          "project-1",
+          "Child card",
+          "content",
+          parent_id.c_str(),
+          &json,
+          &error
       ) == HOLDER_OK
   );
   const std::string child_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
@@ -2566,7 +3109,13 @@ TEST_CASE("C API card_list_links reflects parent/child hierarchy automatically",
   json = nullptr;
   REQUIRE(
       holder_card_create(
-          context, "project-1", "Trashed child", "content", parent_id.c_str(), &json, &error
+          context,
+          "project-1",
+          "Trashed child",
+          "content",
+          parent_id.c_str(),
+          &json,
+          &error
       ) == HOLDER_OK
   );
   const std::string trashed_child_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
@@ -2625,12 +3174,16 @@ TEST_CASE("C API reports invalid tag arguments", "[capi]") {
   seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   REQUIRE(holder_card_list_tags(context, "", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
   holder_error_destroy(error);
   error = nullptr;
-  REQUIRE(holder_card_list_tags(context, "card-1", nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_card_list_tags(context, "card-1", nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
   holder_error_destroy(error);
   error = nullptr;
   REQUIRE(holder_card_list_tags(context, "missing-card", &json, &error) == HOLDER_ERROR_RUNTIME);
@@ -2643,7 +3196,8 @@ TEST_CASE("C API reports invalid tag arguments", "[capi]") {
   holder_error_destroy(error);
   error = nullptr;
   REQUIRE(
-      holder_cards_with_tag(context, "project-1", "", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+      holder_cards_with_tag(context, "project-1", "", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
   );
   holder_error_destroy(error);
   error = nullptr;
@@ -2658,20 +3212,26 @@ TEST_CASE("C API reports invalid tag arguments", "[capi]") {
   holder_error_destroy(error);
   error = nullptr;
   REQUIRE(
-      holder_project_list_tags(context, "project-1", nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+      holder_project_list_tags(context, "project-1", nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
   );
   holder_error_destroy(error);
 
   holder_context_destroy(context);
 }
 
-TEST_CASE("C API validates resource, asset, location, and editable-tag arguments", "[capi][resource]") {
+TEST_CASE(
+    "C API validates resource, asset, location, and editable-tag arguments",
+    "[capi][resource]"
+) {
   const auto data_dir = holder::test::make_temp_dir();
   seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = reinterpret_cast<char*>(1);
   int status = -1;
@@ -2684,9 +3244,13 @@ TEST_CASE("C API validates resource, asset, location, and editable-tag arguments
   REQUIRE(holder_resource_list(context, "", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
   REQUIRE(json == nullptr);
   clear_expected_error();
-  REQUIRE(holder_resource_list(context, "project-1", nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_resource_list(context, "project-1", nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
   clear_expected_error();
-  REQUIRE(holder_resource_list(nullptr, "project-1", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_resource_list(nullptr, "project-1", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
   clear_expected_error();
 
   REQUIRE(holder_resource_get(context, "", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
@@ -2700,7 +3264,10 @@ TEST_CASE("C API validates resource, asset, location, and editable-tag arguments
   clear_expected_error();
   REQUIRE(holder_asset_put_json(context, "", "{}", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
   clear_expected_error();
-  REQUIRE(holder_asset_put_json(context, "missing-resource", "", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_asset_put_json(context, "missing-resource", "", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
   clear_expected_error();
   REQUIRE(holder_asset_delete(context, "", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
   clear_expected_error();
@@ -2714,29 +3281,58 @@ TEST_CASE("C API validates resource, asset, location, and editable-tag arguments
   REQUIRE(holder_location_delete(context, "", &error) == HOLDER_ERROR_INVALID_ARGUMENT);
   clear_expected_error();
 
-  REQUIRE(holder_card_tag_add(context, "card-1", "todo", nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_card_tag_add(context, "card-1", "todo", nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
   clear_expected_error();
-  REQUIRE(holder_card_tag_add(nullptr, "card-1", "todo", &status, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_card_tag_add(nullptr, "card-1", "todo", &status, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
   clear_expected_error();
-  REQUIRE(holder_card_tag_add(context, "", "todo", &status, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_card_tag_add(context, "", "todo", &status, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
   clear_expected_error();
-  REQUIRE(holder_card_tag_add(context, "card-1", "", &status, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_card_tag_add(context, "card-1", "", &status, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
   clear_expected_error();
 
-  REQUIRE(holder_card_tag_remove(context, "card-1", "todo", nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_card_tag_remove(context, "card-1", "todo", nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
   clear_expected_error();
-  REQUIRE(holder_card_tag_remove(nullptr, "card-1", "todo", &status, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_card_tag_remove(nullptr, "card-1", "todo", &status, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
   clear_expected_error();
-  REQUIRE(holder_card_tag_remove(context, "", "todo", &status, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_card_tag_remove(context, "", "todo", &status, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
   clear_expected_error();
-  REQUIRE(holder_card_tag_remove(context, "card-1", "", &status, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_card_tag_remove(context, "card-1", "", &status, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
   clear_expected_error();
 
-  REQUIRE(holder_card_list_editable_tags(context, "card-1", nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_card_list_editable_tags(context, "card-1", nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
   clear_expected_error();
-  REQUIRE(holder_card_list_editable_tags(nullptr, "card-1", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_card_list_editable_tags(nullptr, "card-1", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
   clear_expected_error();
-  REQUIRE(holder_card_list_editable_tags(context, "", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_card_list_editable_tags(context, "", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
   clear_expected_error();
 
   REQUIRE(
@@ -2756,13 +3352,23 @@ TEST_CASE("C API validates resource, asset, location, and editable-tag arguments
   clear_expected_error();
   REQUIRE(
       holder_asset_retrieve(
-          nullptr, "resource-1", "asset-1", "placement-1", "/tmp/destination", &error
+          nullptr,
+          "resource-1",
+          "asset-1",
+          "placement-1",
+          "/tmp/destination",
+          &error
       ) == HOLDER_ERROR_INVALID_ARGUMENT
   );
   clear_expected_error();
   REQUIRE(
       holder_asset_retrieve(
-          context, "missing-resource", "asset-1", "placement-1", "/tmp/destination", &error
+          context,
+          "missing-resource",
+          "asset-1",
+          "placement-1",
+          "/tmp/destination",
+          &error
       ) == HOLDER_ERROR_RUNTIME
   );
   clear_expected_error();
@@ -2776,12 +3382,20 @@ TEST_CASE("C API tags round-trip through create, update, and case-insensitive lo
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(
       holder_card_create(
-          context, "project-1", "Tagged", "Body mentioning #TODO and #android.", nullptr, &json, &error
+          context,
+          "project-1",
+          "Tagged",
+          "Body mentioning #TODO and #android.",
+          nullptr,
+          &json,
+          &error
       ) == HOLDER_OK
   );
   const std::string card_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
@@ -2813,8 +3427,14 @@ TEST_CASE("C API tags round-trip through create, update, and case-insensitive lo
 
   // Editing the body away updates the index, not just adds to it.
   REQUIRE(
-      holder_card_update_content(context, card_id.c_str(), "Only #urgent now.", nullptr, &json, &error) ==
-      HOLDER_OK
+      holder_card_update_content(
+          context,
+          card_id.c_str(),
+          "Only #urgent now.",
+          nullptr,
+          &json,
+          &error
+      ) == HOLDER_OK
   );
   holder_string_free(json);
 
@@ -2852,12 +3472,20 @@ TEST_CASE("C API editable tags can be added, listed, and removed", "[capi]") {
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(
       holder_card_create(
-          context, "project-1", "Tagged", "An inline #reference stays in prose.", nullptr, &json, &error
+          context,
+          "project-1",
+          "Tagged",
+          "An inline #reference stays in prose.",
+          nullptr,
+          &json,
+          &error
       ) == HOLDER_OK
   );
   const std::string card_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
@@ -2874,14 +3502,19 @@ TEST_CASE("C API editable tags can be added, listed, and removed", "[capi]") {
   REQUIRE(nlohmann::json::parse(json) == std::vector<std::string>{"todo"});
   holder_string_free(json);
 
-  REQUIRE(holder_card_tag_remove(context, card_id.c_str(), "reference", &status, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_card_tag_remove(context, card_id.c_str(), "reference", &status, &error) == HOLDER_OK
+  );
   REQUIRE(status == HOLDER_TAG_REMOVE_PRESENT_OUTSIDE_EDITABLE_TAG_LINE);
   REQUIRE(holder_card_tag_remove(context, card_id.c_str(), "todo", &status, &error) == HOLDER_OK);
   REQUIRE(status == HOLDER_TAG_REMOVE_REMOVED);
   REQUIRE(holder_card_tag_remove(context, card_id.c_str(), "todo", &status, &error) == HOLDER_OK);
   REQUIRE(status == HOLDER_TAG_REMOVE_NOT_PRESENT);
 
-  REQUIRE(holder_card_tag_add(context, card_id.c_str(), "not a tag", &status, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_card_tag_add(context, card_id.c_str(), "not a tag", &status, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
   holder_error_destroy(error);
   error = nullptr;
   REQUIRE(
@@ -2893,12 +3526,17 @@ TEST_CASE("C API editable tags can be added, listed, and removed", "[capi]") {
   holder_context_destroy(context);
 }
 
-TEST_CASE("C API cards_with_tag and project_list_tags return nothing for an unknown project", "[capi]") {
+TEST_CASE(
+    "C API cards_with_tag and project_list_tags return nothing for an unknown project",
+    "[capi]"
+) {
   const auto data_dir = holder::test::make_temp_dir();
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(holder_cards_with_tag(context, "no-such-project", "todo", &json, &error) == HOLDER_OK);
@@ -2913,13 +3551,18 @@ TEST_CASE("C API cards_with_tag and project_list_tags return nothing for an unkn
   holder_context_destroy(context);
 }
 
-TEST_CASE("C API tag functions report the underlying sqlite error when card_tags is missing", "[capi]") {
+TEST_CASE(
+    "C API tag functions report the underlying sqlite error when card_tags is missing",
+    "[capi]"
+) {
   const auto data_dir = holder::test::make_temp_dir();
   seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(
@@ -2965,8 +3608,18 @@ TEST_CASE("C API reports invalid milestone arguments", "[capi]") {
   error = nullptr;
 
   REQUIRE(
-      holder_card_milestone_add(nullptr, "card-1", 100, 0, 0, 0, "Deadline", nullptr, &json, &error) ==
-      HOLDER_ERROR_INVALID_ARGUMENT
+      holder_card_milestone_add(
+          nullptr,
+          "card-1",
+          100,
+          0,
+          0,
+          0,
+          "Deadline",
+          nullptr,
+          &json,
+          &error
+      ) == HOLDER_ERROR_INVALID_ARGUMENT
   );
   REQUIRE(json == nullptr);
   REQUIRE(error != nullptr);
@@ -2992,7 +3645,13 @@ TEST_CASE("C API reports invalid milestone arguments", "[capi]") {
 
   REQUIRE(
       holder_card_milestone_update_json(
-          nullptr, "project-1", "card-1", "mile-1", "{}", &json, &error
+          nullptr,
+          "project-1",
+          "card-1",
+          "mile-1",
+          "{}",
+          &json,
+          &error
       ) == HOLDER_ERROR_INVALID_ARGUMENT
   );
   REQUIRE(json == nullptr);
@@ -3004,11 +3663,11 @@ TEST_CASE("C API reports invalid milestone arguments", "[capi]") {
   seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
-
   REQUIRE(
-      holder_card_list_milestones(context, "", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
   );
+
+  REQUIRE(holder_card_list_milestones(context, "", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
   holder_error_destroy(error);
   error = nullptr;
 
@@ -3057,7 +3716,13 @@ TEST_CASE("C API reports invalid milestone arguments", "[capi]") {
   error = nullptr;
   REQUIRE(
       holder_card_milestone_update_json(
-          context, "project-1", "card-1", "mile-1", "", &json, &error
+          context,
+          "project-1",
+          "card-1",
+          "mile-1",
+          "",
+          &json,
+          &error
       ) == HOLDER_ERROR_INVALID_ARGUMENT
   );
   holder_error_destroy(error);
@@ -3071,34 +3736,61 @@ TEST_CASE("C API reports invalid milestone arguments", "[capi]") {
 
   REQUIRE(
       holder_card_milestone_add(
-          context, "missing-card", 100, 0, 0, 0, nullptr, nullptr, &json, &error
+          context,
+          "missing-card",
+          100,
+          0,
+          0,
+          0,
+          nullptr,
+          nullptr,
+          &json,
+          &error
       ) == HOLDER_ERROR_RUNTIME
   );
   holder_error_destroy(error);
   error = nullptr;
 
   REQUIRE(
-      holder_card_milestone_remove(context, "missing-card", "mile-1", &error) == HOLDER_ERROR_RUNTIME
+      holder_card_milestone_remove(context, "missing-card", "mile-1", &error) ==
+      HOLDER_ERROR_RUNTIME
   );
   holder_error_destroy(error);
   error = nullptr;
 
   REQUIRE(
       holder_card_milestone_update_json(
-          context, "project-1", "missing-card", "mile-1", "{}", &json, &error
+          context,
+          "project-1",
+          "missing-card",
+          "mile-1",
+          "{}",
+          &json,
+          &error
       ) == HOLDER_ERROR_RUNTIME
   );
   holder_error_destroy(error);
   error = nullptr;
 
   REQUIRE(
-      holder_card_list_milestones(context, "card-1", nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+      holder_card_list_milestones(context, "card-1", nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
   );
   holder_error_destroy(error);
   error = nullptr;
   REQUIRE(
-      holder_card_milestone_add(context, "card-1", 100, 0, 0, 0, nullptr, nullptr, nullptr, &error) ==
-      HOLDER_ERROR_INVALID_ARGUMENT
+      holder_card_milestone_add(
+          context,
+          "card-1",
+          100,
+          0,
+          0,
+          0,
+          nullptr,
+          nullptr,
+          nullptr,
+          &error
+      ) == HOLDER_ERROR_INVALID_ARGUMENT
   );
   holder_error_destroy(error);
   error = nullptr;
@@ -3110,7 +3802,13 @@ TEST_CASE("C API reports invalid milestone arguments", "[capi]") {
   error = nullptr;
   REQUIRE(
       holder_card_milestone_update_json(
-          context, "project-1", "card-1", "mile-1", "{}", nullptr, &error
+          context,
+          "project-1",
+          "card-1",
+          "mile-1",
+          "{}",
+          nullptr,
+          &error
       ) == HOLDER_ERROR_INVALID_ARGUMENT
   );
   holder_error_destroy(error);
@@ -3127,7 +3825,9 @@ TEST_CASE(
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(
@@ -3147,7 +3847,16 @@ TEST_CASE(
   json = nullptr;
   REQUIRE(
       holder_card_milestone_add(
-          context, card_id.c_str(), 1000, 0, 0, 1, "Renewal", "Car insurance renewal", &json, &error
+          context,
+          card_id.c_str(),
+          1000,
+          0,
+          0,
+          1,
+          "Renewal",
+          "Car insurance renewal",
+          &json,
+          &error
       ) == HOLDER_OK
   );
   auto after_first = nlohmann::json::parse(json);
@@ -3163,8 +3872,18 @@ TEST_CASE(
   // A timed span (has an end_at), no kind/description.
   json = nullptr;
   REQUIRE(
-      holder_card_milestone_add(context, card_id.c_str(), 2000, 1, 2500, 0, nullptr, nullptr, &json, &error) ==
-      HOLDER_OK
+      holder_card_milestone_add(
+          context,
+          card_id.c_str(),
+          2000,
+          1,
+          2500,
+          0,
+          nullptr,
+          nullptr,
+          &json,
+          &error
+      ) == HOLDER_OK
   );
   auto after_second = nlohmann::json::parse(json);
   REQUIRE(after_second.size() == 2);
@@ -3209,7 +3928,9 @@ TEST_CASE(
   holder_string_free(json);
 
   // Removing the first leaves only the second.
-  REQUIRE(holder_card_milestone_remove(context, card_id.c_str(), first_id.c_str(), &error) == HOLDER_OK);
+  REQUIRE(
+      holder_card_milestone_remove(context, card_id.c_str(), first_id.c_str(), &error) == HOLDER_OK
+  );
   json = nullptr;
   REQUIRE(holder_card_list_milestones(context, card_id.c_str(), &json, &error) == HOLDER_OK);
   auto after_remove = nlohmann::json::parse(json);
@@ -3218,7 +3939,9 @@ TEST_CASE(
   holder_string_free(json);
 
   // Removing an already-removed (or never-existing) milestone is a harmless no-op.
-  REQUIRE(holder_card_milestone_remove(context, card_id.c_str(), first_id.c_str(), &error) == HOLDER_OK);
+  REQUIRE(
+      holder_card_milestone_remove(context, card_id.c_str(), first_id.c_str(), &error) == HOLDER_OK
+  );
 
   // Trashing the card removes it from the range query, mirroring tags/the Calendar's own guard.
   REQUIRE(holder_card_delete(context, card_id.c_str(), &error) == HOLDER_OK);
@@ -3239,7 +3962,9 @@ TEST_CASE("C API card_milestone_update_json applies tri-state partial updates", 
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(
@@ -3252,18 +3977,33 @@ TEST_CASE("C API card_milestone_update_json applies tri-state partial updates", 
   json = nullptr;
   REQUIRE(
       holder_card_milestone_add(
-          context, card_id.c_str(), 1000, 1, 5000, 1, "Renewal", "Car insurance renewal", &json, &error
+          context,
+          card_id.c_str(),
+          1000,
+          1,
+          5000,
+          1,
+          "Renewal",
+          "Car insurance renewal",
+          &json,
+          &error
       ) == HOLDER_OK
   );
-  const std::string milestone_id =
-      nlohmann::json::parse(json)[0]["milestone_id"].get<std::string>();
+  const std::string milestone_id = nlohmann::json::parse(json)[0]["milestone_id"].get<std::string>(
+  );
   holder_string_free(json);
 
   // An empty update object is a no-op: everything stays exactly as it was.
   json = nullptr;
   REQUIRE(
       holder_card_milestone_update_json(
-          context, "project-1", card_id.c_str(), milestone_id.c_str(), "{}", &json, &error
+          context,
+          "project-1",
+          card_id.c_str(),
+          milestone_id.c_str(),
+          "{}",
+          &json,
+          &error
       ) == HOLDER_OK
   );
   auto after_noop = nlohmann::json::parse(json);
@@ -3278,8 +4018,13 @@ TEST_CASE("C API card_milestone_update_json applies tri-state partial updates", 
   json = nullptr;
   REQUIRE(
       holder_card_milestone_update_json(
-          context, "project-1", card_id.c_str(), milestone_id.c_str(), R"({"start_at": 2000})",
-          &json, &error
+          context,
+          "project-1",
+          card_id.c_str(),
+          milestone_id.c_str(),
+          R"({"start_at": 2000})",
+          &json,
+          &error
       ) == HOLDER_OK
   );
   auto after_start = nlohmann::json::parse(json);
@@ -3293,8 +4038,13 @@ TEST_CASE("C API card_milestone_update_json applies tri-state partial updates", 
   json = nullptr;
   REQUIRE(
       holder_card_milestone_update_json(
-          context, "project-1", card_id.c_str(), milestone_id.c_str(),
-          R"({"end_at": null, "kind": null, "description": null})", &json, &error
+          context,
+          "project-1",
+          card_id.c_str(),
+          milestone_id.c_str(),
+          R"({"end_at": null, "kind": null, "description": null})",
+          &json,
+          &error
       ) == HOLDER_OK
   );
   auto after_clear = nlohmann::json::parse(json);
@@ -3308,9 +4058,13 @@ TEST_CASE("C API card_milestone_update_json applies tri-state partial updates", 
   json = nullptr;
   REQUIRE(
       holder_card_milestone_update_json(
-          context, "project-1", card_id.c_str(), milestone_id.c_str(),
+          context,
+          "project-1",
+          card_id.c_str(),
+          milestone_id.c_str(),
           R"({"all_day": false, "end_at": 6000, "kind": "Inspection", "description": "Annual check"})",
-          &json, &error
+          &json,
+          &error
       ) == HOLDER_OK
   );
   auto after_replace = nlohmann::json::parse(json);
@@ -3324,8 +4078,13 @@ TEST_CASE("C API card_milestone_update_json applies tri-state partial updates", 
   json = nullptr;
   REQUIRE(
       holder_card_milestone_update_json(
-          context, "project-1", card_id.c_str(), milestone_id.c_str(), R"({"start_at": null})",
-          &json, &error
+          context,
+          "project-1",
+          card_id.c_str(),
+          milestone_id.c_str(),
+          R"({"start_at": null})",
+          &json,
+          &error
       ) == HOLDER_ERROR_INVALID_ARGUMENT
   );
   REQUIRE(json == nullptr);
@@ -3336,8 +4095,13 @@ TEST_CASE("C API card_milestone_update_json applies tri-state partial updates", 
   json = nullptr;
   REQUIRE(
       holder_card_milestone_update_json(
-          context, "project-1", card_id.c_str(), milestone_id.c_str(), R"({"all_day": null})",
-          &json, &error
+          context,
+          "project-1",
+          card_id.c_str(),
+          milestone_id.c_str(),
+          R"({"all_day": null})",
+          &json,
+          &error
       ) == HOLDER_ERROR_INVALID_ARGUMENT
   );
   REQUIRE(json == nullptr);
@@ -3348,21 +4112,39 @@ TEST_CASE("C API card_milestone_update_json applies tri-state partial updates", 
   json = nullptr;
   REQUIRE(
       holder_card_milestone_update_json(
-          context, "wrong-project", card_id.c_str(), milestone_id.c_str(), "{}", &json, &error
+          context,
+          "wrong-project",
+          card_id.c_str(),
+          milestone_id.c_str(),
+          "{}",
+          &json,
+          &error
       ) == HOLDER_ERROR_RUNTIME
   );
   holder_error_destroy(error);
   error = nullptr;
   REQUIRE(
       holder_card_milestone_update_json(
-          context, "project-1", "wrong-card", milestone_id.c_str(), "{}", &json, &error
+          context,
+          "project-1",
+          "wrong-card",
+          milestone_id.c_str(),
+          "{}",
+          &json,
+          &error
       ) == HOLDER_ERROR_RUNTIME
   );
   holder_error_destroy(error);
   error = nullptr;
   REQUIRE(
       holder_card_milestone_update_json(
-          context, "project-1", card_id.c_str(), "wrong-milestone", "{}", &json, &error
+          context,
+          "project-1",
+          card_id.c_str(),
+          "wrong-milestone",
+          "{}",
+          &json,
+          &error
       ) == HOLDER_ERROR_RUNTIME
   );
   holder_error_destroy(error);
@@ -3378,7 +4160,9 @@ TEST_CASE("C API translates repository failures for tags milestones backup and h
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(
@@ -3399,11 +4183,22 @@ TEST_CASE("C API translates repository failures for tags milestones backup and h
     raw.open(data_dir / "server" / "holder.db");
     raw.exec("DROP TABLE milestones;");
   }
-  REQUIRE(holder_card_list_milestones(context, card_id.c_str(), &json, &error) == HOLDER_ERROR_RUNTIME);
+  REQUIRE(
+      holder_card_list_milestones(context, card_id.c_str(), &json, &error) == HOLDER_ERROR_RUNTIME
+  );
   clear_expected_error();
   REQUIRE(
       holder_card_milestone_add(
-          context, card_id.c_str(), 1, 0, 0, 0, nullptr, nullptr, &json, &error
+          context,
+          card_id.c_str(),
+          1,
+          0,
+          0,
+          0,
+          nullptr,
+          nullptr,
+          &json,
+          &error
       ) == HOLDER_ERROR_RUNTIME
   );
   clear_expected_error();
@@ -3424,11 +4219,19 @@ TEST_CASE("C API translates repository failures for tags milestones backup and h
     raw.exec("PRAGMA foreign_keys=OFF; DROP TABLE cards;");
   }
   int status = -1;
-  REQUIRE(holder_card_tag_add(context, card_id.c_str(), "todo", &status, &error) == HOLDER_ERROR_RUNTIME);
+  REQUIRE(
+      holder_card_tag_add(context, card_id.c_str(), "todo", &status, &error) == HOLDER_ERROR_RUNTIME
+  );
   clear_expected_error();
-  REQUIRE(holder_card_tag_remove(context, card_id.c_str(), "todo", &status, &error) == HOLDER_ERROR_RUNTIME);
+  REQUIRE(
+      holder_card_tag_remove(context, card_id.c_str(), "todo", &status, &error) ==
+      HOLDER_ERROR_RUNTIME
+  );
   clear_expected_error();
-  REQUIRE(holder_card_list_editable_tags(context, card_id.c_str(), &json, &error) == HOLDER_ERROR_RUNTIME);
+  REQUIRE(
+      holder_card_list_editable_tags(context, card_id.c_str(), &json, &error) ==
+      HOLDER_ERROR_RUNTIME
+  );
   clear_expected_error();
   REQUIRE(
       holder_backup_snapshot_page(context, "project-1", 0, nullptr, 10, &json, &error) ==
@@ -3443,20 +4246,24 @@ TEST_CASE("C API translates repository failures for tags milestones backup and h
 
   std::filesystem::remove_all(project_root);
   REQUIRE(
-      holder_card_history_list(
-          context, "project-1", card_id.c_str(), nullptr, 10, &json, &error
-      ) == HOLDER_ERROR_RUNTIME
+      holder_card_history_list(context, "project-1", card_id.c_str(), nullptr, 10, &json, &error) ==
+      HOLDER_ERROR_RUNTIME
   );
   clear_expected_error();
   REQUIRE(
       holder_card_history_compare(
-          context, "project-1", card_id.c_str(), "bad-from", "bad-to", &json, &error
+          context,
+          "project-1",
+          card_id.c_str(),
+          "bad-from",
+          "bad-to",
+          &json,
+          &error
       ) == HOLDER_ERROR_RUNTIME
   );
   clear_expected_error();
   holder_context_destroy(context);
 }
-
 
 TEST_CASE(
     "C API card_history_list/compare round-trip a card's grouped commits and comparisons",
@@ -3467,26 +4274,47 @@ TEST_CASE(
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(
-      holder_card_create(context, "project-1", "Original title", "Original body", nullptr, &json, &error) ==
-      HOLDER_OK
+      holder_card_create(
+          context,
+          "project-1",
+          "Original title",
+          "Original body",
+          nullptr,
+          &json,
+          &error
+      ) == HOLDER_OK
   );
   const std::string card_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
   holder_string_free(json);
 
   json = nullptr;
   REQUIRE(
-      holder_card_update_content(context, card_id.c_str(), "First revision", nullptr, &json, &error) ==
-      HOLDER_OK
+      holder_card_update_content(
+          context,
+          card_id.c_str(),
+          "First revision",
+          nullptr,
+          &json,
+          &error
+      ) == HOLDER_OK
   );
   holder_string_free(json);
   json = nullptr;
   REQUIRE(
-      holder_card_update_content(context, card_id.c_str(), "Second revision", nullptr, &json, &error) ==
-      HOLDER_OK
+      holder_card_update_content(
+          context,
+          card_id.c_str(),
+          "Second revision",
+          nullptr,
+          &json,
+          &error
+      ) == HOLDER_OK
   );
   holder_string_free(json);
 
@@ -3513,9 +4341,17 @@ TEST_CASE(
   holder_string_free(json);
 
   json = nullptr;
-  REQUIRE(holder_card_history_list(context, "project-1", card_id.c_str(),
-                                   head_oid.c_str(), 50, &json,
-                                   &error) == HOLDER_OK);
+  REQUIRE(
+      holder_card_history_list(
+          context,
+          "project-1",
+          card_id.c_str(),
+          head_oid.c_str(),
+          50,
+          &json,
+          &error
+      ) == HOLDER_OK
+  );
   holder_string_free(json);
 
   // "This change" for the grouped update entry: no explicit from, captured to =
@@ -3525,7 +4361,13 @@ TEST_CASE(
   json = nullptr;
   REQUIRE(
       holder_card_history_compare(
-          context, "project-1", card_id.c_str(), created_oid.c_str(), head_oid.c_str(), &json, &error
+          context,
+          "project-1",
+          card_id.c_str(),
+          created_oid.c_str(),
+          head_oid.c_str(),
+          &json,
+          &error
       ) == HOLDER_OK
   );
   auto comparison = nlohmann::json::parse(json);
@@ -3541,7 +4383,13 @@ TEST_CASE(
   json = nullptr;
   REQUIRE(
       holder_card_history_compare(
-          context, "project-1", card_id.c_str(), nullptr, created_oid.c_str(), &json, &error
+          context,
+          "project-1",
+          card_id.c_str(),
+          nullptr,
+          created_oid.c_str(),
+          &json,
+          &error
       ) == HOLDER_OK
   );
   comparison = nlohmann::json::parse(json);
@@ -3554,25 +4402,38 @@ TEST_CASE(
   holder_context_destroy(context);
 }
 
-TEST_CASE("C API card_history_restore restores a historical snapshot through the ordinary write path", "[capi]") {
+TEST_CASE(
+    "C API card_history_restore restores a historical snapshot through the ordinary write path",
+    "[capi]"
+) {
   const auto data_dir = holder::test::make_temp_dir();
   seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(
-      holder_card_create(context, "project-1", "Knife care", "Sharpen at 15 degrees", nullptr, &json, &error) ==
-      HOLDER_OK
+      holder_card_create(
+          context,
+          "project-1",
+          "Knife care",
+          "Sharpen at 15 degrees",
+          nullptr,
+          &json,
+          &error
+      ) == HOLDER_OK
   );
   const std::string card_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
   holder_string_free(json);
 
   json = nullptr;
   REQUIRE(
-      holder_card_history_list(context, "project-1", card_id.c_str(), nullptr, 50, &json, &error) == HOLDER_OK
+      holder_card_history_list(context, "project-1", card_id.c_str(), nullptr, 50, &json, &error) ==
+      HOLDER_OK
   );
   const std::string original_oid =
       nlohmann::json::parse(json)["entries"][0]["last_oid"].get<std::string>();
@@ -3581,13 +4442,21 @@ TEST_CASE("C API card_history_restore restores a historical snapshot through the
   json = nullptr;
   REQUIRE(
       holder_card_update_content(
-          context, card_id.c_str(), "Sharpen at 15-20 degrees", "Knife care (updated)", &json, &error
+          context,
+          card_id.c_str(),
+          "Sharpen at 15-20 degrees",
+          "Knife care (updated)",
+          &json,
+          &error
       ) == HOLDER_OK
   );
   holder_string_free(json);
 
   json = nullptr;
-  REQUIRE(holder_card_history_restore(context, card_id.c_str(), original_oid.c_str(), &json, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_card_history_restore(context, card_id.c_str(), original_oid.c_str(), &json, &error) ==
+      HOLDER_OK
+  );
   const auto restored = nlohmann::json::parse(json);
   REQUIRE(restored["card_id"] == card_id);
   REQUIRE(restored["title"] == "Knife care");
@@ -3602,7 +4471,8 @@ TEST_CASE("C API card_history_restore restores a historical snapshot through the
   // remains a reachable entry in the same history, now with one more entry after it.
   json = nullptr;
   REQUIRE(
-      holder_card_history_list(context, "project-1", card_id.c_str(), nullptr, 50, &json, &error) == HOLDER_OK
+      holder_card_history_list(context, "project-1", card_id.c_str(), nullptr, 50, &json, &error) ==
+      HOLDER_OK
   );
   const auto page = nlohmann::json::parse(json);
   REQUIRE(page["entries"].size() == 3);
@@ -3618,7 +4488,9 @@ TEST_CASE("C API reports invalid card history arguments", "[capi]") {
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(
@@ -3678,8 +4550,15 @@ TEST_CASE("C API reports invalid card history arguments", "[capi]") {
 
   error = nullptr;
   REQUIRE(
-      holder_card_history_compare(context, "project-1", "card-1", nullptr, "oid", nullptr, &error) ==
-      HOLDER_ERROR_INVALID_ARGUMENT
+      holder_card_history_compare(
+          context,
+          "project-1",
+          "card-1",
+          nullptr,
+          "oid",
+          nullptr,
+          &error
+      ) == HOLDER_ERROR_INVALID_ARGUMENT
   );
   REQUIRE(error != nullptr);
   holder_error_destroy(error);
@@ -3693,28 +4572,43 @@ TEST_CASE("C API reports invalid card history arguments", "[capi]") {
   holder_error_destroy(error);
 
   error = nullptr;
-  REQUIRE(holder_card_history_compare(context, "", "card-1", nullptr, "oid", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
-  holder_error_destroy(error);
-
-  error = nullptr;
-  REQUIRE(holder_card_history_compare(context, "project-1", "", nullptr, "oid", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
-  holder_error_destroy(error);
-
-  error = nullptr;
-  REQUIRE(holder_card_history_compare(context, "missing", "card-1", nullptr, "oid", &json, &error) == HOLDER_ERROR_RUNTIME);
+  REQUIRE(
+      holder_card_history_compare(context, "", "card-1", nullptr, "oid", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
   holder_error_destroy(error);
 
   error = nullptr;
   REQUIRE(
-      holder_card_history_restore(context, "", "0123456789012345678901234567890123456789", &json, &error) ==
+      holder_card_history_compare(context, "project-1", "", nullptr, "oid", &json, &error) ==
       HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  holder_error_destroy(error);
+
+  error = nullptr;
+  REQUIRE(
+      holder_card_history_compare(context, "missing", "card-1", nullptr, "oid", &json, &error) ==
+      HOLDER_ERROR_RUNTIME
+  );
+  holder_error_destroy(error);
+
+  error = nullptr;
+  REQUIRE(
+      holder_card_history_restore(
+          context,
+          "",
+          "0123456789012345678901234567890123456789",
+          &json,
+          &error
+      ) == HOLDER_ERROR_INVALID_ARGUMENT
   );
   REQUIRE(error != nullptr);
   holder_error_destroy(error);
 
   error = nullptr;
   REQUIRE(
-      holder_card_history_restore(context, "card-1", "", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+      holder_card_history_restore(context, "card-1", "", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
   );
   REQUIRE(error != nullptr);
   holder_error_destroy(error);
@@ -3742,11 +4636,16 @@ TEST_CASE("C API indexes cards for search on create, update, and delete", "[capi
 
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* project_json = nullptr;
-  REQUIRE(holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
-  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>();
+  REQUIRE(
+      holder_project_create(context, "Home", nullptr, nullptr, &project_json, &error) == HOLDER_OK
+  );
+  const std::string project_id = nlohmann::json::parse(project_json)["project_id"].get<std::string>(
+  );
   holder_string_free(project_json);
 
   char* card_json = nullptr;
@@ -3766,7 +4665,8 @@ TEST_CASE("C API indexes cards for search on create, update, and delete", "[capi
 
   char* search_json = nullptr;
   REQUIRE(
-      holder_card_search(context, project_id.c_str(), "sourdough", 20, 0, &search_json, &error) == HOLDER_OK
+      holder_card_search(context, project_id.c_str(), "sourdough", 20, 0, &search_json, &error) ==
+      HOLDER_OK
   );
   auto results = nlohmann::json::parse(search_json);
   REQUIRE(results.size() == 1);
@@ -3776,21 +4676,36 @@ TEST_CASE("C API indexes cards for search on create, update, and delete", "[capi
 
   char* updated_json = nullptr;
   REQUIRE(
-      holder_card_update_content(context, card_id.c_str(), "A recipe for banana bread", nullptr, &updated_json, &error) ==
-      HOLDER_OK
+      holder_card_update_content(
+          context,
+          card_id.c_str(),
+          "A recipe for banana bread",
+          nullptr,
+          &updated_json,
+          &error
+      ) == HOLDER_OK
   );
   holder_string_free(updated_json);
 
-  REQUIRE(holder_card_search(context, project_id.c_str(), "sourdough", 20, 0, &search_json, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_card_search(context, project_id.c_str(), "sourdough", 20, 0, &search_json, &error) ==
+      HOLDER_OK
+  );
   REQUIRE(nlohmann::json::parse(search_json).empty());
   holder_string_free(search_json);
 
-  REQUIRE(holder_card_search(context, project_id.c_str(), "banana", 20, 0, &search_json, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_card_search(context, project_id.c_str(), "banana", 20, 0, &search_json, &error) ==
+      HOLDER_OK
+  );
   REQUIRE(nlohmann::json::parse(search_json).size() == 1);
   holder_string_free(search_json);
 
   REQUIRE(holder_card_delete(context, card_id.c_str(), &error) == HOLDER_OK);
-  REQUIRE(holder_card_search(context, project_id.c_str(), "banana", 20, 0, &search_json, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_card_search(context, project_id.c_str(), "banana", 20, 0, &search_json, &error) ==
+      HOLDER_OK
+  );
   REQUIRE(nlohmann::json::parse(search_json).empty());
   holder_string_free(search_json);
 
@@ -3802,7 +4717,8 @@ TEST_CASE("C API reports invalid card search arguments", "[capi]") {
   char* json = nullptr;
 
   REQUIRE(
-      holder_card_search(nullptr, "project-1", "q", 20, 0, &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+      holder_card_search(nullptr, "project-1", "q", 20, 0, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
   );
   REQUIRE(json == nullptr);
   REQUIRE(error != nullptr);
@@ -3812,10 +4728,13 @@ TEST_CASE("C API reports invalid card search arguments", "[capi]") {
   const auto data_dir = holder::test::make_temp_dir();
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   REQUIRE(
-      holder_card_search(context, "project-1", "", 20, 0, &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+      holder_card_search(context, "project-1", "", 20, 0, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
   );
   REQUIRE(error != nullptr);
   REQUIRE(std::string(holder_error_message(error)).find("query") != std::string::npos);
@@ -3831,16 +4750,22 @@ TEST_CASE("C API reindex backfills cards that weren't indexed", "[capi]") {
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* search_json = nullptr;
-  REQUIRE(holder_card_search(context, "project-1", "Welcome", 20, 0, &search_json, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_card_search(context, "project-1", "Welcome", 20, 0, &search_json, &error) == HOLDER_OK
+  );
   REQUIRE(nlohmann::json::parse(search_json).empty());
   holder_string_free(search_json);
 
   REQUIRE(holder_reindex(context, &error) == HOLDER_OK);
 
-  REQUIRE(holder_card_search(context, "project-1", "Welcome", 20, 0, &search_json, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_card_search(context, "project-1", "Welcome", 20, 0, &search_json, &error) == HOLDER_OK
+  );
   REQUIRE(nlohmann::json::parse(search_json).size() == 1);
   holder_string_free(search_json);
 
@@ -3860,7 +4785,9 @@ TEST_CASE("C API ensure_default_project bootstraps once and then no-ops", "[capi
 
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(
@@ -3928,7 +4855,9 @@ TEST_CASE("C API reports invalid ensure_default_project arguments", "[capi]") {
   const auto data_dir = holder::test::make_temp_dir();
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   REQUIRE(
       holder_ensure_default_project(context, "Home", "", nullptr, &json, &error) ==
@@ -3948,7 +4877,9 @@ TEST_CASE("C API lists projects as JSON", "[capi]") {
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(holder_project_list(context, &json, &error) == HOLDER_OK);
@@ -3975,18 +4906,27 @@ TEST_CASE("C API updates a project's git remote URL, including clearing it", "[c
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(
-      holder_project_update_git_remote(context, "project-1", "git@example.com:a/b.git", &json, &error) ==
-      HOLDER_OK
+      holder_project_update_git_remote(
+          context,
+          "project-1",
+          "git@example.com:a/b.git",
+          &json,
+          &error
+      ) == HOLDER_OK
   );
   REQUIRE(nlohmann::json::parse(json)["git_remote_url"] == "git@example.com:a/b.git");
   holder_string_free(json);
 
   json = nullptr;
-  REQUIRE(holder_project_update_git_remote(context, "project-1", nullptr, &json, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_project_update_git_remote(context, "project-1", nullptr, &json, &error) == HOLDER_OK
+  );
   REQUIRE(nlohmann::json::parse(json)["git_remote_url"].is_null());
   holder_string_free(json);
 
@@ -4000,7 +4940,9 @@ TEST_CASE("C API git_test_remote reports remote_unset when unconfigured", "[capi
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(holder_git_test_remote(context, "project-1", nullptr, &json, &error) == HOLDER_OK);
@@ -4013,7 +4955,10 @@ TEST_CASE("C API git_test_remote reports remote_unset when unconfigured", "[capi
   holder_context_destroy(context);
 }
 
-TEST_CASE("C API git_test_remote reports reachable for a local remote with commits", "[capi][git]") {
+TEST_CASE(
+    "C API git_test_remote reports reachable for a local remote with commits",
+    "[capi][git]"
+) {
   const auto data_dir = holder::test::make_temp_dir();
   const auto remote_dir = data_dir / "remote";
 
@@ -4028,7 +4973,9 @@ TEST_CASE("C API git_test_remote reports reachable for a local remote with commi
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(holder_git_test_remote(context, "project-1", nullptr, &json, &error) == HOLDER_OK);
@@ -4046,7 +4993,9 @@ TEST_CASE("C API git_probe_remote_url reports remote_unset for an empty URL", "[
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(holder_git_probe_remote_url(context, "", &json, &error) == HOLDER_OK);
@@ -4064,12 +5013,12 @@ TEST_CASE("C API git_probe_remote_url reports invalid_remote_url for a bad URL",
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
-  REQUIRE(
-      holder_git_probe_remote_url(context, "not a valid url", &json, &error) == HOLDER_OK
-  );
+  REQUIRE(holder_git_probe_remote_url(context, "not a valid url", &json, &error) == HOLDER_OK);
   const auto body = nlohmann::json::parse(json);
   REQUIRE(body["status"] == "invalid_remote_url");
   REQUIRE(body["remote_has_head"] == false);
@@ -4092,10 +5041,14 @@ TEST_CASE("C API git_probe_remote_url reports reachable for a local bare remote"
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
-  REQUIRE(holder_git_probe_remote_url(context, remote_dir.string().c_str(), &json, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_git_probe_remote_url(context, remote_dir.string().c_str(), &json, &error) == HOLDER_OK
+  );
   const auto body = nlohmann::json::parse(json);
   REQUIRE(body["status"] == "reachable");
   REQUIRE(body["remote_has_head"] == true);
@@ -4112,7 +5065,9 @@ TEST_CASE("C API git_push reports remote_unset and records it in sync status", "
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(holder_git_push(context, "project-1", nullptr, 1, &json, &error) == HOLDER_OK);
@@ -4141,7 +5096,9 @@ TEST_CASE("C API git_push reports up_to_date for a repo with no commits yet", "[
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(holder_git_push(context, "project-1", nullptr, 1, &json, &error) == HOLDER_OK);
@@ -4162,10 +5119,14 @@ TEST_CASE("C API git_push and git_pull round-trip through a local remote", "[cap
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
-  REQUIRE(holder_card_create(context, "project-1", "Seed", "v1", nullptr, &json, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_card_create(context, "project-1", "Seed", "v1", nullptr, &json, &error) == HOLDER_OK
+  );
   holder_string_free(json);
 
   json = nullptr;
@@ -4203,12 +5164,22 @@ TEST_CASE("C API git_pull makes a card written by another peer actually visible"
   holder_context* writer_context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &writer_context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &writer_context, &error) ==
+      HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(
-      holder_card_create(writer_context, "project-1", "From another peer", "body", nullptr, &json, &error) ==
-      HOLDER_OK
+      holder_card_create(
+          writer_context,
+          "project-1",
+          "From another peer",
+          "body",
+          nullptr,
+          &json,
+          &error
+      ) == HOLDER_OK
   );
   holder_string_free(json);
   json = nullptr;
@@ -4222,8 +5193,12 @@ TEST_CASE("C API git_pull makes a card written by another peer actually visible"
   seed_git_project(reader_data_dir, "project-1", reader_data_dir / "repo", remote_dir.string());
   holder_context* reader_context = nullptr;
   REQUIRE(
-      holder_context_open(reader_data_dir.string().c_str(), schema.c_str(), &reader_context, &error) ==
-      HOLDER_OK
+      holder_context_open(
+          reader_data_dir.string().c_str(),
+          schema.c_str(),
+          &reader_context,
+          &error
+      ) == HOLDER_OK
   );
 
   json = nullptr;
@@ -4261,9 +5236,12 @@ TEST_CASE(
   // Peer A creates the card both sides will later edit, and pushes.
   seed_git_project(data_dir, "project-1", data_dir / "repo", remote_dir.string());
   holder_context* peer_a = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &peer_a, &error) == HOLDER_OK);
   REQUIRE(
-      holder_card_create(peer_a, "project-1", "Shared Card", "v0", nullptr, &json, &error) == HOLDER_OK
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &peer_a, &error) == HOLDER_OK
+  );
+  REQUIRE(
+      holder_card_create(peer_a, "project-1", "Shared Card", "v0", nullptr, &json, &error) ==
+      HOLDER_OK
   );
   const std::string shared_card_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
   holder_string_free(json);
@@ -4277,7 +5255,8 @@ TEST_CASE(
   seed_git_project(peer_b_data_dir, "project-1", peer_b_data_dir / "repo", remote_dir.string());
   holder_context* peer_b = nullptr;
   REQUIRE(
-      holder_context_open(peer_b_data_dir.string().c_str(), schema.c_str(), &peer_b, &error) == HOLDER_OK
+      holder_context_open(peer_b_data_dir.string().c_str(), schema.c_str(), &peer_b, &error) ==
+      HOLDER_OK
   );
   json = nullptr;
   REQUIRE(holder_git_pull(peer_b, "project-1", &json, &error) == HOLDER_OK);
@@ -4287,12 +5266,21 @@ TEST_CASE(
   // has never seen. Peer A pushes first.
   json = nullptr;
   REQUIRE(
-      holder_card_update_content(peer_a, shared_card_id.c_str(), "v1 from A", nullptr, &json, &error) ==
-      HOLDER_OK
+      holder_card_update_content(
+          peer_a,
+          shared_card_id.c_str(),
+          "v1 from A",
+          nullptr,
+          &json,
+          &error
+      ) == HOLDER_OK
   );
   holder_string_free(json);
   json = nullptr;
-  REQUIRE(holder_card_create(peer_a, "project-1", "A only", "a-only", nullptr, &json, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_card_create(peer_a, "project-1", "A only", "a-only", nullptr, &json, &error) ==
+      HOLDER_OK
+  );
   holder_string_free(json);
   json = nullptr;
   REQUIRE(holder_git_push(peer_a, "project-1", nullptr, 1, &json, &error) == HOLDER_OK);
@@ -4300,12 +5288,21 @@ TEST_CASE(
 
   json = nullptr;
   REQUIRE(
-      holder_card_update_content(peer_b, shared_card_id.c_str(), "v1 from B", nullptr, &json, &error) ==
-      HOLDER_OK
+      holder_card_update_content(
+          peer_b,
+          shared_card_id.c_str(),
+          "v1 from B",
+          nullptr,
+          &json,
+          &error
+      ) == HOLDER_OK
   );
   holder_string_free(json);
   json = nullptr;
-  REQUIRE(holder_card_create(peer_b, "project-1", "B only", "b-only", nullptr, &json, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_card_create(peer_b, "project-1", "B only", "b-only", nullptr, &json, &error) ==
+      HOLDER_OK
+  );
   holder_string_free(json);
 
   // Peer B pulls into a now-diverged history: it has an unpushed edit to the shared card and an
@@ -4331,7 +5328,10 @@ TEST_CASE(
       conflicted_copy_id = card["card_id"].get<std::string>();
     }
   }
-  REQUIRE(titles == std::set<std::string>{"Shared Card", "Shared Card (conflicted copy)", "A only", "B only"});
+  REQUIRE(
+      titles ==
+      std::set<std::string>{"Shared Card", "Shared Card (conflicted copy)", "A only", "B only"}
+  );
   REQUIRE(conflicted_copy_id.has_value());
 
   // Remote (A's edit) wins the original card_id; B's pre-merge edit survives as the duplicate.
@@ -4341,7 +5341,9 @@ TEST_CASE(
   holder_string_free(content);
 
   content = nullptr;
-  REQUIRE(holder_card_get_content(peer_b, conflicted_copy_id->c_str(), &content, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_card_get_content(peer_b, conflicted_copy_id->c_str(), &content, &error) == HOLDER_OK
+  );
   REQUIRE(std::string(content) == "v1 from B");
   holder_string_free(content);
 
@@ -4363,7 +5365,9 @@ TEST_CASE("C API git_sync_status reports a null sync object before any activity"
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(holder_git_sync_status(context, "project-1", &json, &error) == HOLDER_OK);
@@ -4389,7 +5393,13 @@ TEST_CASE("C API git_set_homedir validates its argument and applies process-wide
 
 namespace {
 
-int fake_sign_ok(void*, const unsigned char*, size_t, unsigned char** out_der_sig, size_t* out_der_sig_len) {
+int fake_sign_ok(
+    void*,
+    const unsigned char*,
+    size_t,
+    unsigned char** out_der_sig,
+    size_t* out_der_sig_len
+) {
   auto* buf = static_cast<unsigned char*>(std::malloc(1));
   buf[0] = 0x00;
   *out_der_sig = buf;
@@ -4399,14 +5409,19 @@ int fake_sign_ok(void*, const unsigned char*, size_t, unsigned char** out_der_si
 
 } // namespace
 
-TEST_CASE("C API git_set_ssh_signer validates arguments and destroys user_data exactly once on replace/destroy", "[capi][git]") {
+TEST_CASE(
+    "C API git_set_ssh_signer validates arguments and destroys user_data exactly once on replace/destroy",
+    "[capi][git]"
+) {
   const auto data_dir = holder::test::make_temp_dir();
   seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
 
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   const unsigned char pubkey[] = {0x01, 0x02, 0x03};
 
@@ -4450,7 +5465,9 @@ TEST_CASE("C API git_set_ssh_signer validates arguments and destroys user_data e
     REQUIRE(destroy_count == 1);
   }
 
-  SECTION("destroy_user_data fires once when replaced, and once more for the replacement at context destroy") {
+  SECTION(
+      "destroy_user_data fires once when replaced, and once more for the replacement at context destroy"
+  ) {
     int first_destroy_count = 0;
     int second_destroy_count = 0;
 
@@ -4503,7 +5520,10 @@ TEST_CASE("C API git_set_ssh_signer validates arguments and destroys user_data e
   }
 }
 
-TEST_CASE("C API git_set_ssh_signer's provider is actually wired into git operations", "[capi][git]") {
+TEST_CASE(
+    "C API git_set_ssh_signer's provider is actually wired into git operations",
+    "[capi][git]"
+) {
   const auto data_dir = holder::test::make_temp_dir();
   const auto remote_dir = data_dir / "remote";
   init_bare_repo(remote_dir);
@@ -4512,12 +5532,21 @@ TEST_CASE("C API git_set_ssh_signer's provider is actually wired into git operat
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   const unsigned char pubkey[] = {0x01, 0x02, 0x03};
   REQUIRE(
       holder_git_set_ssh_signer(
-          context, "git", pubkey, sizeof(pubkey), fake_sign_ok, nullptr, nullptr, &error
+          context,
+          "git",
+          pubkey,
+          sizeof(pubkey),
+          fake_sign_ok,
+          nullptr,
+          nullptr,
+          &error
       ) == HOLDER_OK
   );
 
@@ -4539,7 +5568,9 @@ TEST_CASE("C API git_sync_if_due is a no-op when no remote is configured", "[cap
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(holder_git_sync_if_due(context, "project-1", 0, 0, &json, &error) == HOLDER_OK);
@@ -4551,7 +5582,10 @@ TEST_CASE("C API git_sync_if_due is a no-op when no remote is configured", "[cap
   holder_context_destroy(context);
 }
 
-TEST_CASE("C API git_sync_if_due pulls and pushes when nothing has synced yet, then skips until due again", "[capi][git]") {
+TEST_CASE(
+    "C API git_sync_if_due pulls and pushes when nothing has synced yet, then skips until due again",
+    "[capi][git]"
+) {
   const auto data_dir = holder::test::make_temp_dir();
   const auto remote_dir = data_dir / "remote";
   init_bare_repo(remote_dir);
@@ -4568,7 +5602,9 @@ TEST_CASE("C API git_sync_if_due pulls and pushes when nothing has synced yet, t
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   // Long intervals so this first call is due only because there's no prior sync state.
   // The remote is a genuinely empty bare repo (no commits yet), so the pull attempt
@@ -4594,7 +5630,10 @@ TEST_CASE("C API git_sync_if_due pulls and pushes when nothing has synced yet, t
   holder_context_destroy(context);
 }
 
-TEST_CASE("C API git_sync_if_due reports up_to_date for a repo with no commits yet", "[capi][git]") {
+TEST_CASE(
+    "C API git_sync_if_due reports up_to_date for a repo with no commits yet",
+    "[capi][git]"
+) {
   const auto data_dir = holder::test::make_temp_dir();
   const auto remote_dir = data_dir / "remote";
   init_bare_repo(remote_dir);
@@ -4603,7 +5642,9 @@ TEST_CASE("C API git_sync_if_due reports up_to_date for a repo with no commits y
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(holder_git_sync_if_due(context, "project-1", 3600, 3600, &json, &error) == HOLDER_OK);
@@ -4635,7 +5676,9 @@ TEST_CASE(
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(holder_git_sync_if_due(context, "project-1", 3600, 3600, &json, &error) == HOLDER_OK);
@@ -4654,7 +5697,9 @@ TEST_CASE("C API git_sync_now is a no-op when no remote is configured", "[capi][
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(holder_git_sync_now(context, "project-1", nullptr, 1, 1, &json, &error) == HOLDER_OK);
@@ -4671,7 +5716,9 @@ TEST_CASE("C API git_sync_now reports project not found", "[capi][git]") {
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(
@@ -4694,13 +5741,24 @@ TEST_CASE("C API git_sync_now pulls and pushes as one forced operation", "[capi]
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
   REQUIRE(
-      holder_context_open(writer_data_dir.string().c_str(), schema.c_str(), &writer_context, &error) ==
-      HOLDER_OK
+      holder_context_open(
+          writer_data_dir.string().c_str(),
+          schema.c_str(),
+          &writer_context,
+          &error
+      ) == HOLDER_OK
   );
   char* json = nullptr;
   REQUIRE(
-      holder_card_create(writer_context, "project-1", "From peer A", "body", nullptr, &json, &error) ==
-      HOLDER_OK
+      holder_card_create(
+          writer_context,
+          "project-1",
+          "From peer A",
+          "body",
+          nullptr,
+          &json,
+          &error
+      ) == HOLDER_OK
   );
   holder_string_free(json);
   json = nullptr;
@@ -4713,7 +5771,9 @@ TEST_CASE("C API git_sync_now pulls and pushes as one forced operation", "[capi]
   // pull (a trivial no-op fast-forward -- nothing new upstream) and push its new commit.
   seed_git_project(data_dir, "project-1", data_dir / "repo", remote_dir.string());
   holder_context* context = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   json = nullptr;
   REQUIRE(holder_git_pull(context, "project-1", &json, &error) == HOLDER_OK);
@@ -4760,7 +5820,9 @@ TEST_CASE("C API git_pull reports a real fetch failure as a failed status", "[ca
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(holder_git_pull(context, "project-1", &json, &error) == HOLDER_OK);
@@ -4776,7 +5838,9 @@ TEST_CASE("C API git_sync_if_due reports invalid project arguments", "[capi][git
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(
@@ -4867,21 +5931,46 @@ char* malloc_copy(const char* text) {
 
 // "_with_message" variants set *out_error; "_silent" variants report failure (rc != 0) without
 // setting it, forcing the CApiKeyringProviderHandle wrapper's fallback message.
-int failing_keyring_lookup_with_message(void*, int, const char*, const char*, const char*, int*, char**, char** out_error) {
+int failing_keyring_lookup_with_message(
+    void*,
+    int,
+    const char*,
+    const char*,
+    const char*,
+    int*,
+    char**,
+    char** out_error
+) {
   *out_error = malloc_copy("lookup exploded");
   return 1;
 }
 int failing_keyring_lookup_silent(void*, int, const char*, const char*, const char*, int*, char**, char**) {
   return 1;
 }
-int failing_keyring_store_with_message(void*, int, const char*, const char*, const char*, const char*, const char*, char** out_error) {
+int failing_keyring_store_with_message(
+    void*,
+    int,
+    const char*,
+    const char*,
+    const char*,
+    const char*,
+    const char*,
+    char** out_error
+) {
   *out_error = malloc_copy("store exploded");
   return 1;
 }
 int failing_keyring_store_silent(void*, int, const char*, const char*, const char*, const char*, const char*, char**) {
   return 1;
 }
-int failing_keyring_remove_with_message(void*, int, const char*, const char*, const char*, char** out_error) {
+int failing_keyring_remove_with_message(
+    void*,
+    int,
+    const char*,
+    const char*,
+    const char*,
+    char** out_error
+) {
   *out_error = malloc_copy("remove exploded");
   return 1;
 }
@@ -4891,7 +5980,10 @@ int failing_keyring_remove_silent(void*, int, const char*, const char*, const ch
 
 } // namespace
 
-TEST_CASE("C API keyring_set_provider validates arguments, still destroying user_data exactly once", "[capi][privacy]") {
+TEST_CASE(
+    "C API keyring_set_provider validates arguments, still destroying user_data exactly once",
+    "[capi][privacy]"
+) {
   int destroy_count = 0;
   auto destroy = [](void* user_data) {
     *static_cast<int*>(user_data) += 1;
@@ -4913,11 +6005,18 @@ TEST_CASE("C API keyring_set_provider validates arguments, still destroying user
   holder::privacy::platform_keyring_clear_external_provider();
 }
 
-TEST_CASE("C API keyring_set_provider destroys user_data exactly once on replace and on clear", "[capi][privacy]") {
+TEST_CASE(
+    "C API keyring_set_provider destroys user_data exactly once on replace and on clear",
+    "[capi][privacy]"
+) {
   int first_destroy_count = 0;
   int second_destroy_count = 0;
-  auto destroy_first = [](void* user_data) { *static_cast<int*>(user_data) += 1; };
-  auto destroy_second = [](void* user_data) { *static_cast<int*>(user_data) += 1; };
+  auto destroy_first = [](void* user_data) {
+    *static_cast<int*>(user_data) += 1;
+  };
+  auto destroy_second = [](void* user_data) {
+    *static_cast<int*>(user_data) += 1;
+  };
   holder_error* error = nullptr;
 
   // lookup_fn/store_fn/remove_fn are never actually invoked in this test (nothing here
@@ -4954,7 +6053,10 @@ TEST_CASE("C API keyring_set_provider destroys user_data exactly once on replace
   REQUIRE(first_destroy_count == 1); // unchanged
 }
 
-TEST_CASE("C API keyring_set_provider round-trips lookup/store/remove through the registered callbacks", "[capi][privacy]") {
+TEST_CASE(
+    "C API keyring_set_provider round-trips lookup/store/remove through the registered callbacks",
+    "[capi][privacy]"
+) {
   FakeKeyringState state;
   holder_error* error = nullptr;
   REQUIRE(
@@ -5076,7 +6178,8 @@ TEST_CASE(
         ) == HOLDER_OK
     );
     REQUIRE_THROWS_WITH(
-        holder::privacy::platform_keyring_remove_secret(ref), Catch::Matchers::Equals("remove exploded")
+        holder::privacy::platform_keyring_remove_secret(ref),
+        Catch::Matchers::Equals("remove exploded")
     );
   }
 
@@ -5092,7 +6195,8 @@ TEST_CASE(
         ) == HOLDER_OK
     );
     REQUIRE_THROWS_WITH(
-        holder::privacy::platform_keyring_remove_secret(ref), Catch::Matchers::Equals("keyring remove failed")
+        holder::privacy::platform_keyring_remove_secret(ref),
+        Catch::Matchers::Equals("keyring remove failed")
     );
   }
 
@@ -5113,7 +6217,10 @@ struct FakeStorageBackend {
   int remove_calls = 0;
 };
 
-std::filesystem::path fake_storage_object_path(FakeStorageBackend* backend, const std::string& object_key) {
+std::filesystem::path fake_storage_object_path(
+    FakeStorageBackend* backend,
+    const std::string& object_key
+) {
   const auto path = backend->root / object_key;
   std::filesystem::create_directories(path.parent_path());
   return path;
@@ -5153,7 +6260,11 @@ int fake_storage_get(
     *out_error = malloc_copy("object not found");
     return 1;
   }
-  std::filesystem::copy_file(path, destination_file_path, std::filesystem::copy_options::overwrite_existing);
+  std::filesystem::copy_file(
+      path,
+      destination_file_path,
+      std::filesystem::copy_options::overwrite_existing
+  );
   return 0;
 }
 
@@ -5192,20 +6303,13 @@ int failing_storage_put_with_message(
     int* out_error_code,
     char** out_error
 ) {
-  *out_error_code = user_data == nullptr
-      ? HOLDER_STORAGE_ERROR_CAPACITY
-      : *static_cast<int*>(user_data);
+  *out_error_code = user_data == nullptr ? HOLDER_STORAGE_ERROR_CAPACITY
+                                         : *static_cast<int*>(user_data);
   *out_error = malloc_copy("storage failure");
   return 1;
 }
 
-int fake_storage_exists_but_block_git_write(
-    void* user_data,
-    const char* object_key,
-    int* out_exists,
-    int*,
-    char**
-) {
+int fake_storage_exists_but_block_git_write(void* user_data, const char* object_key, int* out_exists, int*, char**) {
   auto* backend = static_cast<FakeStorageBackend*>(user_data);
   backend->exists_calls++;
   *out_exists = std::filesystem::is_regular_file(backend->root / object_key) ? 1 : 0;
@@ -5229,14 +6333,22 @@ TEST_CASE(
     "[capi][resource]"
 ) {
   int destroy_count = 0;
-  auto destroy = [](void* user_data) { *static_cast<int*>(user_data) += 1; };
+  auto destroy = [](void* user_data) {
+    *static_cast<int*>(user_data) += 1;
+  };
   holder_error* error = nullptr;
 
   SECTION("empty provider_name") {
     REQUIRE(
         holder_storage_provider_register(
-            "", fake_storage_put, fake_storage_get, fake_storage_exists, fake_storage_remove,
-            &destroy_count, destroy, &error
+            "",
+            fake_storage_put,
+            fake_storage_get,
+            fake_storage_exists,
+            fake_storage_remove,
+            &destroy_count,
+            destroy,
+            &error
         ) == HOLDER_ERROR_INVALID_ARGUMENT
     );
   }
@@ -5244,8 +6356,14 @@ TEST_CASE(
   SECTION("'local_directory' cannot be overridden") {
     REQUIRE(
         holder_storage_provider_register(
-            "local_directory", fake_storage_put, fake_storage_get, fake_storage_exists, fake_storage_remove,
-            &destroy_count, destroy, &error
+            "local_directory",
+            fake_storage_put,
+            fake_storage_get,
+            fake_storage_exists,
+            fake_storage_remove,
+            &destroy_count,
+            destroy,
+            &error
         ) == HOLDER_ERROR_INVALID_ARGUMENT
     );
   }
@@ -5253,8 +6371,14 @@ TEST_CASE(
   SECTION("null callback") {
     REQUIRE(
         holder_storage_provider_register(
-            "google-drive", nullptr, fake_storage_get, fake_storage_exists, fake_storage_remove,
-            &destroy_count, destroy, &error
+            "google-drive",
+            nullptr,
+            fake_storage_get,
+            fake_storage_exists,
+            fake_storage_remove,
+            &destroy_count,
+            destroy,
+            &error
         ) == HOLDER_ERROR_INVALID_ARGUMENT
     );
   }
@@ -5262,54 +6386,88 @@ TEST_CASE(
   REQUIRE(destroy_count == 1);
 }
 
-TEST_CASE("C API storage_provider_register destroys user_data exactly once on replace", "[capi][resource]") {
+TEST_CASE(
+    "C API storage_provider_register destroys user_data exactly once on replace",
+    "[capi][resource]"
+) {
   int first_destroy_count = 0;
   int second_destroy_count = 0;
-  auto destroy_first = [](void* user_data) { *static_cast<int*>(user_data) += 1; };
-  auto destroy_second = [](void* user_data) { *static_cast<int*>(user_data) += 1; };
+  auto destroy_first = [](void* user_data) {
+    *static_cast<int*>(user_data) += 1;
+  };
+  auto destroy_second = [](void* user_data) {
+    *static_cast<int*>(user_data) += 1;
+  };
   holder_error* error = nullptr;
 
   REQUIRE(
       holder_storage_provider_register(
-          "storage-replace-test", fake_storage_put, fake_storage_get, fake_storage_exists, fake_storage_remove,
-          &first_destroy_count, destroy_first, &error
+          "storage-replace-test",
+          fake_storage_put,
+          fake_storage_get,
+          fake_storage_exists,
+          fake_storage_remove,
+          &first_destroy_count,
+          destroy_first,
+          &error
       ) == HOLDER_OK
   );
   REQUIRE(first_destroy_count == 0);
 
   REQUIRE(
       holder_storage_provider_register(
-          "storage-replace-test", fake_storage_put, fake_storage_get, fake_storage_exists, fake_storage_remove,
-          &second_destroy_count, destroy_second, &error
+          "storage-replace-test",
+          fake_storage_put,
+          fake_storage_get,
+          fake_storage_exists,
+          fake_storage_remove,
+          &second_destroy_count,
+          destroy_second,
+          &error
       ) == HOLDER_OK
   );
   REQUIRE(first_destroy_count == 1);
   REQUIRE(second_destroy_count == 0);
 }
 
-TEST_CASE("C API asset_import_file/asset_retrieve round-trip through the built-in local provider", "[capi][resource]") {
+TEST_CASE(
+    "C API asset_import_file/asset_retrieve round-trip through the built-in local provider",
+    "[capi][resource]"
+) {
   const auto data_dir = holder::test::make_temp_dir();
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* project_json = nullptr;
-  REQUIRE(holder_project_create(context, "Photos", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_project_create(context, "Photos", nullptr, nullptr, &project_json, &error) == HOLDER_OK
+  );
   const auto project_id = nlohmann::json::parse(project_json).at("project_id").get<std::string>();
   holder_string_free(project_json);
 
   char* card_json = nullptr;
   REQUIRE(
-      holder_card_create(context, project_id.c_str(), "Trip", nullptr, nullptr, &card_json, &error) == HOLDER_OK
+      holder_card_create(
+          context,
+          project_id.c_str(),
+          "Trip",
+          nullptr,
+          nullptr,
+          &card_json,
+          &error
+      ) == HOLDER_OK
   );
   const auto card_id = nlohmann::json::parse(card_json).at("card_id").get<std::string>();
   holder_string_free(card_json);
 
   const auto now = std::chrono::duration_cast<std::chrono::seconds>(
-                        std::chrono::system_clock::now().time_since_epoch()
+                       std::chrono::system_clock::now().time_since_epoch()
   )
-                        .count();
+                       .count();
   const nlohmann::json location_body = {
       {"location_id", "loc-local-1"},
       {"project_id", project_id},
@@ -5321,7 +6479,8 @@ TEST_CASE("C API asset_import_file/asset_retrieve round-trip through the built-i
   };
   char* location_json = nullptr;
   REQUIRE(
-      holder_location_put_json(context, location_body.dump().c_str(), &location_json, &error) == HOLDER_OK
+      holder_location_put_json(context, location_body.dump().c_str(), &location_json, &error) ==
+      HOLDER_OK
   );
   holder_string_free(location_json);
 
@@ -5330,7 +6489,13 @@ TEST_CASE("C API asset_import_file/asset_retrieve round-trip through the built-i
   char* import_json = nullptr;
   REQUIRE(
       holder_asset_import_file(
-          context, project_id.c_str(), card_id.c_str(), "loc-local-1", source_path.c_str(), &import_json, &error
+          context,
+          project_id.c_str(),
+          card_id.c_str(),
+          "loc-local-1",
+          source_path.c_str(),
+          &import_json,
+          &error
       ) == HOLDER_OK
   );
   const auto import_result = nlohmann::json::parse(import_json);
@@ -5350,12 +6515,18 @@ TEST_CASE("C API asset_import_file/asset_retrieve round-trip through the built-i
   const auto destination = (data_dir / "downloaded" / "photo.jpg").string();
   REQUIRE(
       holder_asset_retrieve(
-          context, resource_id.c_str(), asset_id.c_str(), placement_id.c_str(), destination.c_str(), &error
+          context,
+          resource_id.c_str(),
+          asset_id.c_str(),
+          placement_id.c_str(),
+          destination.c_str(),
+          &error
       ) == HOLDER_OK
   );
   std::ifstream downloaded(destination, std::ios::binary);
   const std::string downloaded_content(
-      (std::istreambuf_iterator<char>(downloaded)), std::istreambuf_iterator<char>()
+      (std::istreambuf_iterator<char>(downloaded)),
+      std::istreambuf_iterator<char>()
   );
   REQUIRE(downloaded_content == "fake jpeg bytes");
 
@@ -5370,32 +6541,50 @@ TEST_CASE(
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   FakeStorageBackend backend{.root = data_dir / "fake-drive"};
   REQUIRE(
       holder_storage_provider_register(
-          "google-drive", fake_storage_put, fake_storage_get, fake_storage_exists, fake_storage_remove,
-          &backend, noop_storage_destroy, &error
+          "google-drive",
+          fake_storage_put,
+          fake_storage_get,
+          fake_storage_exists,
+          fake_storage_remove,
+          &backend,
+          noop_storage_destroy,
+          &error
       ) == HOLDER_OK
   );
 
   char* project_json = nullptr;
-  REQUIRE(holder_project_create(context, "Photos", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_project_create(context, "Photos", nullptr, nullptr, &project_json, &error) == HOLDER_OK
+  );
   const auto project_id = nlohmann::json::parse(project_json).at("project_id").get<std::string>();
   holder_string_free(project_json);
 
   char* card_json = nullptr;
   REQUIRE(
-      holder_card_create(context, project_id.c_str(), "Trip", nullptr, nullptr, &card_json, &error) == HOLDER_OK
+      holder_card_create(
+          context,
+          project_id.c_str(),
+          "Trip",
+          nullptr,
+          nullptr,
+          &card_json,
+          &error
+      ) == HOLDER_OK
   );
   const auto card_id = nlohmann::json::parse(card_json).at("card_id").get<std::string>();
   holder_string_free(card_json);
 
   const auto now = std::chrono::duration_cast<std::chrono::seconds>(
-                        std::chrono::system_clock::now().time_since_epoch()
+                       std::chrono::system_clock::now().time_since_epoch()
   )
-                        .count();
+                       .count();
   const nlohmann::json location_body = {
       {"location_id", "loc-drive-1"},
       {"project_id", project_id},
@@ -5407,16 +6596,24 @@ TEST_CASE(
   };
   char* location_json = nullptr;
   REQUIRE(
-      holder_location_put_json(context, location_body.dump().c_str(), &location_json, &error) == HOLDER_OK
+      holder_location_put_json(context, location_body.dump().c_str(), &location_json, &error) ==
+      HOLDER_OK
   );
   holder_string_free(location_json);
 
-  const auto source_path = write_source_file(data_dir / "source" / "photo.jpg", "drive-backed bytes");
+  const auto source_path =
+      write_source_file(data_dir / "source" / "photo.jpg", "drive-backed bytes");
 
   char* import_json = nullptr;
   REQUIRE(
       holder_asset_import_file(
-          context, project_id.c_str(), card_id.c_str(), "loc-drive-1", source_path.c_str(), &import_json, &error
+          context,
+          project_id.c_str(),
+          card_id.c_str(),
+          "loc-drive-1",
+          source_path.c_str(),
+          &import_json,
+          &error
       ) == HOLDER_OK
   );
   const auto import_result = nlohmann::json::parse(import_json);
@@ -5429,61 +6626,88 @@ TEST_CASE(
   char* resource_json = nullptr;
   REQUIRE(holder_resource_get(context, resource_id.c_str(), &resource_json, &error) == HOLDER_OK);
   const auto placement_id = nlohmann::json::parse(resource_json)
-                                 .at("assets")
-                                 .at(0)
-                                 .at("placements")
-                                 .at(0)
-                                 .at("placement_id")
-                                 .get<std::string>();
+                                .at("assets")
+                                .at(0)
+                                .at("placements")
+                                .at(0)
+                                .at("placement_id")
+                                .get<std::string>();
   holder_string_free(resource_json);
 
   const auto destination = (data_dir / "downloaded" / "photo.jpg").string();
   REQUIRE(
       holder_asset_retrieve(
-          context, resource_id.c_str(), asset_id.c_str(), placement_id.c_str(), destination.c_str(), &error
+          context,
+          resource_id.c_str(),
+          asset_id.c_str(),
+          placement_id.c_str(),
+          destination.c_str(),
+          &error
       ) == HOLDER_OK
   );
   REQUIRE(backend.get_calls == 1);
   std::ifstream downloaded(destination, std::ios::binary);
   const std::string downloaded_content(
-      (std::istreambuf_iterator<char>(downloaded)), std::istreambuf_iterator<char>()
+      (std::istreambuf_iterator<char>(downloaded)),
+      std::istreambuf_iterator<char>()
   );
   REQUIRE(downloaded_content == "drive-backed bytes");
 
   holder_context_destroy(context);
 }
 
-TEST_CASE("C API asset_import_file surfaces a registered provider's put failure", "[capi][resource]") {
+TEST_CASE(
+    "C API asset_import_file surfaces a registered provider's put failure",
+    "[capi][resource]"
+) {
   const auto data_dir = holder::test::make_temp_dir();
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   int failure_code = HOLDER_STORAGE_ERROR_CAPACITY;
   REQUIRE(
       holder_storage_provider_register(
-          "quota-limited", failing_storage_put_with_message, fake_storage_get, fake_storage_exists,
-          fake_storage_remove, &failure_code, noop_storage_destroy, &error
+          "quota-limited",
+          failing_storage_put_with_message,
+          fake_storage_get,
+          fake_storage_exists,
+          fake_storage_remove,
+          &failure_code,
+          noop_storage_destroy,
+          &error
       ) == HOLDER_OK
   );
 
   char* project_json = nullptr;
-  REQUIRE(holder_project_create(context, "Photos", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_project_create(context, "Photos", nullptr, nullptr, &project_json, &error) == HOLDER_OK
+  );
   const auto project_id = nlohmann::json::parse(project_json).at("project_id").get<std::string>();
   holder_string_free(project_json);
 
   char* card_json = nullptr;
   REQUIRE(
-      holder_card_create(context, project_id.c_str(), "Trip", nullptr, nullptr, &card_json, &error) == HOLDER_OK
+      holder_card_create(
+          context,
+          project_id.c_str(),
+          "Trip",
+          nullptr,
+          nullptr,
+          &card_json,
+          &error
+      ) == HOLDER_OK
   );
   const auto card_id = nlohmann::json::parse(card_json).at("card_id").get<std::string>();
   holder_string_free(card_json);
 
   const auto now = std::chrono::duration_cast<std::chrono::seconds>(
-                        std::chrono::system_clock::now().time_since_epoch()
+                       std::chrono::system_clock::now().time_since_epoch()
   )
-                        .count();
+                       .count();
   const nlohmann::json location_body = {
       {"location_id", "loc-quota-1"},
       {"project_id", project_id},
@@ -5495,7 +6719,8 @@ TEST_CASE("C API asset_import_file surfaces a registered provider's put failure"
   };
   char* location_json = nullptr;
   REQUIRE(
-      holder_location_put_json(context, location_body.dump().c_str(), &location_json, &error) == HOLDER_OK
+      holder_location_put_json(context, location_body.dump().c_str(), &location_json, &error) ==
+      HOLDER_OK
   );
   holder_string_free(location_json);
 
@@ -5503,7 +6728,13 @@ TEST_CASE("C API asset_import_file surfaces a registered provider's put failure"
 
   char* import_json = nullptr;
   const int rc = holder_asset_import_file(
-      context, project_id.c_str(), card_id.c_str(), "loc-quota-1", source_path.c_str(), &import_json, &error
+      context,
+      project_id.c_str(),
+      card_id.c_str(),
+      "loc-quota-1",
+      source_path.c_str(),
+      &import_json,
+      &error
   );
   REQUIRE(rc == HOLDER_ERROR_RUNTIME);
   REQUIRE(error != nullptr);
@@ -5523,8 +6754,13 @@ TEST_CASE("C API asset_import_file surfaces a registered provider's put failure"
     error = nullptr;
     REQUIRE(
         holder_asset_import_file(
-            context, project_id.c_str(), card_id.c_str(), "loc-quota-1", source_path.c_str(),
-            &import_json, &error
+            context,
+            project_id.c_str(),
+            card_id.c_str(),
+            "loc-quota-1",
+            source_path.c_str(),
+            &import_json,
+            &error
         ) == HOLDER_ERROR_RUNTIME
     );
     REQUIRE(error != nullptr);
@@ -5534,38 +6770,60 @@ TEST_CASE("C API asset_import_file surfaces a registered provider's put failure"
   // Nothing should have been left behind for a resource that never actually got stored.
   char* resource_list_json = nullptr;
   error = nullptr;
-  REQUIRE(holder_resource_list(context, project_id.c_str(), &resource_list_json, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_resource_list(context, project_id.c_str(), &resource_list_json, &error) == HOLDER_OK
+  );
   REQUIRE(nlohmann::json::parse(resource_list_json).empty());
   holder_string_free(resource_list_json);
 
   holder_context_destroy(context);
 }
 
-TEST_CASE("C API asset import removes a newly stored object when the Git write fails", "[capi][resource]") {
+TEST_CASE(
+    "C API asset import removes a newly stored object when the Git write fails",
+    "[capi][resource]"
+) {
   const auto data_dir = holder::test::make_temp_dir();
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   FakeStorageBackend backend{.root = data_dir / "rollback-provider"};
   REQUIRE(
       holder_storage_provider_register(
-          "rollback-provider", fake_storage_put, fake_storage_get,
-          fake_storage_exists_but_block_git_write, fake_storage_remove, &backend,
-          noop_storage_destroy, &error
+          "rollback-provider",
+          fake_storage_put,
+          fake_storage_get,
+          fake_storage_exists_but_block_git_write,
+          fake_storage_remove,
+          &backend,
+          noop_storage_destroy,
+          &error
       ) == HOLDER_OK
   );
 
   char* project_json = nullptr;
-  REQUIRE(holder_project_create(context, "Photos", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_project_create(context, "Photos", nullptr, nullptr, &project_json, &error) == HOLDER_OK
+  );
   const auto project_id = nlohmann::json::parse(project_json).at("project_id").get<std::string>();
   const auto project_root = nlohmann::json::parse(project_json).at("root_path").get<std::string>();
   holder_string_free(project_json);
 
   char* card_json = nullptr;
   REQUIRE(
-      holder_card_create(context, project_id.c_str(), "Trip", nullptr, nullptr, &card_json, &error) == HOLDER_OK
+      holder_card_create(
+          context,
+          project_id.c_str(),
+          "Trip",
+          nullptr,
+          nullptr,
+          &card_json,
+          &error
+      ) == HOLDER_OK
   );
   const auto card_id = nlohmann::json::parse(card_json).at("card_id").get<std::string>();
   holder_string_free(card_json);
@@ -5581,19 +6839,26 @@ TEST_CASE("C API asset import removes a newly stored object when the Git write f
   };
   char* location_json = nullptr;
   REQUIRE(
-      holder_location_put_json(context, location_body.dump().c_str(), &location_json, &error) == HOLDER_OK
+      holder_location_put_json(context, location_body.dump().c_str(), &location_json, &error) ==
+      HOLDER_OK
   );
   holder_string_free(location_json);
 
   // A regular file where the resource directory must be makes the Git-backed manifest write
   // fail after the provider has accepted the bytes.
   write_source_file(std::filesystem::path(project_root) / "resources", "blocks resource directory");
-  const auto source_path = write_source_file(data_dir / "source" / "photo.jpg", "stored then rolled back");
+  const auto source_path =
+      write_source_file(data_dir / "source" / "photo.jpg", "stored then rolled back");
   char* import_json = nullptr;
   REQUIRE(
       holder_asset_import_file(
-          context, project_id.c_str(), card_id.c_str(), "loc-rollback-1", source_path.c_str(),
-          &import_json, &error
+          context,
+          project_id.c_str(),
+          card_id.c_str(),
+          "loc-rollback-1",
+          source_path.c_str(),
+          &import_json,
+          &error
       ) == HOLDER_ERROR_RUNTIME
   );
   REQUIRE(import_json == nullptr);
@@ -5610,24 +6875,36 @@ TEST_CASE("C API asset_import_file reports an unregistered provider by name", "[
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* project_json = nullptr;
-  REQUIRE(holder_project_create(context, "Photos", nullptr, nullptr, &project_json, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_project_create(context, "Photos", nullptr, nullptr, &project_json, &error) == HOLDER_OK
+  );
   const auto project_id = nlohmann::json::parse(project_json).at("project_id").get<std::string>();
   holder_string_free(project_json);
 
   char* card_json = nullptr;
   REQUIRE(
-      holder_card_create(context, project_id.c_str(), "Trip", nullptr, nullptr, &card_json, &error) == HOLDER_OK
+      holder_card_create(
+          context,
+          project_id.c_str(),
+          "Trip",
+          nullptr,
+          nullptr,
+          &card_json,
+          &error
+      ) == HOLDER_OK
   );
   const auto card_id = nlohmann::json::parse(card_json).at("card_id").get<std::string>();
   holder_string_free(card_json);
 
   const auto now = std::chrono::duration_cast<std::chrono::seconds>(
-                        std::chrono::system_clock::now().time_since_epoch()
+                       std::chrono::system_clock::now().time_since_epoch()
   )
-                        .count();
+                       .count();
   const nlohmann::json location_body = {
       {"location_id", "loc-unregistered-1"},
       {"project_id", project_id},
@@ -5639,7 +6916,8 @@ TEST_CASE("C API asset_import_file reports an unregistered provider by name", "[
   };
   char* location_json = nullptr;
   REQUIRE(
-      holder_location_put_json(context, location_body.dump().c_str(), &location_json, &error) == HOLDER_OK
+      holder_location_put_json(context, location_body.dump().c_str(), &location_json, &error) ==
+      HOLDER_OK
   );
   holder_string_free(location_json);
 
@@ -5647,7 +6925,13 @@ TEST_CASE("C API asset_import_file reports an unregistered provider by name", "[
 
   char* import_json = nullptr;
   const int rc = holder_asset_import_file(
-      context, project_id.c_str(), card_id.c_str(), "loc-unregistered-1", source_path.c_str(), &import_json, &error
+      context,
+      project_id.c_str(),
+      card_id.c_str(),
+      "loc-unregistered-1",
+      source_path.c_str(),
+      &import_json,
+      &error
   );
   REQUIRE(rc == HOLDER_ERROR_RUNTIME);
   REQUIRE(error != nullptr);
@@ -5657,14 +6941,19 @@ TEST_CASE("C API asset_import_file reports an unregistered provider by name", "[
   holder_context_destroy(context);
 }
 
-TEST_CASE("C API encryption_check reports plain projects safe without touching disk", "[capi][privacy]") {
+TEST_CASE(
+    "C API encryption_check reports plain projects safe without touching disk",
+    "[capi][privacy]"
+) {
   const auto data_dir = holder::test::make_temp_dir();
   seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
 
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(holder_encryption_check(context, "project-1", &json, &error) == HOLDER_OK);
@@ -5685,10 +6974,15 @@ TEST_CASE("C API encryption_check finds encrypted cards safe", "[capi][privacy]"
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
-  REQUIRE(holder_card_create(context, "project-1", "Secret", "hidden", nullptr, &json, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_card_create(context, "project-1", "Secret", "hidden", nullptr, &json, &error) ==
+      HOLDER_OK
+  );
   holder_string_free(json);
 
   json = nullptr;
@@ -5703,20 +6997,29 @@ TEST_CASE("C API encryption_check finds encrypted cards safe", "[capi][privacy]"
   holder_context_destroy(context);
 }
 
-TEST_CASE("C API recovery_token_export requires key material and a non-empty pin", "[capi][privacy]") {
+TEST_CASE(
+    "C API recovery_token_export requires key material and a non-empty pin",
+    "[capi][privacy]"
+) {
   const auto data_dir = holder::test::make_temp_dir();
   seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
 
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
-  REQUIRE(holder_recovery_token_export(context, "project-1", "", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_recovery_token_export(context, "project-1", "", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
 
   REQUIRE(
-      holder_recovery_token_export(context, "project-1", "1234", &json, &error) == HOLDER_ERROR_RUNTIME
+      holder_recovery_token_export(context, "project-1", "1234", &json, &error) ==
+      HOLDER_ERROR_RUNTIME
   );
   REQUIRE(std::string(holder_error_message(error)).find("no key material") != std::string::npos);
   holder_error_destroy(error);
@@ -5724,7 +7027,10 @@ TEST_CASE("C API recovery_token_export requires key material and a non-empty pin
   holder_context_destroy(context);
 }
 
-TEST_CASE("C API recovery_token_export/inspect/import round-trip through a real encrypted project", "[capi][privacy]") {
+TEST_CASE(
+    "C API recovery_token_export/inspect/import round-trip through a real encrypted project",
+    "[capi][privacy]"
+) {
   const auto data_dir = holder::test::make_temp_dir();
   holder::test::EnvGuard keystore_env("HOLDER_TEST_KEYSTORE_DIR", (data_dir / "keystore").string());
   const auto key_id = seed_encrypted_project(
@@ -5738,7 +7044,9 @@ TEST_CASE("C API recovery_token_export/inspect/import round-trip through a real 
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(holder_recovery_token_export(context, "project-1", "1234", &json, &error) == HOLDER_OK);
@@ -5762,7 +7070,9 @@ TEST_CASE("C API recovery_token_export/inspect/import round-trip through a real 
 
   SECTION("inspect with the wrong pin fails") {
     json = nullptr;
-    REQUIRE(holder_recovery_token_inspect("0000", token.c_str(), &json, &error) == HOLDER_ERROR_RUNTIME);
+    REQUIRE(
+        holder_recovery_token_inspect("0000", token.c_str(), &json, &error) == HOLDER_ERROR_RUNTIME
+    );
     REQUIRE(error != nullptr);
     holder_error_destroy(error);
   }
@@ -5781,8 +7091,14 @@ TEST_CASE("C API recovery_token_export/inspect/import round-trip through a real 
   SECTION("import into a nonexistent project fails") {
     json = nullptr;
     REQUIRE(
-        holder_recovery_token_import(context, "does-not-exist", "1234", token.c_str(), &json, &error) ==
-        HOLDER_ERROR_RUNTIME
+        holder_recovery_token_import(
+            context,
+            "does-not-exist",
+            "1234",
+            token.c_str(),
+            &json,
+            &error
+        ) == HOLDER_ERROR_RUNTIME
     );
     REQUIRE(error != nullptr);
     holder_error_destroy(error);
@@ -5791,7 +7107,10 @@ TEST_CASE("C API recovery_token_export/inspect/import round-trip through a real 
   holder_context_destroy(context);
 }
 
-TEST_CASE("C API recovery_token_import_global creates a project when none exists, with no remote hint", "[capi][privacy]") {
+TEST_CASE(
+    "C API recovery_token_import_global creates a project when none exists, with no remote hint",
+    "[capi][privacy]"
+) {
   const auto data_dir = holder::test::make_temp_dir();
   holder::test::EnvGuard keystore_env("HOLDER_TEST_KEYSTORE_DIR", (data_dir / "keystore").string());
   const auto key_id =
@@ -5800,7 +7119,9 @@ TEST_CASE("C API recovery_token_import_global creates a project when none exists
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(holder_recovery_token_export(context, "project-1", "1234", &json, &error) == HOLDER_OK);
@@ -5812,8 +7133,12 @@ TEST_CASE("C API recovery_token_import_global creates a project when none exists
   const auto other_data_dir = holder::test::make_temp_dir();
   holder_context* other_context = nullptr;
   REQUIRE(
-      holder_context_open(other_data_dir.string().c_str(), schema.c_str(), &other_context, &error) ==
-      HOLDER_OK
+      holder_context_open(
+          other_data_dir.string().c_str(),
+          schema.c_str(),
+          &other_context,
+          &error
+      ) == HOLDER_OK
   );
 
   json = nullptr;
@@ -5851,7 +7176,10 @@ TEST_CASE("C API recovery_token_import_global creates a project when none exists
   holder_context_destroy(context);
 }
 
-TEST_CASE("C API recovery_token_import_global configures and pulls a remote hint", "[capi][privacy]") {
+TEST_CASE(
+    "C API recovery_token_import_global configures and pulls a remote hint",
+    "[capi][privacy]"
+) {
   const auto data_dir = holder::test::make_temp_dir();
   holder::test::EnvGuard keystore_env("HOLDER_TEST_KEYSTORE_DIR", (data_dir / "keystore").string());
 
@@ -5869,12 +7197,17 @@ TEST_CASE("C API recovery_token_import_global configures and pulls a remote hint
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   // Seed the remote with the project's (encrypted) content so the recovering
   // device has something to pull.
   char* json = nullptr;
-  REQUIRE(holder_card_create(context, "project-1", "Secret", "hidden", nullptr, &json, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_card_create(context, "project-1", "Secret", "hidden", nullptr, &json, &error) ==
+      HOLDER_OK
+  );
   holder_string_free(json);
   REQUIRE(holder_git_push(context, "project-1", nullptr, 1, &json, &error) == HOLDER_OK);
   holder_string_free(json);
@@ -5887,8 +7220,12 @@ TEST_CASE("C API recovery_token_import_global configures and pulls a remote hint
   const auto other_data_dir = holder::test::make_temp_dir();
   holder_context* other_context = nullptr;
   REQUIRE(
-      holder_context_open(other_data_dir.string().c_str(), schema.c_str(), &other_context, &error) ==
-      HOLDER_OK
+      holder_context_open(
+          other_data_dir.string().c_str(),
+          schema.c_str(),
+          &other_context,
+          &error
+      ) == HOLDER_OK
   );
 
   json = nullptr;
@@ -5930,12 +7267,20 @@ TEST_CASE(
   const auto remote_dir = data_dir / "remote";
   init_bare_repo(remote_dir);
 
-  seed_encrypted_project(data_dir, "project-1", data_dir / "repo", "Synced Notes", remote_dir.string());
+  seed_encrypted_project(
+      data_dir,
+      "project-1",
+      data_dir / "repo",
+      "Synced Notes",
+      remote_dir.string()
+  );
 
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(holder_recovery_token_export(context, "project-1", "1234", &json, &error) == HOLDER_OK);
@@ -5945,8 +7290,12 @@ TEST_CASE(
   const auto other_data_dir = holder::test::make_temp_dir();
   holder_context* other_context = nullptr;
   REQUIRE(
-      holder_context_open(other_data_dir.string().c_str(), schema.c_str(), &other_context, &error) ==
-      HOLDER_OK
+      holder_context_open(
+          other_data_dir.string().c_str(),
+          schema.c_str(),
+          &other_context,
+          &error
+      ) == HOLDER_OK
   );
 
   json = nullptr;
@@ -5981,12 +7330,20 @@ TEST_CASE(
   const auto remote_dir = data_dir / "remote";
   init_bare_repo(remote_dir); // empty at first -- the recovery pull below is expected to fail
 
-  seed_encrypted_project(data_dir, "project-1", data_dir / "repo", "Synced Notes", remote_dir.string());
+  seed_encrypted_project(
+      data_dir,
+      "project-1",
+      data_dir / "repo",
+      "Synced Notes",
+      remote_dir.string()
+  );
 
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(holder_recovery_token_export(context, "project-1", "1234", &json, &error) == HOLDER_OK);
@@ -5996,8 +7353,12 @@ TEST_CASE(
   const auto other_data_dir = holder::test::make_temp_dir();
   holder_context* other_context = nullptr;
   REQUIRE(
-      holder_context_open(other_data_dir.string().c_str(), schema.c_str(), &other_context, &error) ==
-      HOLDER_OK
+      holder_context_open(
+          other_data_dir.string().c_str(),
+          schema.c_str(),
+          &other_context,
+          &error
+      ) == HOLDER_OK
   );
 
   json = nullptr;
@@ -6012,7 +7373,10 @@ TEST_CASE(
   // finally getting registered lets a push from elsewhere land, or another device
   // finishes its own setup first.
   json = nullptr;
-  REQUIRE(holder_card_create(context, "project-1", "Secret", "hidden", nullptr, &json, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_card_create(context, "project-1", "Secret", "hidden", nullptr, &json, &error) ==
+      HOLDER_OK
+  );
   holder_string_free(json);
   json = nullptr;
   REQUIRE(holder_git_push(context, "project-1", nullptr, 1, &json, &error) == HOLDER_OK);
@@ -6049,7 +7413,9 @@ TEST_CASE("C API reports invalid context_open arguments", "[capi]") {
   holder_context* context = nullptr;
   const auto schema = read_schema_sql();
 
-  REQUIRE(holder_context_open("", schema.c_str(), &context, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_context_open("", schema.c_str(), &context, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
   REQUIRE(context == nullptr);
   REQUIRE(std::string(holder_error_message(error)).find("data_dir") != std::string::npos);
   holder_error_destroy(error);
@@ -6100,10 +7466,22 @@ TEST_CASE("C API JSON helpers validate output and context before dispatch", "[ca
   expect_invalid(holder_resource_list(nullptr, "project-1", nullptr, &error));
   expect_invalid(holder_resource_list(nullptr, "project-1", &json, &error));
   expect_invalid(holder_card_milestone_update_json(
-      nullptr, "project-1", "card-1", "milestone-1", "{}", nullptr, &error
+      nullptr,
+      "project-1",
+      "card-1",
+      "milestone-1",
+      "{}",
+      nullptr,
+      &error
   ));
   expect_invalid(holder_card_milestone_update_json(
-      nullptr, "project-1", "card-1", "milestone-1", "{}", &json, &error
+      nullptr,
+      "project-1",
+      "card-1",
+      "milestone-1",
+      "{}",
+      &json,
+      &error
   ));
   expect_invalid(holder_resource_get(nullptr, "resource-1", nullptr, &error));
   expect_invalid(holder_resource_get(nullptr, "resource-1", &json, &error));
@@ -6124,18 +7502,36 @@ TEST_CASE("C API JSON helpers validate output and context before dispatch", "[ca
   expect_invalid(holder_location_put_json(nullptr, "{}", &json, &error));
   expect_invalid(holder_location_delete(nullptr, "location-1", &error));
   expect_invalid(holder_asset_import_file(
-      nullptr, "project-1", "card-1", "location-1", "/tmp/source", nullptr, &error
+      nullptr,
+      "project-1",
+      "card-1",
+      "location-1",
+      "/tmp/source",
+      nullptr,
+      &error
   ));
   expect_invalid(holder_asset_import_file(
-      nullptr, "project-1", "card-1", "location-1", "/tmp/source", &json, &error
+      nullptr,
+      "project-1",
+      "card-1",
+      "location-1",
+      "/tmp/source",
+      &json,
+      &error
   ));
   expect_invalid(holder_card_move_json(
-      nullptr, "project-1", "card-1", R"({"intent":"to_end"})", nullptr, &error
+      nullptr,
+      "project-1",
+      "card-1",
+      R"({"intent":"to_end"})",
+      nullptr,
+      &error
   ));
-  expect_invalid(holder_card_move_json(
-      nullptr, "project-1", "card-1", R"({"intent":"to_end"})", &json, &error
-  ));
-  expect_invalid(holder_card_query_json(nullptr, "project-1", R"({"view":"all"})", nullptr, &error));
+  expect_invalid(
+      holder_card_move_json(nullptr, "project-1", "card-1", R"({"intent":"to_end"})", &json, &error)
+  );
+  expect_invalid(holder_card_query_json(nullptr, "project-1", R"({"view":"all"})", nullptr, &error)
+  );
   expect_invalid(holder_card_query_json(nullptr, "project-1", R"({"view":"all"})", &json, &error));
 }
 
@@ -6144,7 +7540,9 @@ TEST_CASE("C API reference scopes and card-query validation cover every public v
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   for (const int scope : {0, 1, 2}) {
@@ -6171,12 +7569,17 @@ TEST_CASE("C API reference scopes and card-query validation cover every public v
   holder_context_destroy(context);
 }
 
-TEST_CASE("C API JSON entry points report malformed input and unknown ids as runtime errors", "[capi]") {
+TEST_CASE(
+    "C API JSON entry points report malformed input and unknown ids as runtime errors",
+    "[capi]"
+) {
   const auto data_dir = holder::test::make_temp_dir();
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(
@@ -6186,9 +7589,7 @@ TEST_CASE("C API JSON entry points report malformed input and unknown ids as run
   holder_error_destroy(error);
   error = nullptr;
 
-  REQUIRE(
-      holder_card_query_json(context, "project-1", "{", &json, &error) == HOLDER_ERROR_RUNTIME
-  );
+  REQUIRE(holder_card_query_json(context, "project-1", "{", &json, &error) == HOLDER_ERROR_RUNTIME);
   holder_error_destroy(error);
   error = nullptr;
   REQUIRE(holder_resource_delete(context, "missing-resource", &error) == HOLDER_ERROR_RUNTIME);
@@ -6202,14 +7603,26 @@ TEST_CASE("C API JSON entry points report malformed input and unknown ids as run
   error = nullptr;
   REQUIRE(
       holder_card_move_json(
-          context, "project-1", "missing-card", R"({"intent":"to_end"})", &json, &error
+          context,
+          "project-1",
+          "missing-card",
+          R"({"intent":"to_end"})",
+          &json,
+          &error
       ) == HOLDER_ERROR_RUNTIME
   );
   holder_error_destroy(error);
   error = nullptr;
   REQUIRE(
-      holder_card_milestone_update_json(context, "project-1", "card-1", "milestone-1", "{", &json,
-                                        &error) == HOLDER_ERROR_RUNTIME
+      holder_card_milestone_update_json(
+          context,
+          "project-1",
+          "card-1",
+          "milestone-1",
+          "{",
+          &json,
+          &error
+      ) == HOLDER_ERROR_RUNTIME
   );
   holder_error_destroy(error);
   error = nullptr;
@@ -6234,7 +7647,9 @@ TEST_CASE("C API card_move_json applies an explicit parent_card_id", "[capi]") {
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   const auto create_card = [&](const char* title, const char* parent_card_id) {
     char* json = nullptr;
@@ -6271,17 +7686,27 @@ TEST_CASE("C API move and milestone update reject a trashed card", "[capi]") {
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
-  REQUIRE(holder_card_create(context, "project-1", "Doomed", "body", nullptr, &json, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_card_create(context, "project-1", "Doomed", "body", nullptr, &json, &error) ==
+      HOLDER_OK
+  );
   const auto card_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
   holder_string_free(json);
   json = nullptr;
   REQUIRE(holder_card_delete(context, card_id.c_str(), &error) == HOLDER_OK);
 
   const auto move_rc = holder_card_move_json(
-      context, "project-1", card_id.c_str(), R"({"intent":"to_end"})", &json, &error
+      context,
+      "project-1",
+      card_id.c_str(),
+      R"({"intent":"to_end"})",
+      &json,
+      &error
   );
   INFO("holder_card_move_json on a trashed card: " << (error ? holder_error_message(error) : "ok"));
   REQUIRE(move_rc == HOLDER_ERROR_RUNTIME);
@@ -6299,7 +7724,9 @@ TEST_CASE("C API maps a fault inside a handler body to a runtime error", "[capi]
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   // A second connection removes tables the open context still expects, so the handler's
   // repository calls throw std::exception from inside the try block.
@@ -6312,7 +7739,10 @@ TEST_CASE("C API maps a fault inside a handler body to a runtime error", "[capi]
   sabotage.exec("DROP TABLE cards;");
   const auto resolve_rc =
       holder_card_reference_resolve(context, "project-1", "anything", 0, &json, &error);
-  INFO("holder_card_reference_resolve without a cards table: " << (error ? holder_error_message(error) : "ok"));
+  INFO(
+      "holder_card_reference_resolve without a cards table: "
+      << (error ? holder_error_message(error) : "ok")
+  );
   REQUIRE(resolve_rc == HOLDER_ERROR_RUNTIME);
   REQUIRE(json == nullptr);
   holder_error_destroy(error);
@@ -6320,7 +7750,10 @@ TEST_CASE("C API maps a fault inside a handler body to a runtime error", "[capi]
 
   sabotage.exec("DROP TABLE projects;");
   const auto sync_rc = holder_git_sync_now(context, "project-1", nullptr, 0, 0, &json, &error);
-  INFO("holder_git_sync_now without a projects table: " << (error ? holder_error_message(error) : "ok"));
+  INFO(
+      "holder_git_sync_now without a projects table: "
+      << (error ? holder_error_message(error) : "ok")
+  );
   REQUIRE(sync_rc == HOLDER_ERROR_RUNTIME);
   REQUIRE(json == nullptr);
   holder_error_destroy(error);
@@ -6334,13 +7767,18 @@ TEST_CASE("C API probe reports a URL that cannot be serialized as a runtime erro
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   // The probe echoes the URL in its JSON body; bytes that are not valid UTF-8 make the
   // serializer throw after the probe itself has already completed.
   char* json = nullptr;
   const auto rc = holder_git_probe_remote_url(context, "not-a-url-\xff\xfe", &json, &error);
-  INFO("holder_git_probe_remote_url with invalid UTF-8: " << (error ? holder_error_message(error) : "ok"));
+  INFO(
+      "holder_git_probe_remote_url with invalid UTF-8: "
+      << (error ? holder_error_message(error) : "ok")
+  );
   REQUIRE(rc == HOLDER_ERROR_RUNTIME);
   REQUIRE(json == nullptr);
   holder_error_destroy(error);
@@ -6356,7 +7794,9 @@ TEST_CASE("C API reports remaining invalid card_list argument", "[capi]") {
 
 TEST_CASE("C API reports remaining invalid card_get_content argument", "[capi]") {
   holder_error* error = nullptr;
-  REQUIRE(holder_card_get_content(nullptr, "card-1", nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(
+      holder_card_get_content(nullptr, "card-1", nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
   REQUIRE(std::string(holder_error_message(error)).find("out_content") != std::string::npos);
   holder_error_destroy(error);
 }
@@ -6378,12 +7818,15 @@ TEST_CASE("C API creates a project with an explicit root_path", "[capi]") {
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   const auto explicit_root = (data_dir / "custom-root").string();
   char* json = nullptr;
   REQUIRE(
-      holder_project_create(context, "Custom", explicit_root.c_str(), nullptr, &json, &error) == HOLDER_OK
+      holder_project_create(context, "Custom", explicit_root.c_str(), nullptr, &json, &error) ==
+      HOLDER_OK
   );
   REQUIRE(nlohmann::json::parse(json)["root_path"] == explicit_root);
   holder_string_free(json);
@@ -6395,7 +7838,9 @@ TEST_CASE("C API reports invalid project_rename arguments", "[capi]") {
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(
@@ -6414,7 +7859,8 @@ TEST_CASE("C API reports invalid project_rename arguments", "[capi]") {
   error = nullptr;
 
   REQUIRE(
-      holder_project_rename(context, "project-1", "", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+      holder_project_rename(context, "project-1", "", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
   );
   REQUIRE(std::string(holder_error_message(error)).find("name") != std::string::npos);
   holder_error_destroy(error);
@@ -6427,7 +7873,9 @@ TEST_CASE("C API reports remaining invalid project_delete argument", "[capi]") {
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   REQUIRE(holder_project_delete(context, "", &error) == HOLDER_ERROR_INVALID_ARGUMENT);
   REQUIRE(std::string(holder_error_message(error)).find("project_id") != std::string::npos);
@@ -6440,7 +7888,9 @@ TEST_CASE("C API reports remaining invalid card_create arguments", "[capi]") {
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   REQUIRE(
       holder_card_create(context, "project-1", "Title", "body", nullptr, nullptr, &error) ==
@@ -6466,7 +7916,9 @@ TEST_CASE("C API creates a card with an explicit parent_card_id", "[capi]") {
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* parent_json = nullptr;
   REQUIRE(
@@ -6491,7 +7943,9 @@ TEST_CASE("C API reports invalid card_update_content arguments", "[capi]") {
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(
@@ -6525,7 +7979,9 @@ TEST_CASE("C API reports remaining invalid card_delete argument", "[capi]") {
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   REQUIRE(holder_card_delete(context, "", &error) == HOLDER_ERROR_INVALID_ARGUMENT);
   REQUIRE(std::string(holder_error_message(error)).find("card_id") != std::string::npos);
@@ -6538,7 +7994,9 @@ TEST_CASE("C API reports remaining invalid card_search arguments", "[capi]") {
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   REQUIRE(
       holder_card_search(context, "project-1", "q", 20, 0, nullptr, &error) ==
@@ -6562,7 +8020,9 @@ TEST_CASE("C API reports remaining invalid ensure_default_project arguments", "[
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   REQUIRE(
       holder_ensure_default_project(context, "Home", "Welcome", "body", nullptr, &error) ==
@@ -6595,7 +8055,9 @@ TEST_CASE("C API reports remaining invalid git_set_ssh_signer arguments", "[capi
   const auto data_dir = holder::test::make_temp_dir();
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   const unsigned char blob[] = {0x01};
   REQUIRE(
@@ -6613,7 +8075,9 @@ TEST_CASE("C API reports invalid project_update_git_remote arguments", "[capi]")
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   REQUIRE(
       holder_project_update_git_remote(context, "project-1", "ssh://x", nullptr, &error) ==
@@ -6646,7 +8110,9 @@ TEST_CASE("C API reports remaining invalid git_test_remote arguments", "[capi]")
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   REQUIRE(
       holder_git_test_remote(context, "project-1", nullptr, nullptr, &error) ==
@@ -6678,7 +8144,9 @@ TEST_CASE("C API reports invalid git_probe_remote_url arguments", "[capi]") {
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   REQUIRE(
       holder_git_probe_remote_url(context, "ssh://example", nullptr, &error) ==
@@ -6710,10 +8178,13 @@ TEST_CASE("C API reports invalid git_push arguments", "[capi]") {
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   REQUIRE(
-      holder_git_push(context, "project-1", nullptr, 0, nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+      holder_git_push(context, "project-1", nullptr, 0, nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
   );
   REQUIRE(std::string(holder_error_message(error)).find("out_json") != std::string::npos);
   holder_error_destroy(error);
@@ -6721,15 +8192,14 @@ TEST_CASE("C API reports invalid git_push arguments", "[capi]") {
 
   char* json = nullptr;
   REQUIRE(
-      holder_git_push(nullptr, "project-1", nullptr, 0, &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+      holder_git_push(nullptr, "project-1", nullptr, 0, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
   );
   REQUIRE(std::string(holder_error_message(error)).find("context") != std::string::npos);
   holder_error_destroy(error);
   error = nullptr;
 
-  REQUIRE(
-      holder_git_push(context, "", nullptr, 0, &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
-  );
+  REQUIRE(holder_git_push(context, "", nullptr, 0, &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
   REQUIRE(std::string(holder_error_message(error)).find("project_id") != std::string::npos);
   holder_error_destroy(error);
   holder_context_destroy(context);
@@ -6740,7 +8210,9 @@ TEST_CASE("C API reports invalid git_pull arguments", "[capi]") {
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   REQUIRE(holder_git_pull(context, "project-1", nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
   REQUIRE(std::string(holder_error_message(error)).find("out_json") != std::string::npos);
@@ -6764,7 +8236,9 @@ TEST_CASE("C API reports invalid git_sync_status arguments", "[capi]") {
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   REQUIRE(
       holder_git_sync_status(context, "project-1", nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT
@@ -6792,7 +8266,9 @@ TEST_CASE("C API reports invalid git_sync_if_due arguments", "[capi]") {
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   REQUIRE(
       holder_git_sync_if_due(context, "project-1", 0, 0, nullptr, &error) ==
@@ -6824,7 +8300,9 @@ TEST_CASE("C API reports invalid git_sync_now arguments", "[capi]") {
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   REQUIRE(
       holder_git_sync_now(context, "project-1", nullptr, 1, 1, nullptr, &error) ==
@@ -6844,7 +8322,8 @@ TEST_CASE("C API reports invalid git_sync_now arguments", "[capi]") {
   error = nullptr;
 
   REQUIRE(
-      holder_git_sync_now(context, "", nullptr, 1, 1, &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+      holder_git_sync_now(context, "", nullptr, 1, 1, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
   );
   REQUIRE(std::string(holder_error_message(error)).find("project_id") != std::string::npos);
   holder_error_destroy(error);
@@ -6856,10 +8335,13 @@ TEST_CASE("C API reports invalid encryption_check arguments", "[capi]") {
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   REQUIRE(
-      holder_encryption_check(context, "project-1", nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+      holder_encryption_check(context, "project-1", nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
   );
   REQUIRE(std::string(holder_error_message(error)).find("out_json") != std::string::npos);
   holder_error_destroy(error);
@@ -6884,7 +8366,9 @@ TEST_CASE("C API reports remaining invalid recovery_token_export arguments", "[c
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   REQUIRE(
       holder_recovery_token_export(context, "project-1", "1234", nullptr, &error) ==
@@ -6904,7 +8388,8 @@ TEST_CASE("C API reports remaining invalid recovery_token_export arguments", "[c
   error = nullptr;
 
   REQUIRE(
-      holder_recovery_token_export(context, "", "1234", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+      holder_recovery_token_export(context, "", "1234", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
   );
   REQUIRE(std::string(holder_error_message(error)).find("project_id") != std::string::npos);
   holder_error_destroy(error);
@@ -6916,7 +8401,9 @@ TEST_CASE("C API reports invalid recovery_token_import arguments", "[capi]") {
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   REQUIRE(
       holder_recovery_token_import(context, "project-1", "1234", "token", nullptr, &error) ==
@@ -6963,7 +8450,8 @@ TEST_CASE("C API reports invalid recovery_token_import arguments", "[capi]") {
 TEST_CASE("C API reports invalid recovery_token_inspect arguments", "[capi]") {
   holder_error* error = nullptr;
   REQUIRE(
-      holder_recovery_token_inspect("1234", "token", nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT
+      holder_recovery_token_inspect("1234", "token", nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
   );
   REQUIRE(std::string(holder_error_message(error)).find("out_json") != std::string::npos);
   holder_error_destroy(error);
@@ -6989,7 +8477,9 @@ TEST_CASE("C API reports invalid recovery_token_import_global arguments", "[capi
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   REQUIRE(
       holder_recovery_token_import_global(context, "1234", "token", nullptr, &error) ==
@@ -7030,7 +8520,9 @@ TEST_CASE("C API reports project not found for functions that had no coverage of
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(
@@ -7069,7 +8561,8 @@ TEST_CASE("C API reports project not found for functions that had no coverage of
   error = nullptr;
 
   REQUIRE(
-      holder_recovery_token_export(context, "missing", "1234", &json, &error) == HOLDER_ERROR_RUNTIME
+      holder_recovery_token_export(context, "missing", "1234", &json, &error) ==
+      HOLDER_ERROR_RUNTIME
   );
   REQUIRE(std::string(holder_error_message(error)).find("not found") != std::string::npos);
   holder_error_destroy(error);
@@ -7083,7 +8576,9 @@ TEST_CASE("C API git_pull reports remote not configured", "[capi][git]") {
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(holder_git_pull(context, "project-1", &json, &error) == HOLDER_OK);
@@ -7100,7 +8595,9 @@ TEST_CASE("C API card_get_content reports missing content file", "[capi]") {
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* created_json = nullptr;
   REQUIRE(
@@ -7116,7 +8613,9 @@ TEST_CASE("C API card_get_content reports missing content file", "[capi]") {
   REQUIRE(std::filesystem::remove(data_dir / "repo" / rel_path));
 
   char* content = nullptr;
-  REQUIRE(holder_card_get_content(context, card_id.c_str(), &content, &error) == HOLDER_ERROR_RUNTIME);
+  REQUIRE(
+      holder_card_get_content(context, card_id.c_str(), &content, &error) == HOLDER_ERROR_RUNTIME
+  );
   REQUIRE(std::string(holder_error_message(error)).find("content missing") != std::string::npos);
   holder_error_destroy(error);
   holder_context_destroy(context);
@@ -7127,7 +8626,9 @@ TEST_CASE("C API card_update_content reports card not found", "[capi]") {
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(
@@ -7148,10 +8649,14 @@ TEST_CASE("C API git_sync_if_due succeeds on a real pull and rebuilds the index"
   holder_context* writer_context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &writer_context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &writer_context, &error) ==
+      HOLDER_OK
+  );
   char* json = nullptr;
   REQUIRE(
-      holder_card_create(writer_context, "project-1", "Seed", "body", nullptr, &json, &error) == HOLDER_OK
+      holder_card_create(writer_context, "project-1", "Seed", "body", nullptr, &json, &error) ==
+      HOLDER_OK
   );
   holder_string_free(json);
   json = nullptr;
@@ -7163,12 +8668,18 @@ TEST_CASE("C API git_sync_if_due succeeds on a real pull and rebuilds the index"
   seed_git_project(reader_data_dir, "project-1", reader_data_dir / "repo", remote_dir.string());
   holder_context* reader_context = nullptr;
   REQUIRE(
-      holder_context_open(reader_data_dir.string().c_str(), schema.c_str(), &reader_context, &error) ==
-      HOLDER_OK
+      holder_context_open(
+          reader_data_dir.string().c_str(),
+          schema.c_str(),
+          &reader_context,
+          &error
+      ) == HOLDER_OK
   );
 
   json = nullptr;
-  REQUIRE(holder_git_sync_if_due(reader_context, "project-1", 3600, 3600, &json, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_git_sync_if_due(reader_context, "project-1", 3600, 3600, &json, &error) == HOLDER_OK
+  );
   const auto body = nlohmann::json::parse(json);
   REQUIRE(body["pull_status"] == "succeeded");
   REQUIRE(body["pull_conflicts_resolved"] == 0);
@@ -7192,9 +8703,12 @@ TEST_CASE("C API git_sync_if_due resolves a diverged pull card-level", "[capi][g
 
   seed_git_project(data_dir, "project-1", data_dir / "repo", remote_dir.string());
   holder_context* peer_a = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &peer_a, &error) == HOLDER_OK);
   REQUIRE(
-      holder_card_create(peer_a, "project-1", "Shared Card", "v0", nullptr, &json, &error) == HOLDER_OK
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &peer_a, &error) == HOLDER_OK
+  );
+  REQUIRE(
+      holder_card_create(peer_a, "project-1", "Shared Card", "v0", nullptr, &json, &error) ==
+      HOLDER_OK
   );
   const std::string shared_card_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
   holder_string_free(json);
@@ -7215,7 +8729,8 @@ TEST_CASE("C API git_sync_if_due resolves a diverged pull card-level", "[capi][g
   seed_git_project(peer_b_data_dir, "project-1", peer_b_repo_dir, remote_dir.string());
   holder_context* peer_b = nullptr;
   REQUIRE(
-      holder_context_open(peer_b_data_dir.string().c_str(), schema.c_str(), &peer_b, &error) == HOLDER_OK
+      holder_context_open(peer_b_data_dir.string().c_str(), schema.c_str(), &peer_b, &error) ==
+      HOLDER_OK
   );
   {
     holder::platform::Db peer_b_db;
@@ -7228,8 +8743,14 @@ TEST_CASE("C API git_sync_if_due resolves a diverged pull card-level", "[capi][g
 
   json = nullptr;
   REQUIRE(
-      holder_card_update_content(peer_a, shared_card_id.c_str(), "v1 from A", nullptr, &json, &error) ==
-      HOLDER_OK
+      holder_card_update_content(
+          peer_a,
+          shared_card_id.c_str(),
+          "v1 from A",
+          nullptr,
+          &json,
+          &error
+      ) == HOLDER_OK
   );
   holder_string_free(json);
   json = nullptr;
@@ -7238,8 +8759,14 @@ TEST_CASE("C API git_sync_if_due resolves a diverged pull card-level", "[capi][g
 
   json = nullptr;
   REQUIRE(
-      holder_card_update_content(peer_b, shared_card_id.c_str(), "v1 from B", nullptr, &json, &error) ==
-      HOLDER_OK
+      holder_card_update_content(
+          peer_b,
+          shared_card_id.c_str(),
+          "v1 from B",
+          nullptr,
+          &json,
+          &error
+      ) == HOLDER_OK
   );
   holder_string_free(json);
 
@@ -7259,7 +8786,10 @@ TEST_CASE("C API git_sync_if_due resolves a diverged pull card-level", "[capi][g
   holder_context_destroy(peer_b);
 }
 
-TEST_CASE("C API recovery_token_import_global resolves a diverged pull card-level", "[capi][privacy]") {
+TEST_CASE(
+    "C API recovery_token_import_global resolves a diverged pull card-level",
+    "[capi][privacy]"
+) {
   const auto data_dir = holder::test::make_temp_dir();
   holder::test::EnvGuard keystore_env("HOLDER_TEST_KEYSTORE_DIR", (data_dir / "keystore").string());
   const auto remote_dir = data_dir / "remote";
@@ -7276,7 +8806,9 @@ TEST_CASE("C API recovery_token_import_global resolves a diverged pull card-leve
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(
@@ -7297,8 +8829,12 @@ TEST_CASE("C API recovery_token_import_global resolves a diverged pull card-leve
   const auto other_data_dir = holder::test::make_temp_dir();
   holder_context* other_context = nullptr;
   REQUIRE(
-      holder_context_open(other_data_dir.string().c_str(), schema.c_str(), &other_context, &error) ==
-      HOLDER_OK
+      holder_context_open(
+          other_data_dir.string().c_str(),
+          schema.c_str(),
+          &other_context,
+          &error
+      ) == HOLDER_OK
   );
   json = nullptr;
   REQUIRE(
@@ -7309,8 +8845,14 @@ TEST_CASE("C API recovery_token_import_global resolves a diverged pull card-leve
 
   json = nullptr;
   REQUIRE(
-      holder_card_update_content(context, shared_card_id.c_str(), "v1 from original", nullptr, &json, &error) ==
-      HOLDER_OK
+      holder_card_update_content(
+          context,
+          shared_card_id.c_str(),
+          "v1 from original",
+          nullptr,
+          &json,
+          &error
+      ) == HOLDER_OK
   );
   holder_string_free(json);
   json = nullptr;
@@ -7319,8 +8861,14 @@ TEST_CASE("C API recovery_token_import_global resolves a diverged pull card-leve
 
   json = nullptr;
   REQUIRE(
-      holder_card_update_content(other_context, shared_card_id.c_str(), "v1 from recovered device", nullptr, &json, &error) ==
-      HOLDER_OK
+      holder_card_update_content(
+          other_context,
+          shared_card_id.c_str(),
+          "v1 from recovered device",
+          nullptr,
+          &json,
+          &error
+      ) == HOLDER_OK
   );
   holder_string_free(json);
 
@@ -7357,7 +8905,9 @@ TEST_CASE(
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   {
     holder::platform::Db raw_db;
@@ -7371,7 +8921,8 @@ TEST_CASE(
   error = nullptr;
 
   REQUIRE(
-      holder_project_create(context, "Name", nullptr, nullptr, &json, &error) == HOLDER_ERROR_RUNTIME
+      holder_project_create(context, "Name", nullptr, nullptr, &json, &error) ==
+      HOLDER_ERROR_RUNTIME
   );
   holder_error_destroy(error);
   error = nullptr;
@@ -7436,28 +8987,34 @@ TEST_CASE(
   error = nullptr;
 
   REQUIRE(
-      holder_recovery_token_import(context, "project-1", "1234", "not-a-real-token", &json, &error) ==
-      HOLDER_ERROR_RUNTIME
+      holder_recovery_token_import(
+          context,
+          "project-1",
+          "1234",
+          "not-a-real-token",
+          &json,
+          &error
+      ) == HOLDER_ERROR_RUNTIME
   );
   holder_error_destroy(error);
 
   holder_context_destroy(context);
 }
 
-TEST_CASE(
-    "C API reports the underlying sqlite error when the cards table is missing",
-    "[capi]"
-) {
+TEST_CASE("C API reports the underlying sqlite error when the cards table is missing", "[capi]") {
   const auto data_dir = holder::test::make_temp_dir();
   seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(
-      holder_card_create(context, "project-1", "Title", "content", nullptr, &json, &error) == HOLDER_OK
+      holder_card_create(context, "project-1", "Title", "content", nullptr, &json, &error) ==
+      HOLDER_OK
   );
   const std::string card_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
   holder_string_free(json);
@@ -7514,7 +9071,9 @@ TEST_CASE(
   const auto schema = read_schema_sql();
   holder_context* context = nullptr;
   holder_error* error = nullptr;
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   {
     holder::platform::Db raw_db;
@@ -7524,7 +9083,8 @@ TEST_CASE(
 
   char* json = nullptr;
   REQUIRE(
-      holder_card_search(context, "project-1", "query", 10, 0, &json, &error) == HOLDER_ERROR_RUNTIME
+      holder_card_search(context, "project-1", "query", 10, 0, &json, &error) ==
+      HOLDER_ERROR_RUNTIME
   );
   holder_error_destroy(error);
 
@@ -7542,7 +9102,9 @@ TEST_CASE(
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   char* json = nullptr;
   REQUIRE(holder_recovery_token_export(context, "project-1", "1234", &json, &error) == HOLDER_OK);
@@ -7553,7 +9115,9 @@ TEST_CASE(
   // validation early-return, since inspect_recovery_token/import_recovery_token don't know the
   // pin is wrong until decryption itself fails.
   json = nullptr;
-  REQUIRE(holder_recovery_token_inspect("0000", token.c_str(), &json, &error) == HOLDER_ERROR_RUNTIME);
+  REQUIRE(
+      holder_recovery_token_inspect("0000", token.c_str(), &json, &error) == HOLDER_ERROR_RUNTIME
+  );
   REQUIRE(json == nullptr);
   holder_error_destroy(error);
   error = nullptr;
@@ -7573,14 +9137,19 @@ TEST_CASE("C API error_message returns an empty string for a null error", "[capi
   REQUIRE(std::string(holder_error_message(nullptr)) == "");
 }
 
-TEST_CASE("C API resources assets and locations share the Git-backed JSON model", "[capi][resource]") {
+TEST_CASE(
+    "C API resources assets and locations share the Git-backed JSON model",
+    "[capi][resource]"
+) {
   const auto data_dir = holder::test::make_temp_dir();
   seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
 
   holder_context* context = nullptr;
   holder_error* error = nullptr;
   const auto schema = read_schema_sql();
-  REQUIRE(holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
 
   const nlohmann::json location = {
       {"location_id", "location-1234"},
@@ -7657,7 +9226,11 @@ TEST_CASE("C API resources assets and locations share the Git-backed JSON model"
   json = nullptr;
   REQUIRE(
       holder_asset_put_json(
-          context, "resource-1234", replacement_asset.dump().c_str(), &json, &error
+          context,
+          "resource-1234",
+          replacement_asset.dump().c_str(),
+          &json,
+          &error
       ) == HOLDER_OK
   );
   REQUIRE(nlohmann::json::parse(json)["original_filename"] == "Homework revised.pdf");
@@ -7689,14 +9262,24 @@ TEST_CASE("C API resources assets and locations share the Git-backed JSON model"
 
   REQUIRE(
       holder_asset_retrieve(
-          context, "resource-1234", "missing-asset", "placement-1234", "/tmp/not-written", &error
+          context,
+          "resource-1234",
+          "missing-asset",
+          "placement-1234",
+          "/tmp/not-written",
+          &error
       ) == HOLDER_ERROR_RUNTIME
   );
   holder_error_destroy(error);
   error = nullptr;
   REQUIRE(
       holder_asset_retrieve(
-          context, "resource-1234", "asset-1234", "missing-placement", "/tmp/not-written", &error
+          context,
+          "resource-1234",
+          "asset-1234",
+          "missing-placement",
+          "/tmp/not-written",
+          &error
       ) == HOLDER_ERROR_RUNTIME
   );
   holder_error_destroy(error);

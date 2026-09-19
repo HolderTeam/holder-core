@@ -243,7 +243,10 @@ TEST_CASE("render_card_front_matter includes milestones", "[card_front_matter]")
   REQUIRE(front_matter.find("description: Annual service at garage") != std::string::npos);
 }
 
-TEST_CASE("render_card_front_matter writes null end_at, kind, and description", "[card_front_matter]") {
+TEST_CASE(
+    "render_card_front_matter writes null end_at, kind, and description",
+    "[card_front_matter]"
+) {
   holder::model::Card card;
   card.card_id = "abcd1234";
   card.project_id = "proj-1";

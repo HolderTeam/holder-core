@@ -59,12 +59,12 @@ TEST_CASE("ProjectStore create defaults id, timestamps, and root_path", "[projec
   holder::project::ProjectRepo repo(db);
   REQUIRE(repo.list().size() == 1);
   REQUIRE(repo.list()[0].id_scheme == holder::model::IdScheme::Uuid7);
-  REQUIRE(std::filesystem::exists(
-      std::filesystem::path(created.root_path) / ".holder" / "privacy.json"
-  ));
-  REQUIRE(std::filesystem::exists(
-      std::filesystem::path(created.root_path) / ".holder" / "project.json"
-  ));
+  REQUIRE(
+      std::filesystem::exists(std::filesystem::path(created.root_path) / ".holder" / "privacy.json")
+  );
+  REQUIRE(
+      std::filesystem::exists(std::filesystem::path(created.root_path) / ".holder" / "project.json")
+  );
 }
 
 TEST_CASE("ProjectStore create honors an explicit root_path", "[project_store]") {
@@ -121,7 +121,8 @@ TEST_CASE("ProjectStore create configures a git remote when one is provided", "[
 
   std::ifstream config_file(std::filesystem::path(created.root_path) / ".git" / "config");
   const std::string config(
-      (std::istreambuf_iterator<char>(config_file)), std::istreambuf_iterator<char>()
+      (std::istreambuf_iterator<char>(config_file)),
+      std::istreambuf_iterator<char>()
   );
   REQUIRE(config.find(input.git_remote_url.value()) != std::string::npos);
 }
@@ -163,5 +164,7 @@ TEST_CASE("ProjectStore create sets up an encrypted project", "[project_store]")
   const auto created = store.create(input, counting_uuid_v4("id"), dir / "projects");
 
   REQUIRE(created.project_key_id.has_value());
-  REQUIRE(std::filesystem::exists(std::filesystem::path(created.root_path) / ".holder" / "privacy.json"));
+  REQUIRE(
+      std::filesystem::exists(std::filesystem::path(created.root_path) / ".holder" / "privacy.json")
+  );
 }

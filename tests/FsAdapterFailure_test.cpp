@@ -164,7 +164,10 @@ TEST_CASE("CardStore trash propagates fs rename failure", "[fs]") {
   const auto src_path = project_root / rel_path;
   fs.fail_rename_from = src_path;
 
-  REQUIRE_THROWS_WITH(store.trash(card.card_id, 10), Catch::Matchers::ContainsSubstring("rename failed"));
+  REQUIRE_THROWS_WITH(
+      store.trash(card.card_id, 10),
+      Catch::Matchers::ContainsSubstring("rename failed")
+  );
   REQUIRE(std::filesystem::exists(src_path));
 
   holder::card::CardRepo repo(db);
@@ -208,7 +211,10 @@ TEST_CASE("AiMessageRepo trash propagates fs rename failure", "[fs]") {
   const auto src_path = project_root / rel_path;
   fs.fail_rename_from = src_path;
 
-  REQUIRE_THROWS_WITH(repo.trash(msg.message_id, 10), Catch::Matchers::ContainsSubstring("rename failed"));
+  REQUIRE_THROWS_WITH(
+      repo.trash(msg.message_id, 10),
+      Catch::Matchers::ContainsSubstring("rename failed")
+  );
   REQUIRE(std::filesystem::exists(src_path));
 
   const auto fetched = repo.get(msg.message_id);
@@ -253,7 +259,10 @@ TEST_CASE("Rebuilder propagates fs read failure", "[fs]") {
   project.updated_at = 1;
 
   holder::store::Rebuilder rebuilder(db, &fts, &fs);
-  REQUIRE_THROWS_WITH(rebuilder.rebuild_project(project), Catch::Matchers::ContainsSubstring("read failed"));
+  REQUIRE_THROWS_WITH(
+      rebuilder.rebuild_project(project),
+      Catch::Matchers::ContainsSubstring("read failed")
+  );
 }
 
 TEST_CASE("CardStore restore propagates fs rename failure", "[fs]") {
@@ -282,7 +291,10 @@ TEST_CASE("CardStore restore propagates fs rename failure", "[fs]") {
   const auto src_path = project_root / trash_rel;
   fs.fail_rename_from = src_path;
 
-  REQUIRE_THROWS_WITH(store.restore(card.card_id, 11), Catch::Matchers::ContainsSubstring("rename failed"));
+  REQUIRE_THROWS_WITH(
+      store.restore(card.card_id, 11),
+      Catch::Matchers::ContainsSubstring("rename failed")
+  );
   REQUIRE(std::filesystem::exists(src_path));
 
   holder::card::CardRepo repo(db);
@@ -327,7 +339,10 @@ TEST_CASE("AiMessageRepo restore propagates fs rename failure", "[fs]") {
   const auto src_path = project_root / trash_rel;
   fs.fail_rename_from = src_path;
 
-  REQUIRE_THROWS_WITH(repo.restore(msg.message_id), Catch::Matchers::ContainsSubstring("rename failed"));
+  REQUIRE_THROWS_WITH(
+      repo.restore(msg.message_id),
+      Catch::Matchers::ContainsSubstring("rename failed")
+  );
   REQUIRE(std::filesystem::exists(src_path));
 
   const auto fetched = repo.get(msg.message_id);
@@ -379,7 +394,8 @@ TEST_CASE("Rebuilder rebuilds cards/messages with defaults, links, trash and FTS
   );
 
   // Trash card without front matter -> deleted_at gets mtime. Its #ghost tag must not surface
-  // in the rebuilt index -- trashed cards aren't tag-searchable, same as they aren't FTS-searchable.
+  // in the rebuilt index -- trashed cards aren't tag-searchable, same as they aren't
+  // FTS-searchable.
   const auto card_t_rel = holder::core::card_trash_rel_path(trash_card_id);
   write_file(root / card_t_rel, "trashed card body #ghost\n");
 
@@ -866,7 +882,10 @@ TEST_CASE("Rebuilder rejects cards with unresolved parent graph", "[rebuild]") {
   child.rel_path = holder::core::card_rel_path(child.card_id);
   child.created_at = 1;
   child.updated_at = 1;
-  write_file(root / child.rel_path, holder::core::render_card_front_matter(child, {}, {}) + "body\n");
+  write_file(
+      root / child.rel_path,
+      holder::core::render_card_front_matter(child, {}, {}) + "body\n"
+  );
 
   holder::index::FtsIndexer fts(db);
   holder::store::Rebuilder rebuilder(db, &fts);
@@ -897,9 +916,7 @@ TEST_CASE("Rebuilder tolerates invalid trashed ai messages when configured", "[r
   std::filesystem::create_directories(root);
   create_project(db, project_id, root.string());
 
-  const auto card_rel = holder::core::card_rel_path(
-      "550e8400-e29b-41d4-a716-446655440000"
-  );
+  const auto card_rel = holder::core::card_rel_path("550e8400-e29b-41d4-a716-446655440000");
   write_file(root / card_rel, "# ok\n");
 
   holder::model::AiMessage good_msg;

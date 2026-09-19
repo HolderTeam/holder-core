@@ -14,8 +14,8 @@ std::string ai_thread_manifest_rel_path(const std::string& thread_id) {
   if (thread_id.size() < 4) {
     throw std::invalid_argument("thread_id too short for path sharding");
   }
-  return "ai_threads/" + thread_id.substr(0, 2) + "/" + thread_id.substr(2, 2) + "/" +
-         thread_id + ".json";
+  return "ai_threads/" + thread_id.substr(0, 2) + "/" + thread_id.substr(2, 2) + "/" + thread_id +
+         ".json";
 }
 
 std::string render_ai_thread_manifest(
@@ -34,7 +34,7 @@ std::string render_ai_thread_manifest(
       {"updated_at", thread.updated_at},
   };
   body["card_id"] = thread.card_id.has_value() ? nlohmann::json(*thread.card_id)
-                                                : nlohmann::json(nullptr);
+                                               : nlohmann::json(nullptr);
   const auto plain = body.dump(2) + '\n';
   if (project.privacy_mode != "encrypted_git") return plain;
   if (!project.project_key_id.has_value() || project.project_key_id->empty()) {

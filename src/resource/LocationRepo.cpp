@@ -136,7 +136,11 @@ bool LocationRepo::is_in_use(const std::string& location_id) const {
 void LocationRepo::remove(const std::string& location_id) {
   sqlite3_stmt* stmt = nullptr;
   if (sqlite3_prepare_v2(
-          db_.handle(), "DELETE FROM storage_locations WHERE location_id = ?;", -1, &stmt, nullptr
+          db_.handle(),
+          "DELETE FROM storage_locations WHERE location_id = ?;",
+          -1,
+          &stmt,
+          nullptr
       ) != SQLITE_OK) {
     throw std::runtime_error("prepare remove location failed");
   }
@@ -149,7 +153,11 @@ void LocationRepo::remove(const std::string& location_id) {
 void LocationRepo::remove_project(const std::string& project_id) {
   sqlite3_stmt* stmt = nullptr;
   if (sqlite3_prepare_v2(
-          db_.handle(), "DELETE FROM storage_locations WHERE project_id = ?;", -1, &stmt, nullptr
+          db_.handle(),
+          "DELETE FROM storage_locations WHERE project_id = ?;",
+          -1,
+          &stmt,
+          nullptr
       ) != SQLITE_OK) {
     throw std::runtime_error("prepare remove project locations failed");
   }

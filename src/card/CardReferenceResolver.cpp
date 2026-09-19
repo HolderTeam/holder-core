@@ -51,7 +51,8 @@ std::optional<std::string> normalize_uuid_prefix(std::string_view reference) {
   constexpr std::size_t kMinimumHexDigits = 8;
 
   if (reference.size() >= kUuidLength) {
-    return std::nullopt; // LCOV_EXCL_LINE - full UUIDs use the exact-reference path before this helper.
+    return std::nullopt; // LCOV_EXCL_LINE - full UUIDs use the exact-reference path before this
+                         // helper.
   }
 
   std::string normalized;

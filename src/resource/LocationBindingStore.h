@@ -25,14 +25,10 @@ class LocationBindingStore {
       const std::string& safe_preview,
       long long now
   );
-  std::optional<LocationBinding> get(
-      const std::string& project_id,
-      const std::string& location_id
-  ) const;
-  std::optional<std::string> preview(
-      const std::string& project_id,
-      const std::string& location_id
-  ) const;
+  std::optional<LocationBinding> get(const std::string& project_id, const std::string& location_id)
+      const;
+  std::optional<std::string> preview(const std::string& project_id, const std::string& location_id)
+      const;
   void unbind(const std::string& project_id, const std::string& location_id);
 
   void set_preferred(const std::string& project_id, const std::string& location_id, long long now);

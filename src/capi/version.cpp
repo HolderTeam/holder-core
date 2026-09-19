@@ -16,18 +16,10 @@
 #define HOLDER_VERSION_PATCH 0
 #endif
 
-const char* holder_version_string(void) {
-  return HOLDER_VERSION_STRING;
-}
+const char* holder_version_string(void) { return HOLDER_VERSION_STRING; }
 
-int holder_version_major(void) {
-  return HOLDER_VERSION_MAJOR;
-}
+int holder_version_major(void) { return HOLDER_VERSION_MAJOR; }
 
-int holder_version_minor(void) {
-  return HOLDER_VERSION_MINOR;
-}
+int holder_version_minor(void) { return HOLDER_VERSION_MINOR; }
 
-int holder_version_patch(void) {
-  return HOLDER_VERSION_PATCH;
-}
+int holder_version_patch(void) { return HOLDER_VERSION_PATCH; }

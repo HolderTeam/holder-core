@@ -135,127 +135,130 @@ CardPlacementResult CardPlacementResolver::resolve(
   std::optional<std::string> moved_into_title;
 
   switch (request.intent) {
-    case CardPlacementIntent::Into:
-    case CardPlacementIntent::Before:
-    case CardPlacementIntent::After: {
-      if (!request.target_card_id.has_value()) {
-        throw std::runtime_error("missing_target_card_id");
-      }
-      const std::string& target_card_id = request.target_card_id.value();
-      const auto it = cards_by_id.find(target_card_id);
-      if (it == cards_by_id.end() || it->second.deleted_at.has_value()) {
-        throw std::runtime_error("target_not_found");
-      }
-      const auto& target = it->second;
-      if (request.intent == CardPlacementIntent::Into) {
-        next_parent = target.card_id;
-        if (is_descendant_of(cards_by_id, next_parent, source.card_id)) {
-          throw std::runtime_error("move_would_create_cycle");
-        }
-        next_sort_key = cards_.next_sort_key(project_id, next_parent);
-        moved_into_title = target.title;
-      } else {
-        next_parent = normalize_parent_id(target.parent_card_id);
-        const auto siblings = siblings_for_parent(next_parent, source.card_id);
-        next_sort_key =
-            sort_key_around_target(siblings, target.card_id, request.intent == CardPlacementIntent::After);
-      }
-      break;
+  case CardPlacementIntent::Into:
+  case CardPlacementIntent::Before:
+  case CardPlacementIntent::After: {
+    if (!request.target_card_id.has_value()) {
+      throw std::runtime_error("missing_target_card_id");
     }
-    case CardPlacementIntent::ToStart:
-    case CardPlacementIntent::ToEnd:
-    case CardPlacementIntent::Left:
-    case CardPlacementIntent::Right: {
-      if (request.parent_card_id.has_value()) {
-        next_parent = normalize_parent_id(request.parent_card_id);
-      } else {
-        next_parent = normalize_parent_id(source.parent_card_id);
-      }
-      if (next_parent.has_value()) {
-        const auto parent_it = cards_by_id.find(next_parent.value());
-        if (parent_it == cards_by_id.end() || parent_it->second.deleted_at.has_value()) {
-          throw std::runtime_error("target_not_found");
-        }
-      }
-
-      const auto siblings_without_source = siblings_for_parent(next_parent, source.card_id);
-      if (request.intent == CardPlacementIntent::ToStart) {
-        if (siblings_without_source.empty()) {
-          next_parent = original_parent;
-          next_sort_key = source.sort_key;
-          break;
-        }
-        next_sort_key = siblings_without_source.front().sort_key - 1.0;
-      } else if (request.intent == CardPlacementIntent::ToEnd) {
-        if (siblings_without_source.empty()) {
-          next_parent = original_parent;
-          next_sort_key = source.sort_key;
-          break;
-        }
-        next_sort_key = siblings_without_source.back().sort_key + 1.0;
-      } else {
-        auto siblings_with_source = siblings_for_parent(next_parent, "");
-        std::sort(siblings_with_source.begin(), siblings_with_source.end(), sibling_less);
-        int source_index = -1;
-        for (int i = 0; i < static_cast<int>(siblings_with_source.size()); ++i) {
-          if (siblings_with_source[static_cast<size_t>(i)].card_id == source.card_id) {
-            source_index = i;
-            break;
-          }
-        }
-        // A parent_card_id override naming some other parent leaves the source out of that
-        // parent's sibling list, so there is nothing to move left or right of.
-        if (source_index < 0) {
-          next_parent = original_parent;
-          next_sort_key = source.sort_key;
-          break;
-        }
-        if (request.intent == CardPlacementIntent::Left) {
-          if (source_index == 0) {
-            next_parent = original_parent;
-            next_sort_key = source.sort_key;
-            break;
-          }
-          const auto& target = siblings_with_source[static_cast<size_t>(source_index - 1)];
-          const auto siblings = siblings_for_parent(next_parent, source.card_id);
-          next_sort_key = sort_key_around_target(siblings, target.card_id, false);
-        } else {
-          if (source_index >= static_cast<int>(siblings_with_source.size()) - 1) {
-            next_parent = original_parent;
-            next_sort_key = source.sort_key;
-            break;
-          }
-          const auto& target = siblings_with_source[static_cast<size_t>(source_index) + 1];
-          const auto siblings = siblings_for_parent(next_parent, source.card_id);
-          next_sort_key = sort_key_around_target(siblings, target.card_id, true);
-        }
-      }
-      break;
+    const std::string& target_card_id = request.target_card_id.value();
+    const auto it = cards_by_id.find(target_card_id);
+    if (it == cards_by_id.end() || it->second.deleted_at.has_value()) {
+      throw std::runtime_error("target_not_found");
     }
-    case CardPlacementIntent::UpLevel: {
-      const auto current_parent = normalize_parent_id(source.parent_card_id);
-      if (!current_parent.has_value()) {
-        throw std::runtime_error("already_at_project_root");
-      }
-      const auto parent_it = cards_by_id.find(current_parent.value());
-      if (parent_it == cards_by_id.end() || parent_it->second.deleted_at.has_value()) {
-        next_parent = std::nullopt;
-      } else {
-        next_parent = normalize_parent_id(parent_it->second.parent_card_id);
+    const auto& target = it->second;
+    if (request.intent == CardPlacementIntent::Into) {
+      next_parent = target.card_id;
+      if (is_descendant_of(cards_by_id, next_parent, source.card_id)) {
+        throw std::runtime_error("move_would_create_cycle");
       }
       next_sort_key = cards_.next_sort_key(project_id, next_parent);
-      if (next_parent.has_value()) {
-        const auto dest_parent_it = cards_by_id.find(next_parent.value());
-        if (dest_parent_it != cards_by_id.end() && !dest_parent_it->second.deleted_at.has_value()) {
-          moved_into_title = dest_parent_it->second.title;
+      moved_into_title = target.title;
+    } else {
+      next_parent = normalize_parent_id(target.parent_card_id);
+      const auto siblings = siblings_for_parent(next_parent, source.card_id);
+      next_sort_key = sort_key_around_target(
+          siblings,
+          target.card_id,
+          request.intent == CardPlacementIntent::After
+      );
+    }
+    break;
+  }
+  case CardPlacementIntent::ToStart:
+  case CardPlacementIntent::ToEnd:
+  case CardPlacementIntent::Left:
+  case CardPlacementIntent::Right: {
+    if (request.parent_card_id.has_value()) {
+      next_parent = normalize_parent_id(request.parent_card_id);
+    } else {
+      next_parent = normalize_parent_id(source.parent_card_id);
+    }
+    if (next_parent.has_value()) {
+      const auto parent_it = cards_by_id.find(next_parent.value());
+      if (parent_it == cards_by_id.end() || parent_it->second.deleted_at.has_value()) {
+        throw std::runtime_error("target_not_found");
+      }
+    }
+
+    const auto siblings_without_source = siblings_for_parent(next_parent, source.card_id);
+    if (request.intent == CardPlacementIntent::ToStart) {
+      if (siblings_without_source.empty()) {
+        next_parent = original_parent;
+        next_sort_key = source.sort_key;
+        break;
+      }
+      next_sort_key = siblings_without_source.front().sort_key - 1.0;
+    } else if (request.intent == CardPlacementIntent::ToEnd) {
+      if (siblings_without_source.empty()) {
+        next_parent = original_parent;
+        next_sort_key = source.sort_key;
+        break;
+      }
+      next_sort_key = siblings_without_source.back().sort_key + 1.0;
+    } else {
+      auto siblings_with_source = siblings_for_parent(next_parent, "");
+      std::sort(siblings_with_source.begin(), siblings_with_source.end(), sibling_less);
+      int source_index = -1;
+      for (int i = 0; i < static_cast<int>(siblings_with_source.size()); ++i) {
+        if (siblings_with_source[static_cast<size_t>(i)].card_id == source.card_id) {
+          source_index = i;
+          break;
         }
       }
-      break;
+      // A parent_card_id override naming some other parent leaves the source out of that
+      // parent's sibling list, so there is nothing to move left or right of.
+      if (source_index < 0) {
+        next_parent = original_parent;
+        next_sort_key = source.sort_key;
+        break;
+      }
+      if (request.intent == CardPlacementIntent::Left) {
+        if (source_index == 0) {
+          next_parent = original_parent;
+          next_sort_key = source.sort_key;
+          break;
+        }
+        const auto& target = siblings_with_source[static_cast<size_t>(source_index - 1)];
+        const auto siblings = siblings_for_parent(next_parent, source.card_id);
+        next_sort_key = sort_key_around_target(siblings, target.card_id, false);
+      } else {
+        if (source_index >= static_cast<int>(siblings_with_source.size()) - 1) {
+          next_parent = original_parent;
+          next_sort_key = source.sort_key;
+          break;
+        }
+        const auto& target = siblings_with_source[static_cast<size_t>(source_index) + 1];
+        const auto siblings = siblings_for_parent(next_parent, source.card_id);
+        next_sort_key = sort_key_around_target(siblings, target.card_id, true);
+      }
     }
-    default:
-      // Every CardPlacementIntent value is handled above; this guards against an out-of-range
-      // enum value crossing some future boundary.
-      throw std::runtime_error("invalid_move_intent");
+    break;
+  }
+  case CardPlacementIntent::UpLevel: {
+    const auto current_parent = normalize_parent_id(source.parent_card_id);
+    if (!current_parent.has_value()) {
+      throw std::runtime_error("already_at_project_root");
+    }
+    const auto parent_it = cards_by_id.find(current_parent.value());
+    if (parent_it == cards_by_id.end() || parent_it->second.deleted_at.has_value()) {
+      next_parent = std::nullopt;
+    } else {
+      next_parent = normalize_parent_id(parent_it->second.parent_card_id);
+    }
+    next_sort_key = cards_.next_sort_key(project_id, next_parent);
+    if (next_parent.has_value()) {
+      const auto dest_parent_it = cards_by_id.find(next_parent.value());
+      if (dest_parent_it != cards_by_id.end() && !dest_parent_it->second.deleted_at.has_value()) {
+        moved_into_title = dest_parent_it->second.title;
+      }
+    }
+    break;
+  }
+  default:
+    // Every CardPlacementIntent value is handled above; this guards against an out-of-range
+    // enum value crossing some future boundary.
+    throw std::runtime_error("invalid_move_intent");
   }
 
   CardPlacementResult result;

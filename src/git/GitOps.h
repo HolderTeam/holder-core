@@ -23,9 +23,7 @@ class GitOps {
   // The returned non-movable guard is deliberately lexical: it must be
   // destroyed by the same thread that acquired it. Recursive locking supports
   // same-thread nesting by store operations and their helper operations.
-  [[nodiscard]] GitOperationGuard lock_operation(
-      const std::filesystem::path& repo_dir
-  ) {
+  [[nodiscard]] GitOperationGuard lock_operation(const std::filesystem::path& repo_dir) {
     return GitOperationGuard(operation_mutex_, repo_dir);
   }
 

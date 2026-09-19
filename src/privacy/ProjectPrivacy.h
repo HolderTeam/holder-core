@@ -4,8 +4,8 @@
 #include "privacy/PrivacyError.h"
 #include "project/ProjectRepo.h"
 
-#include <functional>
 #include <array>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>

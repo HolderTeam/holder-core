@@ -202,5 +202,8 @@ TEST_CASE(
 TEST_CASE("RevisionReferenceResolver requires an opened repository", "[git][revision-reference]") {
   holder::git::GitRepo repo;
   RevisionReferenceResolver resolver(repo);
-  REQUIRE_THROWS_WITH(resolver.resolve("12345678"), Catch::Matchers::ContainsSubstring("GitRepo not opened"));
+  REQUIRE_THROWS_WITH(
+      resolver.resolve("12345678"),
+      Catch::Matchers::ContainsSubstring("GitRepo not opened")
+  );
 }

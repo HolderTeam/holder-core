@@ -50,9 +50,7 @@ void create_project(
 class RecordingGitOps final : public holder::git::GitOps {
  public:
   bool fail_pull = false;
-  holder::git::PushResult push_result{
-      holder::git::PushStatus::Pushed, 1, 0, "abc123", {}
-  };
+  holder::git::PushResult push_result{holder::git::PushStatus::Pushed, 1, 0, "abc123", {}};
   std::filesystem::path root;
   std::vector<std::string> calls;
 
@@ -92,8 +90,12 @@ TEST_CASE("ProjectSyncOperation reports and records an unset remote", "[sync][op
       &fts,
       git,
       "proj-1",
-      {.pull = true, .push = false, .push_after_failed_pull = false, .branch = "",
-       .set_upstream = true, .now = 100}
+      {.pull = true,
+       .push = false,
+       .push_after_failed_pull = false,
+       .branch = "",
+       .set_upstream = true,
+       .now = 100}
   );
 
   REQUIRE_FALSE(result.succeeded());
@@ -107,7 +109,10 @@ TEST_CASE("ProjectSyncOperation reports and records an unset remote", "[sync][op
   REQUIRE(state->last_sync_error == "Remote URL is not configured.");
 }
 
-TEST_CASE("ProjectSyncOperation records an unset remote for a push-only request", "[sync][operation]") {
+TEST_CASE(
+    "ProjectSyncOperation records an unset remote for a push-only request",
+    "[sync][operation]"
+) {
   const auto dir = holder::test::make_temp_dir();
   auto db = holder::test::open_db_with_schema(dir / "holder.db");
   holder::index::FtsIndexer fts(db);
@@ -119,8 +124,12 @@ TEST_CASE("ProjectSyncOperation records an unset remote for a push-only request"
       &fts,
       git,
       "proj-1",
-      {.pull = false, .push = true, .push_after_failed_pull = false, .branch = "",
-       .set_upstream = true, .now = 100}
+      {.pull = false,
+       .push = true,
+       .push_after_failed_pull = false,
+       .branch = "",
+       .set_upstream = true,
+       .now = 100}
   );
 
   REQUIRE_FALSE(result.succeeded());
@@ -131,10 +140,15 @@ TEST_CASE("ProjectSyncOperation records an unset remote for a push-only request"
   REQUIRE(git.calls.empty());
   const auto state = holder::project::ProjectSyncRepo(db).get("proj-1");
   REQUIRE(state.has_value());
-  REQUIRE(state->last_push_status == holder::git::push_status_name(holder::git::PushStatus::RemoteUnset));
+  REQUIRE(
+      state->last_push_status == holder::git::push_status_name(holder::git::PushStatus::RemoteUnset)
+  );
 }
 
-TEST_CASE("ProjectSyncOperation rejects a request that selects neither pull nor push", "[sync][operation]") {
+TEST_CASE(
+    "ProjectSyncOperation rejects a request that selects neither pull nor push",
+    "[sync][operation]"
+) {
   const auto dir = holder::test::make_temp_dir();
   auto db = holder::test::open_db_with_schema(dir / "holder.db");
   holder::index::FtsIndexer fts(db);
@@ -147,8 +161,12 @@ TEST_CASE("ProjectSyncOperation rejects a request that selects neither pull nor 
           &fts,
           git,
           "proj-1",
-          {.pull = false, .push = false, .push_after_failed_pull = false, .branch = "",
-           .set_upstream = true, .now = 100}
+          {.pull = false,
+           .push = false,
+           .push_after_failed_pull = false,
+           .branch = "",
+           .set_upstream = true,
+           .now = 100}
       ),
       "project sync must request pull, push, or both"
   );
@@ -181,8 +199,10 @@ int change_root_on_second_select(void* data, int action, const char*, const char
 
 } // namespace
 
-TEST_CASE("ProjectSyncOperation aborts when the project root changes while waiting for the lock",
-          "[sync][operation]") {
+TEST_CASE(
+    "ProjectSyncOperation aborts when the project root changes while waiting for the lock",
+    "[sync][operation]"
+) {
   const auto dir = holder::test::make_temp_dir();
   auto db = holder::test::open_db_with_schema(dir / "holder.db");
   holder::index::FtsIndexer fts(db);
@@ -192,7 +212,9 @@ TEST_CASE("ProjectSyncOperation aborts when the project root changes while waiti
   holder::platform::Db other;
   other.open(dir / "holder.db");
   RootChangeInjector injector{other.handle(), "proj-1", (dir / "moved").string(), 0};
-  REQUIRE(sqlite3_set_authorizer(db.handle(), change_root_on_second_select, &injector) == SQLITE_OK);
+  REQUIRE(
+      sqlite3_set_authorizer(db.handle(), change_root_on_second_select, &injector) == SQLITE_OK
+  );
 
   REQUIRE_THROWS_WITH(
       holder::sync::run_project_sync(
@@ -200,8 +222,12 @@ TEST_CASE("ProjectSyncOperation aborts when the project root changes while waiti
           &fts,
           git,
           "proj-1",
-          {.pull = true, .push = false, .push_after_failed_pull = false, .branch = "",
-           .set_upstream = true, .now = 100}
+          {.pull = true,
+           .push = false,
+           .push_after_failed_pull = false,
+           .branch = "",
+           .set_upstream = true,
+           .now = 100}
       ),
       "project root changed while waiting for sync: proj-1"
   );
@@ -223,8 +249,12 @@ TEST_CASE("ProjectSyncOperation stops before push when pull fails", "[sync][oper
       &fts,
       git,
       "proj-1",
-      {.pull = true, .push = true, .push_after_failed_pull = false, .branch = "",
-       .set_upstream = true, .now = 200}
+      {.pull = true,
+       .push = true,
+       .push_after_failed_pull = false,
+       .branch = "",
+       .set_upstream = true,
+       .now = 200}
   );
 
   REQUIRE_FALSE(result.succeeded());
@@ -250,8 +280,12 @@ TEST_CASE("ProjectSyncOperation pulls before a successful push", "[sync][operati
       &fts,
       git,
       "proj-1",
-      {.pull = true, .push = true, .push_after_failed_pull = false, .branch = "",
-       .set_upstream = true, .now = 300}
+      {.pull = true,
+       .push = true,
+       .push_after_failed_pull = false,
+       .branch = "",
+       .set_upstream = true,
+       .now = 300}
   );
 
   REQUIRE(result.succeeded());
@@ -269,17 +303,17 @@ TEST_CASE("ProjectSyncOperation pulls before a successful push", "[sync][operati
   REQUIRE(state->last_push_status == "pushed");
 }
 
-TEST_CASE("ProjectSyncOperation ignores a failing activity-metrics refresh after a successful pull",
-          "[sync][operation]") {
+TEST_CASE(
+    "ProjectSyncOperation ignores a failing activity-metrics refresh after a successful pull",
+    "[sync][operation]"
+) {
   const auto dir = holder::test::make_temp_dir();
   auto db = holder::test::open_db_with_schema(dir / "holder.db");
   holder::index::FtsIndexer fts(db);
   create_project(db, "proj-1", dir / "project", "https://example.invalid/repo.git");
   // A .git entry that is not a valid gitfile makes the post-sync repository inspection throw,
   // while the stubbed git operations report a clean pull.
-  {
-    std::ofstream(dir / "project" / ".git") << "this is not a gitfile";
-  }
+  { std::ofstream(dir / "project" / ".git") << "this is not a gitfile"; }
   RecordingGitOps git;
 
   const auto result = holder::sync::run_project_sync(
@@ -287,8 +321,12 @@ TEST_CASE("ProjectSyncOperation ignores a failing activity-metrics refresh after
       &fts,
       git,
       "proj-1",
-      {.pull = true, .push = false, .push_after_failed_pull = false, .branch = "",
-       .set_upstream = true, .now = 100}
+      {.pull = true,
+       .push = false,
+       .push_after_failed_pull = false,
+       .branch = "",
+       .set_upstream = true,
+       .now = 100}
   );
 
   REQUIRE(result.succeeded());
@@ -298,7 +336,10 @@ TEST_CASE("ProjectSyncOperation ignores a failing activity-metrics refresh after
   REQUIRE(state->last_pull_status == "succeeded");
 }
 
-TEST_CASE("ProjectSyncOperation fast-forward pull rebuilds the project index", "[sync][operation]") {
+TEST_CASE(
+    "ProjectSyncOperation fast-forward pull rebuilds the project index",
+    "[sync][operation]"
+) {
   const auto dir = holder::test::make_temp_dir();
   const auto remote_root = dir / "remote";
   const auto local_root = dir / "local";
@@ -336,8 +377,12 @@ TEST_CASE("ProjectSyncOperation fast-forward pull rebuilds the project index", "
       &local_fts,
       local_git,
       "proj-1",
-      {.pull = true, .push = false, .push_after_failed_pull = false, .branch = "",
-       .set_upstream = true, .now = 400}
+      {.pull = true,
+       .push = false,
+       .push_after_failed_pull = false,
+       .branch = "",
+       .set_upstream = true,
+       .now = 400}
   );
 
   REQUIRE(result.succeeded());
@@ -348,7 +393,7 @@ TEST_CASE("ProjectSyncOperation fast-forward pull rebuilds the project index", "
 
 TEST_CASE("Project sync names every persisted pull phase", "[sync]") {
   REQUIRE(
-      std::string(holder::sync::pull_phase_status_name(holder::sync::PullPhaseStatus::NotAttempted)) ==
-      "not_attempted"
+      std::string(holder::sync::pull_phase_status_name(holder::sync::PullPhaseStatus::NotAttempted)
+      ) == "not_attempted"
   );
 }

@@ -5,8 +5,8 @@
 #include <catch2/catch.hpp>
 #endif
 
-#include "git/GitRepo.h"
 #include "core_test_helpers.h"
+#include "git/GitRepo.h"
 #include <git2.h>
 
 #include <chrono>
@@ -45,8 +45,7 @@ void remove_parent_tree_object(const std::filesystem::path& root) {
   git_commit_free(commit);
   git_reference_free(head);
   git_repository_free(raw);
-  REQUIRE(std::filesystem::remove(root / ".git" / "objects" /
-                                  oid.substr(0, 2) / oid.substr(2)));
+  REQUIRE(std::filesystem::remove(root / ".git" / "objects" / oid.substr(0, 2) / oid.substr(2)));
 }
 
 void init_bare_repo(const std::filesystem::path& repo_path) {
@@ -125,13 +124,19 @@ TEST_CASE("GitRepo throws when not opened", "[git]") {
       repo.write_file("a.txt", "data"),
       Catch::Matchers::ContainsSubstring("GitRepo not opened")
   );
-  REQUIRE_THROWS_WITH(repo.stage_path("a.txt"), Catch::Matchers::ContainsSubstring("GitRepo not opened"));
+  REQUIRE_THROWS_WITH(
+      repo.stage_path("a.txt"),
+      Catch::Matchers::ContainsSubstring("GitRepo not opened")
+  );
   REQUIRE_THROWS_WITH(repo.commit("msg"), Catch::Matchers::ContainsSubstring("GitRepo not opened"));
   REQUIRE_THROWS_WITH(
       repo.set_remote("origin", "git@example.com:repo.git"),
       Catch::Matchers::ContainsSubstring("GitRepo not opened")
   );
-  REQUIRE_THROWS_WITH(repo.remove_remote("origin"), Catch::Matchers::ContainsSubstring("GitRepo not opened"));
+  REQUIRE_THROWS_WITH(
+      repo.remove_remote("origin"),
+      Catch::Matchers::ContainsSubstring("GitRepo not opened")
+  );
 }
 
 TEST_CASE("GitRepo open_or_init fails on file path", "[git]") {
@@ -356,7 +361,10 @@ TEST_CASE("GitRepo push_branch returns up_to_date for unborn branch with remote"
   REQUIRE(result.error_message.empty());
 }
 
-TEST_CASE("GitRepo push_branch distinguishes changed and unchanged remote refs", "[git][push-result]") {
+TEST_CASE(
+    "GitRepo push_branch distinguishes changed and unchanged remote refs",
+    "[git][push-result]"
+) {
   const auto dir = make_temp_dir();
   init_bare_repo(dir / "remote");
   holder::git::GitRepo local;
@@ -455,7 +463,10 @@ TEST_CASE("GitRepo pull_remote_ff_only rejects non-fast-forward updates", "[git]
   }
 }
 
-TEST_CASE("GitRepo pull_remote_ff_only is a no-op when local is strictly ahead of remote", "[git]") {
+TEST_CASE(
+    "GitRepo pull_remote_ff_only is a no-op when local is strictly ahead of remote",
+    "[git]"
+) {
   // Not a divergence -- remote simply hasn't moved since local's last pull (e.g. right after a
   // local commit that hasn't been pushed yet). There's nothing to pull, so this should succeed
   // silently rather than being treated as a conflict.
@@ -588,7 +599,8 @@ TEST_CASE(
     captured_remote_oid = e.remote_oid_hex;
   }
 
-  local_repo.merge_remote_taking_theirs_for_conflicts("origin", captured_local_oid, captured_remote_oid);
+  local_repo
+      .merge_remote_taking_theirs_for_conflicts("origin", captured_local_oid, captured_remote_oid);
 
   REQUIRE_FALSE(std::filesystem::exists(local_dir / "cards" / "doomed.md"));
   REQUIRE(read_text_file(local_dir / "cards" / "shared.md") == "remote edit");
@@ -639,7 +651,10 @@ TEST_CASE("GitRepo push_branch uses GIT_DEFAULT_BRANCH when HEAD is detached", "
   git_repository_free(remote);
 }
 
-TEST_CASE("GitRepo push_branch falls back to cards when HEAD and git config have no branch", "[git]") {
+TEST_CASE(
+    "GitRepo push_branch falls back to cards when HEAD and git config have no branch",
+    "[git]"
+) {
 #ifdef _WIN32
   SKIP("Windows CI does not yet isolate libgit2 default-branch config for this edge case");
 #endif
@@ -1102,14 +1117,12 @@ TEST_CASE(
   }
 }
 
-TEST_CASE("GitRepo history handles unborn repos pagination and invalid cursors",
-          "[git]") {
+TEST_CASE("GitRepo history handles unborn repos pagination and invalid cursors", "[git]") {
   const auto dir = make_temp_dir();
   holder::git::GitRepo repo;
   repo.open_or_init(dir);
 
-  CHECK(repo.history_for_paths({"cards/a.md"}, 10, std::nullopt, 100)
-            .commits.empty());
+  CHECK(repo.history_for_paths({"cards/a.md"}, 10, std::nullopt, 100).commits.empty());
   CHECK(repo.history_all(10, std::nullopt, 100).commits.empty());
 
   repo.write_file("cards/a.md", "one");
@@ -1119,8 +1132,7 @@ TEST_CASE("GitRepo history handles unborn repos pagination and invalid cursors",
   repo.stage_path("cards/a.md");
   repo.commit("Second");
 
-  const auto path_page =
-      repo.history_for_paths({"cards/a.md"}, 1, std::nullopt, 100);
+  const auto path_page = repo.history_for_paths({"cards/a.md"}, 1, std::nullopt, 100);
   REQUIRE(path_page.commits.size() == 1);
   CHECK(path_page.has_more);
 
@@ -1138,8 +1150,7 @@ TEST_CASE("GitRepo history handles unborn repos pagination and invalid cursors",
   );
 }
 
-TEST_CASE("GitRepo history reports malformed HEAD and missing parent trees",
-          "[git][history]") {
+TEST_CASE("GitRepo history reports malformed HEAD and missing parent trees", "[git][history]") {
   SECTION("malformed HEAD") {
     const auto root = make_temp_dir();
     holder::git::GitRepo repo;

@@ -239,13 +239,7 @@ TEST_CASE("LinkRepo delete_link supports type-only and type+kind filters", "[lin
   REQUIRE(typed[0].kind == "ref");
 
   // has_kind only branch
-  repo.delete_link(
-      "proj-1",
-      "card-a",
-      "card-b",
-      std::nullopt,
-      std::optional<std::string>("wiki")
-  );
+  repo.delete_link("proj-1", "card-a", "card-b", std::nullopt, std::optional<std::string>("wiki"));
   outgoing = repo.list_outgoing("proj-1", "card-a");
   REQUIRE(outgoing.size() == 1);
   REQUIRE(outgoing[0].kind == "ref");
@@ -287,11 +281,14 @@ TEST_CASE("LinkRepo methods throw sqlite errors when DB is closed", "[linkrepo]"
   );
   REQUIRE_THROWS_WITH(
       repo.list_backlinks_typed("proj-1", "card-b", "card"),
-      Catch::Matchers::ContainsSubstring("prepare list backlinks typed failed: unknown sqlite error")
+      Catch::Matchers::ContainsSubstring("prepare list backlinks typed failed: unknown sqlite error"
+      )
   );
   REQUIRE_THROWS_WITH(
       repo.list_incoming_typed("proj-1", "card"),
-      Catch::Matchers::ContainsSubstring("prepare list incoming typed links failed: unknown sqlite error")
+      Catch::Matchers::ContainsSubstring(
+          "prepare list incoming typed links failed: unknown sqlite error"
+      )
   );
   REQUIRE_THROWS_WITH(
       repo.delete_link("proj-1", "card-a", "card-b", std::nullopt, std::nullopt),
