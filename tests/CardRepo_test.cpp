@@ -1,5 +1,6 @@
 #if __has_include(<catch2/catch_test_macros.hpp>)
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #else
 #include <catch2/catch.hpp>
 #endif
@@ -383,7 +384,10 @@ TEST_CASE("CardRepo throws sqlite error when DB handle is invalid", "[cardrepo]"
   card.created_at = 1;
   card.updated_at = 1;
 
-  REQUIRE_THROWS(repo.create(card));
+  REQUIRE_THROWS_WITH(
+      repo.create(card),
+      Catch::Matchers::ContainsSubstring("prepare insert card failed: unknown sqlite error")
+  );
 }
 
 TEST_CASE("CardRepo create throws on duplicate primary key", "[cardrepo]") {
@@ -407,7 +411,10 @@ TEST_CASE("CardRepo create throws on duplicate primary key", "[cardrepo]") {
   card.updated_at = 1;
 
   repo.create(card);
-  REQUIRE_THROWS(repo.create(card));
+  REQUIRE_THROWS_WITH(
+      repo.create(card),
+      Catch::Matchers::ContainsSubstring("insert card failed: UNIQUE constraint failed: cards.project_id, cards.rel_path")
+  );
 }
 
 TEST_CASE("CardRepo methods throw sqlite errors when DB is closed", "[cardrepo]") {
@@ -432,30 +439,84 @@ TEST_CASE("CardRepo methods throw sqlite errors when DB is closed", "[cardrepo]"
 
   db.close();
 
-  REQUIRE_THROWS(repo.get("missing"));
-  REQUIRE_THROWS(repo.find_by_id("proj-1", "missing", holder::model::CardScope::Either));
-  REQUIRE_THROWS(
+  REQUIRE_THROWS_WITH(
+      repo.get("missing"),
+      Catch::Matchers::ContainsSubstring("prepare get card failed: unknown sqlite error")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.find_by_id("proj-1", "missing", holder::model::CardScope::Either),
+      Catch::Matchers::ContainsSubstring("prepare find card by id failed: unknown sqlite error")
+  );
+  REQUIRE_THROWS_WITH(
       repo.find_by_id_prefix("proj-1", "missing", holder::model::CardScope::Either, 10)
-  );
-  REQUIRE_THROWS(
+  , Catch::Matchers::ContainsSubstring("prepare find cards by id prefix failed: unknown sqlite error"));
+  REQUIRE_THROWS_WITH(
       repo.find_by_exact_title("proj-1", "Missing", holder::model::CardScope::Either, 10)
+  , Catch::Matchers::ContainsSubstring("prepare find cards by exact title failed: unknown sqlite error"));
+  REQUIRE_THROWS_WITH(
+      repo.list_roots("proj-1"),
+      Catch::Matchers::ContainsSubstring("prepare list cards failed: unknown sqlite error")
   );
-  REQUIRE_THROWS(repo.list_roots("proj-1"));
-  REQUIRE_THROWS(repo.list_children("proj-1", "parent"));
-  REQUIRE_THROWS(repo.list_all("proj-1"));
-  REQUIRE_THROWS(repo.count_all_not_deleted("proj-1"));
-  REQUIRE_THROWS(repo.count_roots_not_deleted("proj-1"));
-  REQUIRE_THROWS(repo.count_children_not_deleted("proj-1", "parent"));
-  REQUIRE_THROWS(repo.next_sort_key("proj-1", std::nullopt));
-  REQUIRE_THROWS(repo.next_sort_key("proj-1", std::optional<std::string>("parent")));
-  REQUIRE_THROWS(repo.update_title("card-1", "Title", 2));
-  REQUIRE_THROWS(repo.touch_updated("card-1", 2));
-  REQUIRE_THROWS(repo.soft_delete("card-1", 3, 4));
-  REQUIRE_THROWS(repo.restore("card-1", 5));
-  REQUIRE_THROWS(repo.restore_snapshot(card));
-  REQUIRE_THROWS(repo.remove("card-1"));
-  REQUIRE_THROWS(repo.move("card-1", std::nullopt, 1.5, 6));
-  REQUIRE_THROWS(repo.list_recent_page("proj-1", std::nullopt, std::nullopt, 10));
+  REQUIRE_THROWS_WITH(
+      repo.list_children("proj-1", "parent"),
+      Catch::Matchers::ContainsSubstring("prepare list child cards failed: unknown sqlite error")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.list_all("proj-1"),
+      Catch::Matchers::ContainsSubstring("prepare list all cards failed: unknown sqlite error")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.count_all_not_deleted("proj-1"),
+      Catch::Matchers::ContainsSubstring("prepare count all cards failed: unknown sqlite error")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.count_roots_not_deleted("proj-1"),
+      Catch::Matchers::ContainsSubstring("prepare count root cards failed: unknown sqlite error")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.count_children_not_deleted("proj-1", "parent"),
+      Catch::Matchers::ContainsSubstring("prepare count child cards failed: unknown sqlite error")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.next_sort_key("proj-1", std::nullopt),
+      Catch::Matchers::ContainsSubstring("prepare next sort_key failed: unknown sqlite error")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.next_sort_key("proj-1", std::optional<std::string>("parent")),
+      Catch::Matchers::ContainsSubstring("prepare next sort_key failed: unknown sqlite error")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.update_title("card-1", "Title", 2),
+      Catch::Matchers::ContainsSubstring("prepare update card title failed: unknown sqlite error")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.touch_updated("card-1", 2),
+      Catch::Matchers::ContainsSubstring("prepare touch card failed: unknown sqlite error")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.soft_delete("card-1", 3, 4),
+      Catch::Matchers::ContainsSubstring("prepare soft delete card failed: unknown sqlite error")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.restore("card-1", 5),
+      Catch::Matchers::ContainsSubstring("prepare restore card failed: unknown sqlite error")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.restore_snapshot(card),
+      Catch::Matchers::ContainsSubstring("prepare restore card snapshot failed: unknown sqlite error")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.remove("card-1"),
+      Catch::Matchers::ContainsSubstring("prepare delete card failed: unknown sqlite error")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.move("card-1", std::nullopt, 1.5, 6),
+      Catch::Matchers::ContainsSubstring("prepare move card failed: unknown sqlite error")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.list_recent_page("proj-1", std::nullopt, std::nullopt, 10),
+      Catch::Matchers::ContainsSubstring("prepare list recent cards failed: unknown sqlite error")
+  );
 }
 
 TEST_CASE("CardRepo read/count queries throw on interrupted sqlite step", "[cardrepo]") {
@@ -493,15 +554,46 @@ TEST_CASE("CardRepo read/count queries throw on interrupted sqlite step", "[card
   int interrupt_on = 1;
   sqlite3_progress_handler(db.handle(), 1, sqlite_interrupt_cb, &interrupt_on);
 
-  REQUIRE_THROWS(repo.get("parent-int"));
-  REQUIRE_THROWS(repo.list_roots("proj-1"));
-  REQUIRE_THROWS(repo.list_children("proj-1", "parent-int"));
-  REQUIRE_THROWS(repo.list_all("proj-1"));
-  REQUIRE_THROWS(repo.count_all_not_deleted("proj-1"));
-  REQUIRE_THROWS(repo.count_roots_not_deleted("proj-1"));
-  REQUIRE_THROWS(repo.count_children_not_deleted("proj-1", "parent-int"));
-  REQUIRE_THROWS(repo.next_sort_key("proj-1", std::nullopt));
-  REQUIRE_THROWS(repo.next_sort_key("proj-1", std::optional<std::string>("parent-int")));
+  REQUIRE_THROWS_WITH(
+      repo.get("parent-int"),
+      Catch::Matchers::ContainsSubstring("get card failed: interrupted")
+  );
+  // SQLite 3.41+ can report the interrupt while preparing the statement, earlier versions while
+  // stepping it. The operation name and "interrupted" are the stable part; the phase is not.
+  REQUIRE_THROWS_WITH(
+      repo.list_roots("proj-1"),
+      Catch::Matchers::ContainsSubstring("list cards failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.list_children("proj-1", "parent-int"),
+      Catch::Matchers::ContainsSubstring("list child cards failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.list_all("proj-1"),
+      Catch::Matchers::ContainsSubstring("list all cards failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.count_all_not_deleted("proj-1"),
+      Catch::Matchers::ContainsSubstring("count all cards failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.count_roots_not_deleted("proj-1"),
+      Catch::Matchers::ContainsSubstring("count root cards failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.count_children_not_deleted("proj-1", "parent-int"),
+      Catch::Matchers::ContainsSubstring("count child cards failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.next_sort_key("proj-1", std::nullopt),
+      Catch::Matchers::ContainsSubstring("next sort_key failed: interrupted") ||
+          Catch::Matchers::ContainsSubstring("next sort_key query failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.next_sort_key("proj-1", std::optional<std::string>("parent-int")),
+      Catch::Matchers::ContainsSubstring("next sort_key failed: interrupted") ||
+          Catch::Matchers::ContainsSubstring("next sort_key query failed: interrupted")
+  );
 
   sqlite3_progress_handler(db.handle(), 0, nullptr, nullptr);
 }
@@ -556,14 +648,42 @@ TEST_CASE("CardRepo list/count/next_sort throw on interrupted step under load", 
   int interrupt_on = 1;
   sqlite3_progress_handler(db.handle(), 1, sqlite_interrupt_cb, &interrupt_on);
 
-  REQUIRE_THROWS(repo.list_roots("proj-1"));
-  REQUIRE_THROWS(repo.list_children("proj-1", "parent-lock"));
-  REQUIRE_THROWS(repo.list_all("proj-1"));
-  REQUIRE_THROWS(repo.count_all_not_deleted("proj-1"));
-  REQUIRE_THROWS(repo.count_roots_not_deleted("proj-1"));
-  REQUIRE_THROWS(repo.count_children_not_deleted("proj-1", "parent-lock"));
-  REQUIRE_THROWS(repo.next_sort_key("proj-1", std::nullopt));
-  REQUIRE_THROWS(repo.next_sort_key("proj-1", std::optional<std::string>("parent-lock")));
+  // SQLite 3.41+ can report the interrupt while preparing the statement, earlier versions while
+  // stepping it. The operation name and "interrupted" are the stable part; the phase is not.
+  REQUIRE_THROWS_WITH(
+      repo.list_roots("proj-1"),
+      Catch::Matchers::ContainsSubstring("list cards failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.list_children("proj-1", "parent-lock"),
+      Catch::Matchers::ContainsSubstring("list child cards failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.list_all("proj-1"),
+      Catch::Matchers::ContainsSubstring("list all cards failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.count_all_not_deleted("proj-1"),
+      Catch::Matchers::ContainsSubstring("count all cards failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.count_roots_not_deleted("proj-1"),
+      Catch::Matchers::ContainsSubstring("count root cards failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.count_children_not_deleted("proj-1", "parent-lock"),
+      Catch::Matchers::ContainsSubstring("count child cards failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.next_sort_key("proj-1", std::nullopt),
+      Catch::Matchers::ContainsSubstring("next sort_key failed: interrupted") ||
+          Catch::Matchers::ContainsSubstring("next sort_key query failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.next_sort_key("proj-1", std::optional<std::string>("parent-lock")),
+      Catch::Matchers::ContainsSubstring("next sort_key failed: interrupted") ||
+          Catch::Matchers::ContainsSubstring("next sort_key query failed: interrupted")
+  );
 
   sqlite3_progress_handler(db.handle(), 0, nullptr, nullptr);
 }
@@ -594,13 +714,34 @@ TEST_CASE("CardRepo update/delete/move throw when sqlite step aborts", "[cardrep
   db.exec("CREATE TRIGGER cards_fail_delete BEFORE DELETE ON cards "
           "BEGIN SELECT RAISE(ABORT, 'blocked delete'); END;");
 
-  REQUIRE_THROWS(repo.update_title(card.card_id, "New", 2));
-  REQUIRE_THROWS(repo.touch_updated(card.card_id, 3));
-  REQUIRE_THROWS(repo.soft_delete(card.card_id, 4, 5));
-  REQUIRE_THROWS(repo.restore(card.card_id, 6));
-  REQUIRE_THROWS(repo.restore_snapshot(card));
-  REQUIRE_THROWS(repo.move(card.card_id, std::nullopt, 2.0, 7));
-  REQUIRE_THROWS(repo.remove(card.card_id));
+  REQUIRE_THROWS_WITH(
+      repo.update_title(card.card_id, "New", 2),
+      Catch::Matchers::ContainsSubstring("update card title failed: blocked update")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.touch_updated(card.card_id, 3),
+      Catch::Matchers::ContainsSubstring("touch card failed: blocked update")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.soft_delete(card.card_id, 4, 5),
+      Catch::Matchers::ContainsSubstring("soft delete card failed: blocked update")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.restore(card.card_id, 6),
+      Catch::Matchers::ContainsSubstring("restore card failed: blocked update")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.restore_snapshot(card),
+      Catch::Matchers::ContainsSubstring("restore card snapshot failed: blocked update")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.move(card.card_id, std::nullopt, 2.0, 7),
+      Catch::Matchers::ContainsSubstring("move card failed: blocked update")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.remove(card.card_id),
+      Catch::Matchers::ContainsSubstring("delete card failed: blocked delete")
+  );
 }
 
 TEST_CASE("CardRepo read/count queries throw when sqlite step hits locked database", "[cardrepo]") {
@@ -650,12 +791,32 @@ TEST_CASE("CardRepo read/count queries throw when sqlite step hits locked databa
   int interrupt_on = 1;
   sqlite3_progress_handler(db.handle(), 1, sqlite_interrupt_cb, &interrupt_on);
 
-  REQUIRE_THROWS(repo.list_roots("proj-1"));
-  REQUIRE_THROWS(repo.list_children("proj-1", "parent-lock"));
-  REQUIRE_THROWS(repo.list_all("proj-1"));
-  REQUIRE_THROWS(repo.count_all_not_deleted("proj-1"));
-  REQUIRE_THROWS(repo.count_roots_not_deleted("proj-1"));
-  REQUIRE_THROWS(repo.count_children_not_deleted("proj-1", "parent-lock"));
+  // SQLite 3.41+ can report the interrupt while preparing the statement, earlier versions while
+  // stepping it. The operation name and "interrupted" are the stable part; the phase is not.
+  REQUIRE_THROWS_WITH(
+      repo.list_roots("proj-1"),
+      Catch::Matchers::ContainsSubstring("list cards failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.list_children("proj-1", "parent-lock"),
+      Catch::Matchers::ContainsSubstring("list child cards failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.list_all("proj-1"),
+      Catch::Matchers::ContainsSubstring("list all cards failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.count_all_not_deleted("proj-1"),
+      Catch::Matchers::ContainsSubstring("count all cards failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.count_roots_not_deleted("proj-1"),
+      Catch::Matchers::ContainsSubstring("count root cards failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.count_children_not_deleted("proj-1", "parent-lock"),
+      Catch::Matchers::ContainsSubstring("count child cards failed: interrupted")
+  );
 
   sqlite3_progress_handler(db.handle(), 0, nullptr, nullptr);
 }

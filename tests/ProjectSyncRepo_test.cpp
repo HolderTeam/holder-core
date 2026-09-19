@@ -1,3 +1,7 @@
+#if __has_include(<catch2/catch_test_macros.hpp>)
+#include <catch2/matchers/catch_matchers_string.hpp>
+#endif
+
 #include "core_test_helpers.h"
 #include "project/ProjectRepo.h"
 #include "project/ProjectSyncRepo.h"
@@ -281,12 +285,21 @@ TEST_CASE("ProjectSyncRepo throws when sqlite handle is closed", "[sync][repo]")
   holder::project::ProjectSyncRepo sync(db);
   db.close();
 
-  REQUIRE_THROWS(sync.get("proj-1"));
-  REQUIRE_THROWS(sync.update_activity_counts(
-      "proj-1",
-      {.uncommitted_changes_count = 1, .unpushed_commits_count = 1, .updated_at = 1}
-  ));
-  REQUIRE_THROWS(sync.remove("proj-1"));
+  REQUIRE_THROWS_WITH(
+      sync.get("proj-1"),
+      Catch::Matchers::ContainsSubstring("prepare get project sync state failed: unknown sqlite error")
+  );
+  REQUIRE_THROWS_WITH(
+      sync.update_activity_counts(
+          "proj-1",
+          {.uncommitted_changes_count = 1, .unpushed_commits_count = 1, .updated_at = 1}
+      ),
+      Catch::Matchers::ContainsSubstring("prepare get project sync state failed: unknown sqlite error")
+  );
+  REQUIRE_THROWS_WITH(
+      sync.remove("proj-1"),
+      Catch::Matchers::ContainsSubstring("prepare delete project sync state failed: unknown sqlite error")
+  );
 }
 
 TEST_CASE("ProjectSyncRepo read/write/delete throw on interrupted sqlite step", "[sync][repo]") {
@@ -313,9 +326,18 @@ TEST_CASE("ProjectSyncRepo read/write/delete throw on interrupted sqlite step", 
   int interrupt_on = 1;
   sqlite3_progress_handler(db.handle(), 1, sqlite_interrupt_cb, &interrupt_on);
 
-  REQUIRE_THROWS(sync.get("proj-1"));
-  REQUIRE_THROWS(sync.record_push_result("proj-1", "failed", false, std::nullopt, 2));
-  REQUIRE_THROWS(sync.remove("proj-1"));
+  REQUIRE_THROWS_WITH(
+      sync.get("proj-1"),
+      Catch::Matchers::ContainsSubstring("get project sync state failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      sync.record_push_result("proj-1", "failed", false, std::nullopt, 2),
+      Catch::Matchers::ContainsSubstring("get project sync state failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      sync.remove("proj-1"),
+      Catch::Matchers::ContainsSubstring("delete project sync state failed: interrupted")
+  );
 
   sqlite3_progress_handler(db.handle(), 0, nullptr, nullptr);
 }
@@ -336,7 +358,10 @@ TEST_CASE("ProjectSyncRepo upsert prepare fails when insert is not authorized", 
 
   holder::project::ProjectSyncRepo sync(db);
   REQUIRE(sqlite3_set_authorizer(db.handle(), deny_project_sync_insert, nullptr) == SQLITE_OK);
-  REQUIRE_THROWS(sync.record_push_result("proj-1", "failed", false, std::nullopt, 2));
+  REQUIRE_THROWS_WITH(
+      sync.record_push_result("proj-1", "failed", false, std::nullopt, 2),
+      Catch::Matchers::ContainsSubstring("prepare upsert project sync state failed: not authorized")
+  );
   REQUIRE(sqlite3_set_authorizer(db.handle(), nullptr, nullptr) == SQLITE_OK);
 }
 
@@ -359,5 +384,8 @@ TEST_CASE("ProjectSyncRepo upsert step fails when trigger aborts insert", "[sync
           "BEFORE INSERT ON project_sync_state "
           "BEGIN SELECT RAISE(ABORT, 'blocked insert'); END;");
 
-  REQUIRE_THROWS(sync.record_push_result("proj-1", "failed", false, std::nullopt, 3));
+  REQUIRE_THROWS_WITH(
+      sync.record_push_result("proj-1", "failed", false, std::nullopt, 3),
+      Catch::Matchers::ContainsSubstring("upsert project sync state failed: blocked insert")
+  );
 }

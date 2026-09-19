@@ -1,5 +1,6 @@
 #if __has_include(<catch2/catch_test_macros.hpp>)
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #else
 #include <catch2/catch.hpp>
 #endif
@@ -106,7 +107,10 @@ TEST_CASE("CardStore update_links fails if card file missing", "[cardstore]") {
   const auto rel_path = holder::core::card_rel_path(card.card_id);
   std::filesystem::remove(project_root / rel_path);
 
-  REQUIRE_THROWS(store.update_links(card.card_id, 2));
+  REQUIRE_THROWS_WITH(
+      store.update_links(card.card_id, 2),
+      Catch::Matchers::ContainsSubstring("card content missing")
+  );
 }
 
 TEST_CASE("CardStore trash fails if card file missing", "[cardstore]") {
@@ -132,7 +136,10 @@ TEST_CASE("CardStore trash fails if card file missing", "[cardstore]") {
   const auto rel_path = holder::core::card_rel_path(card.card_id);
   std::filesystem::remove(project_root / rel_path);
 
-  REQUIRE_THROWS(store.trash(card.card_id, 10));
+  REQUIRE_THROWS_WITH(
+      store.trash(card.card_id, 10),
+      Catch::Matchers::ContainsSubstring("card content missing")
+  );
 }
 
 TEST_CASE("CardStore restore fails if trash file missing", "[cardstore]") {
@@ -159,7 +166,10 @@ TEST_CASE("CardStore restore fails if trash file missing", "[cardstore]") {
   const auto trash_rel = holder::core::card_trash_rel_path(card.card_id);
   std::filesystem::remove(project_root / trash_rel);
 
-  REQUIRE_THROWS(store.restore(card.card_id, 11));
+  REQUIRE_THROWS_WITH(
+      store.restore(card.card_id, 11),
+      Catch::Matchers::ContainsSubstring("card content missing")
+  );
 }
 
 TEST_CASE("CardStore update fails on rel_path mismatch", "[cardstore]") {
@@ -184,5 +194,8 @@ TEST_CASE("CardStore update fails on rel_path mismatch", "[cardstore]") {
 
   db.exec("UPDATE cards SET rel_path = 'cards/xx/yy/other.md' WHERE card_id = 'faceb00c';");
 
-  REQUIRE_THROWS(store.update_content(card.card_id, "next", std::nullopt, 3));
+  REQUIRE_THROWS_WITH(
+      store.update_content(card.card_id, "next", std::nullopt, 3),
+      Catch::Matchers::ContainsSubstring("card rel_path does not match card_id")
+  );
 }

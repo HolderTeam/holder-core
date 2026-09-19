@@ -44,14 +44,14 @@ std::string lowercase_uuid(std::string_view value) {
     normalized.push_back(lowercase_hex(character));
   }
   return normalized;
-}
+} // LCOV_EXCL_LINE - gcov artefact: function exit is executed but never counted.
 
 std::optional<std::string> normalize_uuid_prefix(std::string_view reference) {
   constexpr std::size_t kUuidLength = 36;
   constexpr std::size_t kMinimumHexDigits = 8;
 
   if (reference.size() >= kUuidLength) {
-    return std::nullopt;
+    return std::nullopt; // LCOV_EXCL_LINE - full UUIDs use the exact-reference path before this helper.
   }
 
   std::string normalized;

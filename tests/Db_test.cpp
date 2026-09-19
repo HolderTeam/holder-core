@@ -210,7 +210,10 @@ TEST_CASE("Database rebuild readiness markers are durable and reject malformed s
 
   const auto directory_target = dir / "marker-is-directory";
   std::filesystem::create_directory(directory_target);
-  REQUIRE_THROWS(holder::platform::mark_database_rebuild_ready(directory_target));
+  REQUIRE_THROWS_WITH(
+      holder::platform::mark_database_rebuild_ready(directory_target),
+      Catch::Matchers::ContainsSubstring("failed to replace database rebuild readiness marker")
+  );
 }
 
 TEST_CASE("Database durable ownership audit checks every Git-owned object kind", "[db][rebuild]") {
@@ -225,7 +228,10 @@ TEST_CASE("Database durable ownership audit checks every Git-owned object kind",
   );
 
   const auto quarantine_log = dir / "quarantined-cards.json";
-  REQUIRE_THROWS(holder::platform::audit_core_durable_ownership(db, quarantine_log));
+  REQUIRE_THROWS_WITH(
+      holder::platform::audit_core_durable_ownership(db, quarantine_log),
+      Catch::Matchers::ContainsSubstring("project metadata exists only in SQLite or has a missing durable file")
+  );
   write_plain_project_manifest(root, "project-1234");
 
   db.exec(
@@ -234,23 +240,35 @@ TEST_CASE("Database durable ownership audit checks every Git-owned object kind",
       "INSERT INTO ai_messages(message_id,thread_id,role,source,content,created_at) VALUES("
       "'message-1234','thread-1234','user','local','Body',1);"
   );
-  REQUIRE_THROWS(holder::platform::audit_core_durable_ownership(db, quarantine_log));
+  REQUIRE_THROWS_WITH(
+      holder::platform::audit_core_durable_ownership(db, quarantine_log),
+      Catch::Matchers::ContainsSubstring("AI message exists only in SQLite")
+  );
   write_file(root / holder::core::ai_message_rel_path("message-1234"));
-  REQUIRE_THROWS(holder::platform::audit_core_durable_ownership(db, quarantine_log));
+  REQUIRE_THROWS_WITH(
+      holder::platform::audit_core_durable_ownership(db, quarantine_log),
+      Catch::Matchers::ContainsSubstring("AI thread exists only in SQLite")
+  );
   write_file(root / holder::ai::ai_thread_manifest_rel_path("thread-1234"));
 
   db.exec(
       "INSERT INTO resources(resource_id,project_id,type,label,created_at,updated_at) VALUES("
       "'resource-1234','project-1234','thing','Resource',1,1);"
   );
-  REQUIRE_THROWS(holder::platform::audit_core_durable_ownership(db, quarantine_log));
+  REQUIRE_THROWS_WITH(
+      holder::platform::audit_core_durable_ownership(db, quarantine_log),
+      Catch::Matchers::ContainsSubstring("Resource exists only in SQLite")
+  );
   write_file(root / holder::resource::resource_rel_path("resource-1234"));
 
   db.exec(
       "INSERT INTO storage_locations(location_id,project_id,name,provider,config_json,created_at,updated_at) "
       "VALUES('location-1234','project-1234','Location','local_directory','{}',1,1);"
   );
-  REQUIRE_THROWS(holder::platform::audit_core_durable_ownership(db, quarantine_log));
+  REQUIRE_THROWS_WITH(
+      holder::platform::audit_core_durable_ownership(db, quarantine_log),
+      Catch::Matchers::ContainsSubstring("storage Location exists only in SQLite")
+  );
   write_file(root / holder::resource::location_rel_path("location-1234"));
   REQUIRE(holder::platform::audit_core_durable_ownership(db, quarantine_log) == 0);
 }
@@ -358,7 +376,14 @@ TEST_CASE("Database durable ownership audit reports prepare failures for every q
   for (std::string table :
        {"projects", "cards", "ai_messages", "ai_threads", "resources", "storage_locations"}) {
     REQUIRE(sqlite3_set_authorizer(db.handle(), deny_sqlite_read, &table) == SQLITE_OK);
-    REQUIRE_THROWS(holder::platform::audit_core_durable_ownership(db, quarantine_log));
+    REQUIRE_THROWS_WITH(
+        holder::platform::audit_core_durable_ownership(db, quarantine_log),
+        Catch::Matchers::ContainsSubstring("prepare AI message ownership audit failed") ||
+            Catch::Matchers::ContainsSubstring("prepare Location ownership audit failed") ||
+            Catch::Matchers::ContainsSubstring("prepare Resource ownership audit failed") ||
+            Catch::Matchers::ContainsSubstring("prepare durable ownership audit failed for card") ||
+            Catch::Matchers::ContainsSubstring("prepare durable ownership audit failed for project metadata")
+    );
     REQUIRE(sqlite3_set_authorizer(db.handle(), nullptr, nullptr) == SQLITE_OK);
   }
 
@@ -395,7 +420,10 @@ TEST_CASE("Database rebuild reports aggregate and validation preparation failure
     request.hooks.audit_existing = [](holder::platform::Db& old) {
       old.exec("DROP TABLE resource_metadata;");
     };
-    REQUIRE_THROWS(holder::platform::rebuild_database_projection(request));
+    REQUIRE_THROWS_WITH(
+        holder::platform::rebuild_database_projection(request),
+        Catch::Matchers::ContainsSubstring("failed to count resource_metadata: no such table: resource_metadata")
+    );
   }
 
   SECTION("old durable count query is interrupted while stepping") {
@@ -426,7 +454,10 @@ TEST_CASE("Database rebuild reports aggregate and validation preparation failure
     request.hooks.restore_after_projects = [&](holder::platform::Db& rebuilt) {
       REQUIRE(sqlite3_set_authorizer(rebuilt.handle(), deny_sqlite_pragma, &denied) == SQLITE_OK);
     };
-    REQUIRE_THROWS(holder::platform::rebuild_database_projection(request));
+    REQUIRE_THROWS_WITH(
+        holder::platform::rebuild_database_projection(request),
+        Catch::Matchers::ContainsSubstring("database validation prepare failed")
+    );
   }
 
   SECTION("foreign key pragma cannot prepare") {
@@ -438,7 +469,10 @@ TEST_CASE("Database rebuild reports aggregate and validation preparation failure
     request.hooks.restore_after_projects = [&](holder::platform::Db& rebuilt) {
       REQUIRE(sqlite3_set_authorizer(rebuilt.handle(), deny_sqlite_pragma, &denied) == SQLITE_OK);
     };
-    REQUIRE_THROWS(holder::platform::rebuild_database_projection(request));
+    REQUIRE_THROWS_WITH(
+        holder::platform::rebuild_database_projection(request),
+        Catch::Matchers::ContainsSubstring("foreign key validation prepare failed")
+    );
   }
 
   SECTION("rebuild sidecar cannot be removed") {
@@ -462,12 +496,20 @@ TEST_CASE("Database rebuild reports aggregate and validation preparation failure
 TEST_CASE("Database rebuild rejects unsafe inputs before replacing the database", "[db][rebuild]") {
   const auto dir = make_temp_dir();
   holder::platform::DatabaseRebuildRequest request;
-  REQUIRE_THROWS(holder::platform::rebuild_database_projection(request));
+  REQUIRE_THROWS_WITH(
+      holder::platform::rebuild_database_projection(request),
+      Catch::Matchers::ContainsSubstring("database path and schema SQL are required")
+  );
 
   request.database_path = dir / "database-is-directory";
   request.schema_sql = schema_sql();
   std::filesystem::create_directory(request.database_path);
-  REQUIRE_THROWS(holder::platform::rebuild_database_projection(request));
+  REQUIRE_THROWS_WITH(
+      holder::platform::rebuild_database_projection(request),
+      // SQLite's own wording for opening a directory varies by OS ("disk I/O error" on Linux,
+      // "unable to open database file" on macOS and Windows); the prefix is this project's.
+      Catch::Matchers::ContainsSubstring("database I/O failure is not safe to rebuild")
+  );
 
   const auto corrupt = dir / "corrupt.db";
   write_file(corrupt, "not sqlite");
@@ -476,27 +518,42 @@ TEST_CASE("Database rebuild rejects unsafe inputs before replacing the database"
   request.database_path = corrupt;
   request.project_roots = {root};
   request.durable_ownership_ready = false;
-  REQUIRE_THROWS(holder::platform::rebuild_database_projection(request));
+  REQUIRE_THROWS_WITH(
+      holder::platform::rebuild_database_projection(request),
+      Catch::Matchers::ContainsSubstring("database was preserved because durable ownership is not ready")
+  );
 
   request.durable_ownership_ready = true;
   request.required_authorities = {{"key store", dir / "missing-authority"}};
-  REQUIRE_THROWS(holder::platform::rebuild_database_projection(request));
+  REQUIRE_THROWS_WITH(
+      holder::platform::rebuild_database_projection(request),
+      Catch::Matchers::ContainsSubstring("database recovery authority is missing its key store")
+  );
 
   request.database_path = dir / "missing.db";
   request.required_authorities.clear();
   request.project_roots = {dir / "missing-project-root"};
-  REQUIRE_THROWS(holder::platform::rebuild_database_projection(request));
+  REQUIRE_THROWS_WITH(
+      holder::platform::rebuild_database_projection(request),
+      Catch::Matchers::ContainsSubstring("registered project root is unavailable")
+  );
 
   const auto first_root = dir / "first-project";
   const auto second_root = dir / "second-project";
   write_plain_project_manifest(first_root, "same-project-id");
   write_plain_project_manifest(second_root, "same-project-id");
   request.project_roots = {first_root, second_root};
-  REQUIRE_THROWS(holder::platform::rebuild_database_projection(request));
+  REQUIRE_THROWS_WITH(
+      holder::platform::rebuild_database_projection(request),
+      Catch::Matchers::ContainsSubstring("duplicate project_id in discovered roots: same-project-id")
+  );
 
   request.project_roots.clear();
   write_file(std::filesystem::path(request.database_path.string() + ".rebuild.tmp"));
-  REQUIRE_THROWS(holder::platform::rebuild_database_projection(request));
+  REQUIRE_THROWS_WITH(
+      holder::platform::rebuild_database_projection(request),
+      Catch::Matchers::ContainsSubstring("stale rebuild temporary database exists")
+  );
 }
 
 TEST_CASE("Database rebuild detects a projection whose durable counts changed", "[db][rebuild]") {
@@ -518,7 +575,10 @@ TEST_CASE("Database rebuild detects a projection whose durable counts changed", 
         "VALUES('unexpected-project','Unexpected','/tmp/unexpected','plain',1,1);"
     );
   };
-  REQUIRE_THROWS(holder::platform::rebuild_database_projection(request));
+  REQUIRE_THROWS_WITH(
+      holder::platform::rebuild_database_projection(request),
+      Catch::Matchers::ContainsSubstring("rebuilt database durable object counts do not match source database")
+  );
   REQUIRE_FALSE(std::filesystem::exists(database.string() + ".rebuild.tmp"));
 }
 

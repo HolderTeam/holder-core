@@ -1,5 +1,6 @@
 #if __has_include(<catch2/catch_test_macros.hpp>)
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #else
 #include <catch2/catch.hpp>
 #endif
@@ -86,7 +87,10 @@ TEST_CASE("Rebuilder throws when project root is missing", "[startup][recovery]"
   project.created_at = 1;
   project.updated_at = 1;
 
-  REQUIRE_THROWS(rebuilder.rebuild_project(project));
+  REQUIRE_THROWS_WITH(
+      rebuilder.rebuild_project(project),
+      Catch::Matchers::ContainsSubstring("project root not found")
+  );
 }
 
 TEST_CASE("Rebuilder rejects card front matter without card id", "[startup][recovery]") {
@@ -111,7 +115,10 @@ TEST_CASE("Rebuilder rejects card front matter without card id", "[startup][reco
   project.created_at = 1;
   project.updated_at = 1;
 
-  REQUIRE_THROWS(rebuilder.rebuild_project(project));
+  REQUIRE_THROWS_WITH(
+      rebuilder.rebuild_project(project),
+      Catch::Matchers::ContainsSubstring("card_id missing in front matter")
+  );
 }
 
 TEST_CASE("Rebuilder rejects a non-UUID canonical card identity", "[startup][recovery]") {
@@ -175,7 +182,10 @@ TEST_CASE("Rebuilder rejects ai message front matter without message id", "[star
   project.created_at = 1;
   project.updated_at = 1;
 
-  REQUIRE_THROWS(rebuilder.rebuild_project(project));
+  REQUIRE_THROWS_WITH(
+      rebuilder.rebuild_project(project),
+      Catch::Matchers::ContainsSubstring("message_id missing in front matter")
+  );
 }
 
 TEST_CASE("Rebuilder validates durable AI thread manifests",
@@ -211,14 +221,17 @@ TEST_CASE("Rebuilder validates durable AI thread manifests",
     write_startup_file(
         root / holder::ai::ai_thread_manifest_rel_path(thread.thread_id),
         "{bad-json");
-    REQUIRE_THROWS(rebuild());
+    REQUIRE_THROWS_WITH(
+        rebuild(),
+        Catch::Matchers::ContainsSubstring("ai_threads/th/re/thread-1234.json: [json.exception.parse_err")
+    );
   }
 
   SECTION("manifest in the wrong shard") {
     write_startup_file(root / "ai_threads" / "xx" / "yy" /
                            (thread.thread_id + ".json"),
                        holder::ai::render_ai_thread_manifest(project, thread));
-    REQUIRE_THROWS(rebuild());
+    REQUIRE_THROWS_WITH(rebuild(), Catch::Matchers::ContainsSubstring("AI thread path does not match id"));
   }
 
   SECTION("durable manifest is rebuilt without messages") {
@@ -245,14 +258,20 @@ TEST_CASE("Rebuilder validates durable AI thread manifests",
     write_startup_file(
         root / holder::core::ai_message_rel_path(message.message_id),
         message_text);
-    REQUIRE_THROWS(rebuild());
+    REQUIRE_THROWS_WITH(
+        rebuild(),
+        Catch::Matchers::ContainsSubstring("AI message refers to thread without durable manifest: thread-")
+    );
   }
 
   SECTION("strict rebuilding requires thread manifests") {
     write_startup_file(
         root / holder::core::ai_message_rel_path(message.message_id),
         message_text);
-    REQUIRE_THROWS(rebuild(true));
+    REQUIRE_THROWS_WITH(
+        rebuild(true),
+        Catch::Matchers::ContainsSubstring("AI messages exist without durable thread manifests")
+    );
   }
 }
 
@@ -264,8 +283,11 @@ TEST_CASE("Strict project recovery requires unique durable manifests",
   SECTION("missing manifest") {
     const auto root = dir / "missing-manifest";
     std::filesystem::create_directories(root);
-    REQUIRE_THROWS(holder::project::recover_project_roots(
-        db, nullptr, {root}, [] { return std::string("unused"); }, true));
+    REQUIRE_THROWS_WITH(
+        holder::project::recover_project_roots(
+            db, nullptr, {root}, [] { return std::string("unused"); }, true),
+        Catch::Matchers::ContainsSubstring("project has no durable manifest")
+    );
   }
 
   const auto write_project = [&](const std::filesystem::path &root) {
@@ -303,9 +325,12 @@ TEST_CASE("Strict project recovery requires unique durable manifests",
     const auto second = dir / "second";
     write_project(first);
     write_project(second);
-    REQUIRE_THROWS(holder::project::recover_project_roots(
-        db, nullptr, {first, second}, [] { return std::string("unused"); },
-        true));
+    REQUIRE_THROWS_WITH(
+        holder::project::recover_project_roots(
+            db, nullptr, {first, second}, [] { return std::string("unused"); },
+            true),
+        Catch::Matchers::ContainsSubstring("duplicate project_id discovered at different roots: project-")
+    );
   }
 }
 

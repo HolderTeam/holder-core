@@ -289,6 +289,40 @@ TEST_CASE("CardPlacementResolver ToStart/ToEnd no-op when the target parent has 
   );
   REQUIRE_FALSE(result.parent_card_id.has_value());
   REQUIRE(result.sort_key == 42.0);
+
+  const auto to_end = resolver.resolve(
+      "proj-1",
+      "ffffffff-0000-4000-8000-000000000001",
+      simple_request(CardPlacementIntent::ToEnd)
+  );
+  REQUIRE_FALSE(to_end.parent_card_id.has_value());
+  REQUIRE(to_end.sort_key == 42.0);
+}
+
+TEST_CASE("CardPlacementResolver excludes deleted tied siblings", "[card][placement]") {
+  const auto dir = holder::test::make_temp_dir();
+  auto db = holder::test::open_db_with_schema(dir / "holder.db");
+  create_project(db, "proj-1");
+
+  holder::card::CardRepo cards(db);
+  CardPlacementResolver resolver(cards);
+  create_card(cards, "abababab-0000-4000-8000-000000000001", "proj-1", "Later", 20.0, std::nullopt, 2);
+  create_card(cards, "abababab-0000-4000-8000-000000000002", "proj-1", "Earlier", 20.0, std::nullopt, 3);
+  create_card(
+      cards,
+      "abababab-0000-4000-8000-000000000004",
+      "proj-1",
+      "Deleted",
+      1.0,
+      std::nullopt,
+      4,
+      5
+  );
+
+  const auto ordered = resolver.resolve(
+      "proj-1", "abababab-0000-4000-8000-000000000001", simple_request(CardPlacementIntent::ToStart)
+  );
+  REQUIRE(ordered.sort_key == 19.0);
 }
 
 TEST_CASE("CardPlacementResolver Left/Right move within siblings", "[card][placement]") {
@@ -461,5 +495,129 @@ TEST_CASE("CardPlacementResolver rejects a missing or cross-project card", "[car
           into_request("does-not-exist")
       ),
       "target_not_found"
+  );
+}
+
+TEST_CASE("CardPlacementResolver handles tied siblings and parent edge cases", "[card][placement]") {
+  const auto dir = holder::test::make_temp_dir();
+  auto db = holder::test::open_db_with_schema(dir / "holder.db");
+  create_project(db, "proj-1");
+  holder::card::CardRepo cards(db);
+  CardPlacementResolver resolver(cards);
+  const std::string source = "66666666-0000-4000-8000-000000000001";
+  const std::string title_first = "66666666-0000-4000-8000-000000000002";
+  const std::string title_last = "66666666-0000-4000-8000-000000000003";
+  const std::string deleted_parent = "66666666-0000-4000-8000-000000000004";
+  create_card(cards, source, "proj-1", "Source", 10.0);
+  // Identical sort_key and updated_at: only the title decides the sibling order.
+  create_card(cards, title_first, "proj-1", "A", 20.0, std::nullopt, 2);
+  create_card(cards, title_last, "proj-1", "Z", 20.0, std::nullopt, 2);
+  create_card(cards, deleted_parent, "proj-1", "Deleted parent", 30.0, std::nullopt, 1, 9);
+
+  REQUIRE(resolver.resolve("proj-1", source,
+                           simple_request(CardPlacementIntent::ToEnd)).sort_key == 21.0);
+  // Siblings order as [A, Z], so "after A" sits in a zero-width gap and steps past it (21.0).
+  // Were Z first, A would be last and the result would be the midpoint 20.5.
+  REQUIRE(resolver.resolve("proj-1", source,
+                           before_after_request(CardPlacementIntent::After, title_first))
+              .sort_key == 21.0);
+  REQUIRE(resolver.resolve("proj-1", source,
+                           before_after_request(CardPlacementIntent::Before, title_last))
+              .sort_key == 19.0);
+  REQUIRE_THROWS_WITH(
+      resolver.resolve("proj-1", source, simple_request(CardPlacementIntent::ToStart, deleted_parent)),
+      "target_not_found"
+  );
+  REQUIRE_THROWS_WITH(
+      resolver.resolve("proj-1", source, simple_request(CardPlacementIntent::Left, deleted_parent)),
+      "target_not_found"
+  );
+
+  const std::string orphan = "66666666-0000-4000-8000-000000000005";
+  create_card(cards, orphan, "proj-1", "Orphan", 1.0, deleted_parent);
+  const auto up = resolver.resolve("proj-1", orphan, simple_request(CardPlacementIntent::UpLevel));
+  REQUIRE_FALSE(up.parent_card_id.has_value());
+}
+
+TEST_CASE("CardPlacementResolver treats a blank parent_card_id override as the project root", "[card][placement]") {
+  const auto dir = holder::test::make_temp_dir();
+  auto db = holder::test::open_db_with_schema(dir / "holder.db");
+  create_project(db, "proj-1");
+  holder::card::CardRepo cards(db);
+  CardPlacementResolver resolver(cards);
+  const std::string parent = "77777777-0000-4000-8000-000000000001";
+  const std::string root_sibling = "77777777-0000-4000-8000-000000000002";
+  const std::string child = "77777777-0000-4000-8000-000000000003";
+  create_card(cards, parent, "proj-1", "Parent", 10.0);
+  create_card(cards, root_sibling, "proj-1", "Root sibling", 20.0);
+  create_card(cards, child, "proj-1", "Child", 5.0, parent);
+
+  // Whitespace-only is not an id: it must normalise to "no parent", moving the child out to the
+  // root after the last root card, not fail with target_not_found.
+  const auto result =
+      resolver.resolve("proj-1", child, simple_request(CardPlacementIntent::ToEnd, "  \t\n"));
+  REQUIRE_FALSE(result.parent_card_id.has_value());
+  REQUIRE(result.sort_key == 21.0);
+}
+
+TEST_CASE("CardPlacementResolver Into tolerates a target whose ancestor is in another project",
+          "[card][placement]") {
+  const auto dir = holder::test::make_temp_dir();
+  auto db = holder::test::open_db_with_schema(dir / "holder.db");
+  create_project(db, "proj-1");
+  create_project(db, "proj-2");
+  holder::card::CardRepo cards(db);
+  CardPlacementResolver resolver(cards);
+  const std::string foreign_parent = "88888888-0000-4000-8000-000000000001";
+  const std::string target = "88888888-0000-4000-8000-000000000002";
+  const std::string source = "88888888-0000-4000-8000-000000000003";
+  // The parent foreign key does not constrain project, and the resolver only loads one project's
+  // cards, so the cycle walk can run into an ancestor it cannot see. That is not a cycle.
+  create_card(cards, foreign_parent, "proj-2", "Foreign parent", 1.0);
+  create_card(cards, target, "proj-1", "Target", 10.0, foreign_parent);
+  create_card(cards, source, "proj-1", "Source", 20.0);
+
+  const auto result = resolver.resolve("proj-1", source, into_request(target));
+  REQUIRE(result.parent_card_id == target);
+  REQUIRE(result.moved_into_title == "Target");
+}
+
+TEST_CASE("CardPlacementResolver Left/Right are no-ops under a parent override that isn't the card's own",
+          "[card][placement]") {
+  const auto dir = holder::test::make_temp_dir();
+  auto db = holder::test::open_db_with_schema(dir / "holder.db");
+  create_project(db, "proj-1");
+  holder::card::CardRepo cards(db);
+  CardPlacementResolver resolver(cards);
+  const std::string own_parent = "99999999-0000-4000-8000-000000000001";
+  const std::string other_parent = "99999999-0000-4000-8000-000000000002";
+  const std::string source = "99999999-0000-4000-8000-000000000003";
+  const std::string other_child = "99999999-0000-4000-8000-000000000004";
+  create_card(cards, own_parent, "proj-1", "Own parent", 10.0);
+  create_card(cards, other_parent, "proj-1", "Other parent", 20.0);
+  create_card(cards, source, "proj-1", "Source", 5.0, own_parent);
+  create_card(cards, other_child, "proj-1", "Other child", 7.0, other_parent);
+
+  // The source is not among other_parent's children, so there is no neighbour to move past:
+  // report "nothing moved" with the card's real parent and sort key.
+  for (const auto intent : {CardPlacementIntent::Left, CardPlacementIntent::Right}) {
+    const auto result = resolver.resolve("proj-1", source, simple_request(intent, other_parent));
+    REQUIRE(result.parent_card_id == own_parent);
+    REQUIRE(result.sort_key == 5.0);
+  }
+}
+
+TEST_CASE("CardPlacementResolver rejects an out-of-range intent", "[card][placement]") {
+  const auto dir = holder::test::make_temp_dir();
+  auto db = holder::test::open_db_with_schema(dir / "holder.db");
+  create_project(db, "proj-1");
+  holder::card::CardRepo cards(db);
+  CardPlacementResolver resolver(cards);
+  create_card(cards, "aaaaaaaa-1111-4000-8000-000000000001", "proj-1", "Only", 1.0);
+
+  CardPlacementRequest request;
+  request.intent = static_cast<CardPlacementIntent>(99);
+  REQUIRE_THROWS_WITH(
+      resolver.resolve("proj-1", "aaaaaaaa-1111-4000-8000-000000000001", request), "invalid_move_intent"
   );
 }

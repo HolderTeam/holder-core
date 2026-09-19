@@ -1,5 +1,6 @@
 #if __has_include(<catch2/catch_test_macros.hpp>)
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #else
 #include <catch2/catch.hpp>
 #endif
@@ -105,24 +106,42 @@ TEST_CASE("AI thread manifests reject invalid identity and durable input", "[ai]
   thread.created_at = 1;
   thread.updated_at = 2;
 
-  REQUIRE_THROWS(holder::ai::ai_thread_manifest_rel_path("abc"));
+  REQUIRE_THROWS_WITH(
+      holder::ai::ai_thread_manifest_rel_path("abc"),
+      Catch::Matchers::ContainsSubstring("thread_id too short for path sharding")
+  );
   auto invalid_thread = thread;
   invalid_thread.title.clear();
-  REQUIRE_THROWS(holder::ai::render_ai_thread_manifest(project, invalid_thread));
-  REQUIRE_THROWS(holder::ai::parse_ai_thread_manifest(project, R"({"version":2})"));
-  REQUIRE_THROWS(
+  REQUIRE_THROWS_WITH(
+      holder::ai::render_ai_thread_manifest(project, invalid_thread),
+      Catch::Matchers::ContainsSubstring("invalid AI thread manifest fields")
+  );
+  REQUIRE_THROWS_WITH(
+      holder::ai::parse_ai_thread_manifest(project, R"({"version":2})"),
+      Catch::Matchers::ContainsSubstring("unsupported AI thread manifest version")
+  );
+  REQUIRE_THROWS_WITH(
       holder::ai::parse_ai_thread_manifest(
           project,
           R"({"version":1,"thread_id":"thread-1234","project_id":"other","title":"Title","created_at":1,"updated_at":2})"
       )
-  );
+  , Catch::Matchers::ContainsSubstring("AI thread manifest does not match project"));
 
   auto encrypted = project;
   encrypted.privacy_mode = "encrypted_git";
-  REQUIRE_THROWS(holder::ai::render_ai_thread_manifest(encrypted, thread));
-  REQUIRE_THROWS(holder::ai::parse_ai_thread_manifest(encrypted, "not an envelope"));
+  REQUIRE_THROWS_WITH(
+      holder::ai::render_ai_thread_manifest(encrypted, thread),
+      Catch::Matchers::ContainsSubstring("encrypted project has no key id")
+  );
+  REQUIRE_THROWS_WITH(
+      holder::ai::parse_ai_thread_manifest(encrypted, "not an envelope"),
+      Catch::Matchers::ContainsSubstring("encrypted project has no key id")
+  );
 
   const auto manifest_path = dir / "wrong-name.json";
   std::ofstream(manifest_path) << holder::ai::render_ai_thread_manifest(project, thread);
-  REQUIRE_THROWS(holder::ai::read_ai_thread_manifest(project, manifest_path));
+  REQUIRE_THROWS_WITH(
+      holder::ai::read_ai_thread_manifest(project, manifest_path),
+      Catch::Matchers::ContainsSubstring("AI thread manifest path does not match thread_id")
+  );
 }

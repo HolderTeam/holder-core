@@ -1,5 +1,6 @@
 #if __has_include(<catch2/catch_test_macros.hpp>)
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #else
 #include <catch2/catch.hpp>
 #endif
@@ -120,11 +121,17 @@ void seed_bare_remote_branch(
 
 TEST_CASE("GitRepo throws when not opened", "[git]") {
   holder::git::GitRepo repo;
-  REQUIRE_THROWS(repo.write_file("a.txt", "data"));
-  REQUIRE_THROWS(repo.stage_path("a.txt"));
-  REQUIRE_THROWS(repo.commit("msg"));
-  REQUIRE_THROWS(repo.set_remote("origin", "git@example.com:repo.git"));
-  REQUIRE_THROWS(repo.remove_remote("origin"));
+  REQUIRE_THROWS_WITH(
+      repo.write_file("a.txt", "data"),
+      Catch::Matchers::ContainsSubstring("GitRepo not opened")
+  );
+  REQUIRE_THROWS_WITH(repo.stage_path("a.txt"), Catch::Matchers::ContainsSubstring("GitRepo not opened"));
+  REQUIRE_THROWS_WITH(repo.commit("msg"), Catch::Matchers::ContainsSubstring("GitRepo not opened"));
+  REQUIRE_THROWS_WITH(
+      repo.set_remote("origin", "git@example.com:repo.git"),
+      Catch::Matchers::ContainsSubstring("GitRepo not opened")
+  );
+  REQUIRE_THROWS_WITH(repo.remove_remote("origin"), Catch::Matchers::ContainsSubstring("GitRepo not opened"));
 }
 
 TEST_CASE("GitRepo open_or_init fails on file path", "[git]") {
@@ -136,7 +143,10 @@ TEST_CASE("GitRepo open_or_init fails on file path", "[git]") {
   out.close();
 
   holder::git::GitRepo repo;
-  REQUIRE_THROWS(repo.open_or_init(file_path));
+  REQUIRE_THROWS_WITH(
+      repo.open_or_init(file_path),
+      Catch::Matchers::ContainsSubstring("Failed to create repo dir")
+  );
 }
 
 TEST_CASE("GitRepo stage_path throws on missing file", "[git]") {
@@ -144,7 +154,10 @@ TEST_CASE("GitRepo stage_path throws on missing file", "[git]") {
   holder::git::GitRepo repo;
   repo.open_or_init(dir);
 
-  REQUIRE_THROWS(repo.stage_path("missing.txt"));
+  REQUIRE_THROWS_WITH(
+      repo.stage_path("missing.txt"),
+      Catch::Matchers::ContainsSubstring("git_index_add_bypath failed for missing.txt")
+  );
 }
 
 TEST_CASE("GitRepo stage_paths stages every path in one commit", "[git]") {
@@ -173,7 +186,10 @@ TEST_CASE("GitRepo stage_paths throws on a missing file, leaving the index untou
   repo.open_or_init(dir);
 
   repo.write_file("cards/a.md", "a");
-  REQUIRE_THROWS(repo.stage_paths({"cards/a.md", "cards/missing.md"}));
+  REQUIRE_THROWS_WITH(
+      repo.stage_paths({"cards/a.md", "cards/missing.md"}),
+      Catch::Matchers::ContainsSubstring("git_index_add_bypath failed for cards/missing.md")
+  );
 }
 
 TEST_CASE("GitRepo pull_remote_ff_only pulls from local remote", "[git]") {
@@ -240,7 +256,10 @@ TEST_CASE("GitRepo pull_remote_ff_only throws when remote is not configured", "[
   const auto dir = make_temp_dir();
   holder::git::GitRepo repo;
   repo.open_or_init(dir);
-  REQUIRE_THROWS(repo.pull_remote_ff_only("origin"));
+  REQUIRE_THROWS_WITH(
+      repo.pull_remote_ff_only("origin"),
+      Catch::Matchers::ContainsSubstring("git_remote_lookup failed")
+  );
 }
 
 TEST_CASE("GitRepo probe_remote reports remote_unset when missing", "[git]") {
@@ -799,7 +818,10 @@ TEST_CASE("GitRepo commit throws when HEAD is malformed", "[git]") {
 
   repo.write_file("cards/b.md", "v2");
   repo.stage_path("cards/b.md");
-  REQUIRE_THROWS(repo.commit("after malformed head"));
+  REQUIRE_THROWS_WITH(
+      repo.commit("after malformed head"),
+      Catch::Matchers::ContainsSubstring("git_repository_head failed")
+  );
 }
 
 TEST_CASE("GitRepo commit throws when parent commit lookup fails", "[git]") {
@@ -832,7 +854,10 @@ TEST_CASE("GitRepo commit throws when parent commit lookup fails", "[git]") {
 
   repo.write_file("cards/c.md", "v3");
   repo.stage_path("cards/c.md");
-  REQUIRE_THROWS(repo.commit("after broken parent ref"));
+  REQUIRE_THROWS_WITH(
+      repo.commit("after broken parent ref"),
+      Catch::Matchers::ContainsSubstring("git_commit_lookup failed")
+  );
 }
 
 TEST_CASE("GitRepo push_branch can classify non-fast-forward rejection", "[git]") {
@@ -1103,9 +1128,14 @@ TEST_CASE("GitRepo history handles unborn repos pagination and invalid cursors",
   REQUIRE(all_page.commits.size() == 1);
   CHECK(all_page.has_more);
 
-  REQUIRE_THROWS(
-      repo.history_for_paths({"cards/a.md"}, 10, "not-a-reachable-oid", 100));
-  REQUIRE_THROWS(repo.history_all(10, "not-a-reachable-oid", 100));
+  REQUIRE_THROWS_WITH(
+      repo.history_for_paths({"cards/a.md"}, 10, "not-a-reachable-oid", 100),
+      Catch::Matchers::ContainsSubstring("history cursor is not reachable from HEAD")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.history_all(10, "not-a-reachable-oid", 100),
+      Catch::Matchers::ContainsSubstring("history cursor is not reachable from HEAD")
+  );
 }
 
 TEST_CASE("GitRepo history reports malformed HEAD and missing parent trees",
@@ -1118,8 +1148,14 @@ TEST_CASE("GitRepo history reports malformed HEAD and missing parent trees",
     repo.stage_path("card.md");
     repo.commit("one");
     std::ofstream(root / ".git" / "HEAD", std::ios::trunc) << "not-an-oid\n";
-    REQUIRE_THROWS(repo.history_for_paths({"card.md"}, 10, std::nullopt, 100));
-    REQUIRE_THROWS(repo.history_all(10, std::nullopt, 100));
+    REQUIRE_THROWS_WITH(
+        repo.history_for_paths({"card.md"}, 10, std::nullopt, 100),
+        Catch::Matchers::ContainsSubstring("git_revwalk_push_head failed")
+    );
+    REQUIRE_THROWS_WITH(
+        repo.history_all(10, std::nullopt, 100),
+        Catch::Matchers::ContainsSubstring("git_revwalk_push_head failed")
+    );
   }
 
   SECTION("history_for_paths releases a commit after tree lookup failure") {
@@ -1135,7 +1171,10 @@ TEST_CASE("GitRepo history reports malformed HEAD and missing parent trees",
     remove_parent_tree_object(root);
     holder::git::GitRepo history;
     history.open_existing(root);
-    REQUIRE_THROWS(history.history_for_paths({"card.md"}, 10, std::nullopt, 100));
+    REQUIRE_THROWS_WITH(
+        history.history_for_paths({"card.md"}, 10, std::nullopt, 100),
+        Catch::Matchers::ContainsSubstring("git_commit parent tree lookup failed")
+    );
   }
 
   SECTION("history_all releases a commit after tree lookup failure") {
@@ -1151,6 +1190,9 @@ TEST_CASE("GitRepo history reports malformed HEAD and missing parent trees",
     remove_parent_tree_object(root);
     holder::git::GitRepo history;
     history.open_existing(root);
-    REQUIRE_THROWS(history.history_all(10, std::nullopt, 100));
+    REQUIRE_THROWS_WITH(
+        history.history_all(10, std::nullopt, 100),
+        Catch::Matchers::ContainsSubstring("git_commit parent tree lookup failed")
+    );
   }
 }

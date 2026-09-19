@@ -123,7 +123,7 @@ CardPlacementResult CardPlacementResolver::resolve(
     }
     std::sort(siblings.begin(), siblings.end(), sibling_less);
     return siblings;
-  };
+  }; // LCOV_EXCL_LINE - gcov artefact: lambda closer is executed but never counted.
 
   // The card's real, unmodified parent -- restored verbatim by the ToStart/ToEnd/Left/Right
   // no-op escapes below, since those report "nothing moved" even when a parent_card_id
@@ -147,12 +147,6 @@ CardPlacementResult CardPlacementResolver::resolve(
         throw std::runtime_error("target_not_found");
       }
       const auto& target = it->second;
-      // cards_by_id is populated from list_all(project_id), so this branch is unreachable
-      // in practice -- kept for parity with the daemon route this was ported from.
-      if (target.project_id != project_id) {
-        throw std::runtime_error("cross_project_move_forbidden");
-      }
-
       if (request.intent == CardPlacementIntent::Into) {
         next_parent = target.card_id;
         if (is_descendant_of(cards_by_id, next_parent, source.card_id)) {
@@ -209,6 +203,8 @@ CardPlacementResult CardPlacementResolver::resolve(
             break;
           }
         }
+        // A parent_card_id override naming some other parent leaves the source out of that
+        // parent's sibling list, so there is nothing to move left or right of.
         if (source_index < 0) {
           next_parent = original_parent;
           next_sort_key = source.sort_key;
@@ -257,19 +253,9 @@ CardPlacementResult CardPlacementResolver::resolve(
       break;
     }
     default:
-      // LCOV_EXCL_START -- every CardPlacementIntent value is handled above; this only
-      // guards against a corrupted/out-of-range enum value crossing some future boundary.
+      // Every CardPlacementIntent value is handled above; this guards against an out-of-range
+      // enum value crossing some future boundary.
       throw std::runtime_error("invalid_move_intent");
-      // LCOV_EXCL_STOP
-  }
-
-  if (!next_sort_key.has_value()) {
-    // LCOV_EXCL_START -- every branch above either sets next_sort_key or returns early via
-    // one of the "break" no-op paths, which themselves set next_sort_key to the card's
-    // current value; this is unreachable, kept for parity with the daemon route's own
-    // defensive fallback.
-    next_sort_key = cards_.next_sort_key(project_id, next_parent);
-    // LCOV_EXCL_STOP
   }
 
   CardPlacementResult result;

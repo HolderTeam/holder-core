@@ -1,5 +1,6 @@
 #if __has_include(<catch2/catch_test_macros.hpp>)
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #else
 #include <catch2/catch.hpp>
 #endif
@@ -118,7 +119,10 @@ TEST_CASE("RepoSyncMetrics throws for invalid remote name lookup", "[git][sync]"
   repo.stage_path("cards/a.md");
   repo.commit("seed");
 
-  REQUIRE_THROWS(holder::git::inspect_repo_sync_metrics(dir, ".."));
+  REQUIRE_THROWS_WITH(
+      holder::git::inspect_repo_sync_metrics(dir, ".."),
+      Catch::Matchers::ContainsSubstring("git_reference_lookup for remote branch failed")
+  );
 }
 
 TEST_CASE("RepoSyncMetrics throws when repo open hits filesystem error", "[git][sync]") {
@@ -128,7 +132,14 @@ TEST_CASE("RepoSyncMetrics throws when repo open hits filesystem error", "[git][
   const auto dir = make_temp_dir();
   const auto loop_path = dir / "loop";
   std::filesystem::create_symlink("loop", loop_path);
-  REQUIRE_THROWS(holder::git::inspect_repo_sync_metrics(loop_path));
+  // Deliberately no GitRepo (which holds libgit2 open for the life of the process) before the
+  // call: with inspect_repo_sync_metrics as the only libgit2 user, the error it reports must be
+  // the real cause, not "library has not been initialized" left behind by an early shutdown.
+  REQUIRE_THROWS_WITH(
+      holder::git::inspect_repo_sync_metrics(loop_path),
+      Catch::Matchers::ContainsSubstring("git_repository_open failed") &&
+          !Catch::Matchers::ContainsSubstring("library has not been initialized")
+  );
 #endif
 }
 

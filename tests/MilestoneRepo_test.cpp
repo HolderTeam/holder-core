@@ -64,10 +64,22 @@ holder::model::Milestone make_milestone(
 TEST_CASE("MilestoneRepo reports a prepare failure when the database is not open", "[milestonerepo]") {
   holder::platform::Db db;
   holder::card::MilestoneRepo repo(db);
-  REQUIRE_THROWS(repo.replace_for_card("proj-1", "card-a", {}));
-  REQUIRE_THROWS(repo.delete_for_card("proj-1", "card-a"));
-  REQUIRE_THROWS(repo.list_for_card("proj-1", "card-a"));
-  REQUIRE_THROWS(repo.list_in_range("proj-1", 0, 10));
+  REQUIRE_THROWS_WITH(
+      repo.replace_for_card("proj-1", "card-a", {}),
+      Catch::Matchers::ContainsSubstring("prepare delete milestones failed: unknown sqlite error")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.delete_for_card("proj-1", "card-a"),
+      Catch::Matchers::ContainsSubstring("prepare delete milestones failed: unknown sqlite error")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.list_for_card("proj-1", "card-a"),
+      Catch::Matchers::ContainsSubstring("prepare list milestones for card failed: unknown sqlite error")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.list_in_range("proj-1", 0, 10),
+      Catch::Matchers::ContainsSubstring("prepare list milestones in range failed: unknown sqlite error")
+  );
 }
 
 TEST_CASE("MilestoneRepo reports a duplicate insert in one replacement", "[milestonerepo]") {
@@ -77,7 +89,10 @@ TEST_CASE("MilestoneRepo reports a duplicate insert in one replacement", "[miles
   create_card(db, "card-a", "proj-1");
   holder::card::MilestoneRepo repo(db);
   const auto milestone = make_milestone("duplicate", "proj-1", "card-a", 10);
-  REQUIRE_THROWS(repo.replace_for_card("proj-1", "card-a", {milestone, milestone}));
+  REQUIRE_THROWS_WITH(
+      repo.replace_for_card("proj-1", "card-a", {milestone, milestone}),
+      Catch::Matchers::ContainsSubstring("insert milestone failed: UNIQUE constraint failed: milestones.milestone_id")
+  );
 }
 
 TEST_CASE(
@@ -138,9 +153,9 @@ TEST_CASE(
   create_card(db, "card-a", "proj-1");
 
   holder::card::MilestoneRepo repo(db);
-  REQUIRE_THROWS(
+  REQUIRE_THROWS_WITH(
       repo.replace_for_card("proj-1", "card-a", {make_milestone("mile-1", "proj-1", "card-b", 100)})
-  );
+  , Catch::Matchers::ContainsSubstring("milestone project_id/card_id mismatch"));
 }
 
 TEST_CASE("MilestoneRepo delete_for_card removes a card's milestones", "[milestonerepo]") {

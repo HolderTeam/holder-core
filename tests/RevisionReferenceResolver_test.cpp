@@ -1,5 +1,6 @@
 #if __has_include(<catch2/catch_test_macros.hpp>)
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #else
 #include <catch2/catch.hpp>
 #endif
@@ -201,5 +202,5 @@ TEST_CASE(
 TEST_CASE("RevisionReferenceResolver requires an opened repository", "[git][revision-reference]") {
   holder::git::GitRepo repo;
   RevisionReferenceResolver resolver(repo);
-  REQUIRE_THROWS(resolver.resolve("12345678"));
+  REQUIRE_THROWS_WITH(resolver.resolve("12345678"), Catch::Matchers::ContainsSubstring("GitRepo not opened"));
 }

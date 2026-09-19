@@ -1,5 +1,6 @@
 #if __has_include(<catch2/catch_test_macros.hpp>)
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #else
 #include <catch2/catch.hpp>
 #endif
@@ -493,5 +494,8 @@ TEST_CASE("Project history paginates incrementally and exposes bounded scan cont
   const auto no_resources = holder::history::ProjectHistoryService().list(
       project, 50, std::nullopt, ProjectHistoryObjectKind::Resource);
   CHECK(no_resources.activities.empty());
-  REQUIRE_THROWS(holder::history::ProjectHistoryService().list(project, 0));
+  REQUIRE_THROWS_WITH(
+      holder::history::ProjectHistoryService().list(project, 0),
+      Catch::Matchers::ContainsSubstring("history limit must be between 1 and 200")
+  );
 }

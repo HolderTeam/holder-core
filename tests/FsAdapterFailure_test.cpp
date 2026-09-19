@@ -1,5 +1,6 @@
 #if __has_include(<catch2/catch_test_macros.hpp>)
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #else
 #include <catch2/catch.hpp>
 #endif
@@ -163,7 +164,7 @@ TEST_CASE("CardStore trash propagates fs rename failure", "[fs]") {
   const auto src_path = project_root / rel_path;
   fs.fail_rename_from = src_path;
 
-  REQUIRE_THROWS(store.trash(card.card_id, 10));
+  REQUIRE_THROWS_WITH(store.trash(card.card_id, 10), Catch::Matchers::ContainsSubstring("rename failed"));
   REQUIRE(std::filesystem::exists(src_path));
 
   holder::card::CardRepo repo(db);
@@ -207,7 +208,7 @@ TEST_CASE("AiMessageRepo trash propagates fs rename failure", "[fs]") {
   const auto src_path = project_root / rel_path;
   fs.fail_rename_from = src_path;
 
-  REQUIRE_THROWS(repo.trash(msg.message_id, 10));
+  REQUIRE_THROWS_WITH(repo.trash(msg.message_id, 10), Catch::Matchers::ContainsSubstring("rename failed"));
   REQUIRE(std::filesystem::exists(src_path));
 
   const auto fetched = repo.get(msg.message_id);
@@ -252,7 +253,7 @@ TEST_CASE("Rebuilder propagates fs read failure", "[fs]") {
   project.updated_at = 1;
 
   holder::store::Rebuilder rebuilder(db, &fts, &fs);
-  REQUIRE_THROWS(rebuilder.rebuild_project(project));
+  REQUIRE_THROWS_WITH(rebuilder.rebuild_project(project), Catch::Matchers::ContainsSubstring("read failed"));
 }
 
 TEST_CASE("CardStore restore propagates fs rename failure", "[fs]") {
@@ -281,7 +282,7 @@ TEST_CASE("CardStore restore propagates fs rename failure", "[fs]") {
   const auto src_path = project_root / trash_rel;
   fs.fail_rename_from = src_path;
 
-  REQUIRE_THROWS(store.restore(card.card_id, 11));
+  REQUIRE_THROWS_WITH(store.restore(card.card_id, 11), Catch::Matchers::ContainsSubstring("rename failed"));
   REQUIRE(std::filesystem::exists(src_path));
 
   holder::card::CardRepo repo(db);
@@ -326,7 +327,7 @@ TEST_CASE("AiMessageRepo restore propagates fs rename failure", "[fs]") {
   const auto src_path = project_root / trash_rel;
   fs.fail_rename_from = src_path;
 
-  REQUIRE_THROWS(repo.restore(msg.message_id));
+  REQUIRE_THROWS_WITH(repo.restore(msg.message_id), Catch::Matchers::ContainsSubstring("rename failed"));
   REQUIRE(std::filesystem::exists(src_path));
 
   const auto fetched = repo.get(msg.message_id);
@@ -637,7 +638,10 @@ TEST_CASE("Rebuilder rejects invalid card front matter", "[rebuild]") {
   project.created_at = 1;
   project.updated_at = 1;
 
-  REQUIRE_THROWS(rebuilder.rebuild_project(project));
+  REQUIRE_THROWS_WITH(
+      rebuilder.rebuild_project(project),
+      Catch::Matchers::ContainsSubstring("invalid card front matter")
+  );
 }
 
 TEST_CASE("Rebuilder rejects ai message front matter with missing message_id", "[rebuild]") {
@@ -651,8 +655,9 @@ TEST_CASE("Rebuilder rejects ai message front matter with missing message_id", "
   std::filesystem::create_directories(root);
   create_project(db, project_id, root.string());
 
-  // Valid card so rebuild reaches ai_messages phase.
-  const auto card_rel = holder::core::card_rel_path("abcd1234");
+  // A real UUID at its canonical path, so rebuild gets past the card phase and reaches the
+  // ai_messages phase this test is about.
+  const auto card_rel = holder::core::card_rel_path("12345678-1234-4234-8234-123456789abc");
   write_file(root / card_rel, "# ok\n");
 
   const auto msg_rel = holder::core::ai_message_rel_path("mesa1234");
@@ -671,7 +676,10 @@ TEST_CASE("Rebuilder rejects ai message front matter with missing message_id", "
   project.created_at = 1;
   project.updated_at = 1;
 
-  REQUIRE_THROWS(rebuilder.rebuild_project(project));
+  REQUIRE_THROWS_WITH(
+      rebuilder.rebuild_project(project),
+      Catch::Matchers::ContainsSubstring("message_id missing in front matter")
+  );
 }
 
 TEST_CASE("Rebuilder rejects short derived card_id from filename", "[rebuild]") {
@@ -698,7 +706,10 @@ TEST_CASE("Rebuilder rejects short derived card_id from filename", "[rebuild]") 
   project.created_at = 1;
   project.updated_at = 1;
 
-  REQUIRE_THROWS(rebuilder.rebuild_project(project));
+  REQUIRE_THROWS_WITH(
+      rebuilder.rebuild_project(project),
+      Catch::Matchers::ContainsSubstring("invalid card_id in file")
+  );
 }
 
 TEST_CASE("Rebuilder rejects short derived ai message id from filename", "[rebuild]") {
@@ -711,9 +722,6 @@ TEST_CASE("Rebuilder rejects short derived ai message id from filename", "[rebui
   const auto root = dir / "repo";
   std::filesystem::create_directories(root);
   create_project(db, project_id, root.string());
-
-  const auto card_rel = holder::core::card_rel_path("abcd1234");
-  write_file(root / card_rel, "# ok\n");
 
   const auto short_message_path = root / "ai_messages" / "xy.md";
   write_file(short_message_path, "body\n");
@@ -728,7 +736,10 @@ TEST_CASE("Rebuilder rejects short derived ai message id from filename", "[rebui
   project.created_at = 1;
   project.updated_at = 1;
 
-  REQUIRE_THROWS(rebuilder.rebuild_project(project));
+  REQUIRE_THROWS_WITH(
+      rebuilder.rebuild_project(project),
+      Catch::Matchers::ContainsSubstring("invalid message_id in file")
+  );
 }
 
 TEST_CASE("Rebuilder rejects invalid ai message front matter", "[rebuild]") {
@@ -742,7 +753,9 @@ TEST_CASE("Rebuilder rejects invalid ai message front matter", "[rebuild]") {
   std::filesystem::create_directories(root);
   create_project(db, project_id, root.string());
 
-  const auto card_rel = holder::core::card_rel_path("abcd1234");
+  // A real UUID at its canonical path, so rebuild gets past the card phase and reaches the
+  // ai_messages phase this test is about.
+  const auto card_rel = holder::core::card_rel_path("12345678-1234-4234-8234-123456789abc");
   write_file(root / card_rel, "# ok\n");
 
   const auto msg_rel = holder::core::ai_message_rel_path("mesa1234");
@@ -758,7 +771,41 @@ TEST_CASE("Rebuilder rejects invalid ai message front matter", "[rebuild]") {
   project.created_at = 1;
   project.updated_at = 1;
 
-  REQUIRE_THROWS(rebuilder.rebuild_project(project));
+  REQUIRE_THROWS_WITH(
+      rebuilder.rebuild_project(project),
+      Catch::Matchers::ContainsSubstring("invalid ai message front matter")
+  );
+}
+
+TEST_CASE("Rebuilder rejects a card file stored under the wrong path", "[rebuild]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+
+  const std::string project_id = "proj-1";
+  const auto root = dir / "repo";
+  std::filesystem::create_directories(root);
+  create_project(db, project_id, root.string());
+
+  // The stem is a valid UUID, so the card_id is derived and accepted; only the directory is wrong.
+  const std::string card_id = "12345678-1234-4234-8234-123456789abc";
+  write_file(root / "cards" / "misc" / (card_id + ".md"), "body\n");
+
+  holder::index::FtsIndexer fts(db);
+  holder::store::Rebuilder rebuilder(db, &fts);
+
+  holder::model::Project project;
+  project.project_id = project_id;
+  project.name = "Project";
+  project.root_path = root.string();
+  project.created_at = 1;
+  project.updated_at = 1;
+
+  REQUIRE_THROWS_WITH(
+      rebuilder.rebuild_project(project),
+      Catch::Matchers::ContainsSubstring("card path does not match card_id")
+  );
 }
 
 TEST_CASE("Rebuilder rejects ai message path mismatch with message_id", "[rebuild]") {
@@ -771,9 +818,6 @@ TEST_CASE("Rebuilder rejects ai message path mismatch with message_id", "[rebuil
   const auto root = dir / "repo";
   std::filesystem::create_directories(root);
   create_project(db, project_id, root.string());
-
-  const auto card_rel = holder::core::card_rel_path("abcd1234");
-  write_file(root / card_rel, "# ok\n");
 
   holder::model::AiMessage msg;
   msg.message_id = "other5678";
@@ -797,7 +841,10 @@ TEST_CASE("Rebuilder rejects ai message path mismatch with message_id", "[rebuil
   project.created_at = 1;
   project.updated_at = 1;
 
-  REQUIRE_THROWS(rebuilder.rebuild_project(project));
+  REQUIRE_THROWS_WITH(
+      rebuilder.rebuild_project(project),
+      Catch::Matchers::ContainsSubstring("ai message path does not match message_id")
+  );
 }
 
 TEST_CASE("Rebuilder rejects cards with unresolved parent graph", "[rebuild]") {

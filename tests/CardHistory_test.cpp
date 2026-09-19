@@ -1,5 +1,6 @@
 #if __has_include(<catch2/catch_test_macros.hpp>)
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #else
 #include <catch2/catch.hpp>
 #endif
@@ -882,7 +883,10 @@ TEST_CASE("Card history rejects encrypted snapshots without a project key id",
   project.project_id = "project-history";
   project.root_path = root.string();
   project.privacy_mode = "encrypted_git";
-  REQUIRE_THROWS(holder::history::CardHistoryService().list(project, card_id));
+  REQUIRE_THROWS_WITH(
+      holder::history::CardHistoryService().list(project, card_id),
+      Catch::Matchers::ContainsSubstring("Encrypted project is missing its project key id")
+  );
 }
 
 TEST_CASE("Card history describes an all-whitespace edit without an excerpt",

@@ -2,6 +2,7 @@
 #include "platform/Db.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -68,10 +69,22 @@ TEST_CASE("AiProviderCredentialRepo throws when upsert prepare fails", "[db]") {
   db.exec("DROP TABLE ai_provider_credentials;");
 
   holder::ai::AiProviderCredentialRepo repo(db);
-  REQUIRE_THROWS(repo.list());
-  REQUIRE_THROWS(repo.get("openai"));
-  REQUIRE_THROWS(repo.upsert("openai", "k", 1, 1));
-  REQUIRE_THROWS(repo.remove("openai"));
+  REQUIRE_THROWS_WITH(
+      repo.list(),
+      Catch::Matchers::ContainsSubstring("prepare list provider credentials failed: no such table: ai_provider_credentials")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.get("openai"),
+      Catch::Matchers::ContainsSubstring("prepare get provider credential failed: no such table: ai_provider_credentials")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.upsert("openai", "k", 1, 1),
+      Catch::Matchers::ContainsSubstring("prepare upsert provider credential failed: no such table: ai_provider_credentials")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.remove("openai"),
+      Catch::Matchers::ContainsSubstring("prepare delete provider credential failed: no such table: ai_provider_credentials")
+  );
 }
 
 TEST_CASE("AiProviderCredentialRepo throws when upsert step fails", "[db]") {
@@ -92,7 +105,10 @@ TEST_CASE("AiProviderCredentialRepo throws when upsert step fails", "[db]") {
           "BEGIN SELECT RAISE(ABORT, 'no insert'); END;");
 
   holder::ai::AiProviderCredentialRepo repo(db);
-  REQUIRE_THROWS(repo.upsert("openai", "k", 1, 1));
+  REQUIRE_THROWS_WITH(
+      repo.upsert("openai", "k", 1, 1),
+      Catch::Matchers::ContainsSubstring("upsert provider credential failed: no insert")
+  );
 }
 
 TEST_CASE("AiProviderCredentialRepo throws when delete step fails", "[db]") {
@@ -115,7 +131,10 @@ TEST_CASE("AiProviderCredentialRepo throws when delete step fails", "[db]") {
 
   db.exec("CREATE TRIGGER fail_ai_provider_delete BEFORE DELETE ON ai_provider_credentials "
           "BEGIN SELECT RAISE(ABORT, 'no delete'); END;");
-  REQUIRE_THROWS(repo.remove("openai"));
+  REQUIRE_THROWS_WITH(
+      repo.remove("openai"),
+      Catch::Matchers::ContainsSubstring("delete provider credential failed: no delete")
+  );
 }
 
 TEST_CASE("AiProviderCredentialRepo throws when list/get step is interrupted", "[db]") {
@@ -137,7 +156,13 @@ TEST_CASE("AiProviderCredentialRepo throws when list/get step is interrupted", "
   repo.upsert("openai", "k", 1, 1);
 
   sqlite3_progress_handler(db.handle(), 1, sqlite_interrupt_cb, nullptr);
-  REQUIRE_THROWS(repo.list());
-  REQUIRE_THROWS(repo.get("openai"));
+  REQUIRE_THROWS_WITH(
+      repo.list(),
+      Catch::Matchers::ContainsSubstring("list provider credentials failed: interrupted")
+  );
+  REQUIRE_THROWS_WITH(
+      repo.get("openai"),
+      Catch::Matchers::ContainsSubstring("get provider credential failed: interrupted")
+  );
   sqlite3_progress_handler(db.handle(), 0, nullptr, nullptr);
 }

@@ -20,6 +20,19 @@ std::runtime_error git_err(const std::string& what, int rc) {
   return std::runtime_error(message);
 }
 
+// Balances git_libgit2_init() on every exit path. It has to outlive the exceptions thrown below:
+// libgit2 keeps its last-error state per thread and discards it when the last reference is
+// released, so shutting down before git_err() reads the error replaces the real cause with
+// "library has not been initialized". A `throw git_err(...)` copies the message first and only
+// then unwinds, so the guard's destructor runs after the error has been captured.
+class Libgit2Reference {
+ public:
+  Libgit2Reference() { git_libgit2_init(); }
+  ~Libgit2Reference() { git_libgit2_shutdown(); }
+  Libgit2Reference(const Libgit2Reference&) = delete;
+  Libgit2Reference& operator=(const Libgit2Reference&) = delete;
+};
+
 int clamp_size_t_to_int(std::size_t value) {
   if (value > static_cast<std::size_t>(INT_MAX)) {
     return INT_MAX; // LCOV_EXCL_LINE
@@ -86,16 +99,14 @@ RepoSyncMetrics inspect_repo_sync_metrics(
     const std::string& remote_name
 ) {
   RepoSyncMetrics metrics;
-  git_libgit2_init();
+  const Libgit2Reference libgit2;
 
   git_repository* repo = nullptr;
   int rc = git_repository_open(&repo, repo_dir.string().c_str());
   if (rc == GIT_ENOTFOUND) {
-    git_libgit2_shutdown();
     return metrics;
   }
   if (rc != 0 || repo == nullptr) {
-    git_libgit2_shutdown();
     throw git_err("git_repository_open failed", rc);
   }
 
@@ -109,7 +120,6 @@ RepoSyncMetrics inspect_repo_sync_metrics(
   rc = git_status_list_new(&status_list, repo, &status_opts);
   if (rc != 0 || status_list == nullptr) {
     git_repository_free(repo);
-    git_libgit2_shutdown();
     throw git_err("git_status_list_new failed", rc);
   }
   metrics.uncommitted_changes_count = filtered_uncommitted_count(status_list);
@@ -119,7 +129,6 @@ RepoSyncMetrics inspect_repo_sync_metrics(
   if (branch.empty()) {
     metrics.unpushed_commits_count = 0;
     git_repository_free(repo);
-    git_libgit2_shutdown();
     return metrics;
   }
 
@@ -127,14 +136,12 @@ RepoSyncMetrics inspect_repo_sync_metrics(
   rc = git_reference_lookup(&head_ref, repo, ("refs/heads/" + branch).c_str());
   if (rc != 0 || head_ref == nullptr) {
     git_repository_free(repo); // LCOV_EXCL_LINE
-    git_libgit2_shutdown(); // LCOV_EXCL_LINE
     throw git_err("git_reference_lookup for local branch failed", rc); // LCOV_EXCL_LINE
   }
   const git_oid* local_oid = git_reference_target(head_ref);
   if (local_oid == nullptr) {
     git_reference_free(head_ref); // LCOV_EXCL_LINE
     git_repository_free(repo); // LCOV_EXCL_LINE
-    git_libgit2_shutdown(); // LCOV_EXCL_LINE
     throw std::runtime_error("Local branch has no target oid"); // LCOV_EXCL_LINE
   }
 
@@ -150,13 +157,11 @@ RepoSyncMetrics inspect_repo_sync_metrics(
     // Treat as unknown/clean rather than "all local commits unpushed".
     metrics.unpushed_commits_count = 0;
     git_repository_free(repo);
-    git_libgit2_shutdown();
     return metrics;
   }
   if (rc != 0 || remote_ref == nullptr) {
     git_reference_free(head_ref);
     git_repository_free(repo);
-    git_libgit2_shutdown();
     throw git_err("git_reference_lookup for remote branch failed", rc);
   }
   const git_oid* remote_oid = git_reference_target(remote_ref);
@@ -164,7 +169,6 @@ RepoSyncMetrics inspect_repo_sync_metrics(
     git_reference_free(remote_ref);
     git_reference_free(head_ref);
     git_repository_free(repo);
-    git_libgit2_shutdown();
     throw std::runtime_error("Remote branch has no target oid");
   }
 
@@ -175,7 +179,6 @@ RepoSyncMetrics inspect_repo_sync_metrics(
   git_reference_free(remote_ref);
   git_reference_free(head_ref);
   git_repository_free(repo);
-  git_libgit2_shutdown();
   if (rc != 0) {
     throw git_err("git_graph_ahead_behind failed", rc);
   }

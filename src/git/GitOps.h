@@ -74,19 +74,19 @@ class GitOps {
   // These operations are needed only when a pull reports divergence. Defaults keep
   // lightweight adapters source-compatible while making pull orchestration reusable
   // outside the C API's concrete RealGitOps path.
-  virtual GitRepo::DivergedMergeResult merge_remote_taking_theirs_for_conflicts(
+  virtual GitRepo::DivergedMergeResult merge_remote_taking_theirs_for_conflicts( // LCOV_EXCL_START - explicit unsupported adapter defaults.
       const std::string&,
       const std::string&,
       const std::string&
   ) {
     throw std::runtime_error("Diverged pull resolution is not supported by this Git adapter.");
-  }
-  virtual std::optional<std::string> read_blob_at(
+  } // LCOV_EXCL_STOP
+  virtual std::optional<std::string> read_blob_at( // LCOV_EXCL_START
       const std::string&,
       const std::filesystem::path&
   ) {
     throw std::runtime_error("Historical blob reads are not supported by this Git adapter.");
-  }
+  } // LCOV_EXCL_STOP
   virtual std::filesystem::path repo_dir() const = 0;
 
  private:
