@@ -517,25 +517,27 @@ TEST_CASE("Resource and Location repositories surface interrupted sqlite steps",
       locations.get("location-1234"),
       Catch::Matchers::ContainsSubstring("get location failed")
   );
+  // SQLite 3.41+ can report the interrupt while preparing the statement, earlier versions while
+  // stepping it. The operation name and "interrupted" are the stable part; the phase is not.
   REQUIRE_THROWS_WITH(
       locations.list("project-1234"),
-      Catch::Matchers::ContainsSubstring("prepare list locations failed")
+      Catch::Matchers::ContainsSubstring("list locations failed")
   );
   REQUIRE_THROWS_WITH(
       locations.is_in_use("location-1234"),
-      Catch::Matchers::ContainsSubstring("prepare location use check failed")
+      Catch::Matchers::ContainsSubstring("location use check failed")
   );
   REQUIRE_THROWS_WITH(
       locations.put(sample_location()),
-      Catch::Matchers::ContainsSubstring("prepare put location failed")
+      Catch::Matchers::ContainsSubstring("put location failed")
   );
   REQUIRE_THROWS_WITH(
       locations.remove("location-1234"),
-      Catch::Matchers::ContainsSubstring("prepare remove location failed")
+      Catch::Matchers::ContainsSubstring("remove location failed")
   );
   REQUIRE_THROWS_WITH(
       locations.remove_project("project-1234"),
-      Catch::Matchers::ContainsSubstring("prepare remove project locations failed")
+      Catch::Matchers::ContainsSubstring("remove project locations failed")
   );
   REQUIRE_THROWS_WITH(
       resources.get("resource-1234"),
@@ -547,19 +549,19 @@ TEST_CASE("Resource and Location repositories surface interrupted sqlite steps",
   );
   REQUIRE_THROWS_WITH(
       resources.find_by_asset_hash("project-1234", std::string(64, 'a')),
-      Catch::Matchers::ContainsSubstring("prepare find asset hash failed: interrupted")
+      Catch::Matchers::ContainsSubstring("find asset hash failed: interrupted")
   );
   REQUIRE_THROWS_WITH(
       resources.list("project-1234"),
-      Catch::Matchers::ContainsSubstring("prepare list resources failed: interrupted")
+      Catch::Matchers::ContainsSubstring("list resources failed: interrupted")
   );
   REQUIRE_THROWS_WITH(
       resources.remove("resource-1234"),
-      Catch::Matchers::ContainsSubstring("prepare remove resource failed: interrupted")
+      Catch::Matchers::ContainsSubstring("remove resource failed: interrupted")
   );
   REQUIRE_THROWS_WITH(
       resources.remove_project("project-1234"),
-      Catch::Matchers::ContainsSubstring("prepare remove project resources failed: interrupted")
+      Catch::Matchers::ContainsSubstring("remove project resources failed: interrupted")
   );
   sqlite3_progress_handler(db.handle(), 0, nullptr, nullptr);
 }

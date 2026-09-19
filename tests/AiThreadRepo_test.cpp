@@ -212,9 +212,11 @@ TEST_CASE("AiThreadRepo throws on get/list step error paths", "[aithreaddrepo]")
       repo.get("thread-int"),
       Catch::Matchers::ContainsSubstring("get ai thread failed: interrupted")
   );
+  // SQLite 3.41+ can report the interrupt while preparing the statement, earlier versions while
+  // stepping it. The operation name and "interrupted" are the stable part; the phase is not.
   REQUIRE_THROWS_WITH(
       repo.list("proj-1"),
-      Catch::Matchers::ContainsSubstring("prepare list ai threads failed: interrupted")
+      Catch::Matchers::ContainsSubstring("list ai threads failed: interrupted")
   );
   sqlite3_progress_handler(db.handle(), 0, nullptr, nullptr);
 }

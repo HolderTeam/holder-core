@@ -364,21 +364,23 @@ TEST_CASE("LinkRepo list methods throw when sqlite step is interrupted", "[linkr
   repo.upsert_links("proj-1", "card-a", {link});
 
   sqlite3_progress_handler(db.handle(), 1, interrupt_progress, nullptr);
+  // SQLite 3.41+ can report the interrupt while preparing the statement, earlier versions while
+  // stepping it. The operation name and "interrupted" are the stable part; the phase is not.
   REQUIRE_THROWS_WITH(
       repo.list_outgoing("proj-1", "card-a"),
-      Catch::Matchers::ContainsSubstring("prepare list outgoing links failed: interrupted")
+      Catch::Matchers::ContainsSubstring("list outgoing links failed: interrupted")
   );
   REQUIRE_THROWS_WITH(
       repo.list_backlinks("proj-1", "card-b"),
-      Catch::Matchers::ContainsSubstring("prepare list backlinks failed: interrupted")
+      Catch::Matchers::ContainsSubstring("list backlinks failed: interrupted")
   );
   REQUIRE_THROWS_WITH(
       repo.list_backlinks_typed("proj-1", "card-b", "card"),
-      Catch::Matchers::ContainsSubstring("prepare list backlinks typed failed: interrupted")
+      Catch::Matchers::ContainsSubstring("list backlinks typed failed: interrupted")
   );
   REQUIRE_THROWS_WITH(
       repo.list_incoming_typed("proj-1", "card"),
-      Catch::Matchers::ContainsSubstring("prepare list incoming typed links failed: interrupted")
+      Catch::Matchers::ContainsSubstring("list incoming typed links failed: interrupted")
   );
   sqlite3_progress_handler(db.handle(), 0, nullptr, nullptr);
 }

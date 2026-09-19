@@ -558,37 +558,41 @@ TEST_CASE("CardRepo read/count queries throw on interrupted sqlite step", "[card
       repo.get("parent-int"),
       Catch::Matchers::ContainsSubstring("get card failed: interrupted")
   );
+  // SQLite 3.41+ can report the interrupt while preparing the statement, earlier versions while
+  // stepping it. The operation name and "interrupted" are the stable part; the phase is not.
   REQUIRE_THROWS_WITH(
       repo.list_roots("proj-1"),
-      Catch::Matchers::ContainsSubstring("prepare list cards failed: interrupted")
+      Catch::Matchers::ContainsSubstring("list cards failed: interrupted")
   );
   REQUIRE_THROWS_WITH(
       repo.list_children("proj-1", "parent-int"),
-      Catch::Matchers::ContainsSubstring("prepare list child cards failed: interrupted")
+      Catch::Matchers::ContainsSubstring("list child cards failed: interrupted")
   );
   REQUIRE_THROWS_WITH(
       repo.list_all("proj-1"),
-      Catch::Matchers::ContainsSubstring("prepare list all cards failed: interrupted")
+      Catch::Matchers::ContainsSubstring("list all cards failed: interrupted")
   );
   REQUIRE_THROWS_WITH(
       repo.count_all_not_deleted("proj-1"),
-      Catch::Matchers::ContainsSubstring("prepare count all cards failed: interrupted")
+      Catch::Matchers::ContainsSubstring("count all cards failed: interrupted")
   );
   REQUIRE_THROWS_WITH(
       repo.count_roots_not_deleted("proj-1"),
-      Catch::Matchers::ContainsSubstring("prepare count root cards failed: interrupted")
+      Catch::Matchers::ContainsSubstring("count root cards failed: interrupted")
   );
   REQUIRE_THROWS_WITH(
       repo.count_children_not_deleted("proj-1", "parent-int"),
-      Catch::Matchers::ContainsSubstring("prepare count child cards failed: interrupted")
+      Catch::Matchers::ContainsSubstring("count child cards failed: interrupted")
   );
   REQUIRE_THROWS_WITH(
       repo.next_sort_key("proj-1", std::nullopt),
-      Catch::Matchers::ContainsSubstring("prepare next sort_key failed: interrupted")
+      Catch::Matchers::ContainsSubstring("next sort_key failed: interrupted") ||
+          Catch::Matchers::ContainsSubstring("next sort_key query failed: interrupted")
   );
   REQUIRE_THROWS_WITH(
       repo.next_sort_key("proj-1", std::optional<std::string>("parent-int")),
-      Catch::Matchers::ContainsSubstring("prepare next sort_key failed: interrupted")
+      Catch::Matchers::ContainsSubstring("next sort_key failed: interrupted") ||
+          Catch::Matchers::ContainsSubstring("next sort_key query failed: interrupted")
   );
 
   sqlite3_progress_handler(db.handle(), 0, nullptr, nullptr);
@@ -644,37 +648,41 @@ TEST_CASE("CardRepo list/count/next_sort throw on interrupted step under load", 
   int interrupt_on = 1;
   sqlite3_progress_handler(db.handle(), 1, sqlite_interrupt_cb, &interrupt_on);
 
+  // SQLite 3.41+ can report the interrupt while preparing the statement, earlier versions while
+  // stepping it. The operation name and "interrupted" are the stable part; the phase is not.
   REQUIRE_THROWS_WITH(
       repo.list_roots("proj-1"),
-      Catch::Matchers::ContainsSubstring("prepare list cards failed: interrupted")
+      Catch::Matchers::ContainsSubstring("list cards failed: interrupted")
   );
   REQUIRE_THROWS_WITH(
       repo.list_children("proj-1", "parent-lock"),
-      Catch::Matchers::ContainsSubstring("prepare list child cards failed: interrupted")
+      Catch::Matchers::ContainsSubstring("list child cards failed: interrupted")
   );
   REQUIRE_THROWS_WITH(
       repo.list_all("proj-1"),
-      Catch::Matchers::ContainsSubstring("prepare list all cards failed: interrupted")
+      Catch::Matchers::ContainsSubstring("list all cards failed: interrupted")
   );
   REQUIRE_THROWS_WITH(
       repo.count_all_not_deleted("proj-1"),
-      Catch::Matchers::ContainsSubstring("prepare count all cards failed: interrupted")
+      Catch::Matchers::ContainsSubstring("count all cards failed: interrupted")
   );
   REQUIRE_THROWS_WITH(
       repo.count_roots_not_deleted("proj-1"),
-      Catch::Matchers::ContainsSubstring("prepare count root cards failed: interrupted")
+      Catch::Matchers::ContainsSubstring("count root cards failed: interrupted")
   );
   REQUIRE_THROWS_WITH(
       repo.count_children_not_deleted("proj-1", "parent-lock"),
-      Catch::Matchers::ContainsSubstring("prepare count child cards failed: interrupted")
+      Catch::Matchers::ContainsSubstring("count child cards failed: interrupted")
   );
   REQUIRE_THROWS_WITH(
       repo.next_sort_key("proj-1", std::nullopt),
-      Catch::Matchers::ContainsSubstring("prepare next sort_key failed: interrupted")
+      Catch::Matchers::ContainsSubstring("next sort_key failed: interrupted") ||
+          Catch::Matchers::ContainsSubstring("next sort_key query failed: interrupted")
   );
   REQUIRE_THROWS_WITH(
       repo.next_sort_key("proj-1", std::optional<std::string>("parent-lock")),
-      Catch::Matchers::ContainsSubstring("prepare next sort_key failed: interrupted")
+      Catch::Matchers::ContainsSubstring("next sort_key failed: interrupted") ||
+          Catch::Matchers::ContainsSubstring("next sort_key query failed: interrupted")
   );
 
   sqlite3_progress_handler(db.handle(), 0, nullptr, nullptr);
@@ -783,29 +791,31 @@ TEST_CASE("CardRepo read/count queries throw when sqlite step hits locked databa
   int interrupt_on = 1;
   sqlite3_progress_handler(db.handle(), 1, sqlite_interrupt_cb, &interrupt_on);
 
+  // SQLite 3.41+ can report the interrupt while preparing the statement, earlier versions while
+  // stepping it. The operation name and "interrupted" are the stable part; the phase is not.
   REQUIRE_THROWS_WITH(
       repo.list_roots("proj-1"),
-      Catch::Matchers::ContainsSubstring("prepare list cards failed: interrupted")
+      Catch::Matchers::ContainsSubstring("list cards failed: interrupted")
   );
   REQUIRE_THROWS_WITH(
       repo.list_children("proj-1", "parent-lock"),
-      Catch::Matchers::ContainsSubstring("prepare list child cards failed: interrupted")
+      Catch::Matchers::ContainsSubstring("list child cards failed: interrupted")
   );
   REQUIRE_THROWS_WITH(
       repo.list_all("proj-1"),
-      Catch::Matchers::ContainsSubstring("prepare list all cards failed: interrupted")
+      Catch::Matchers::ContainsSubstring("list all cards failed: interrupted")
   );
   REQUIRE_THROWS_WITH(
       repo.count_all_not_deleted("proj-1"),
-      Catch::Matchers::ContainsSubstring("prepare count all cards failed: interrupted")
+      Catch::Matchers::ContainsSubstring("count all cards failed: interrupted")
   );
   REQUIRE_THROWS_WITH(
       repo.count_roots_not_deleted("proj-1"),
-      Catch::Matchers::ContainsSubstring("prepare count root cards failed: interrupted")
+      Catch::Matchers::ContainsSubstring("count root cards failed: interrupted")
   );
   REQUIRE_THROWS_WITH(
       repo.count_children_not_deleted("proj-1", "parent-lock"),
-      Catch::Matchers::ContainsSubstring("prepare count child cards failed: interrupted")
+      Catch::Matchers::ContainsSubstring("count child cards failed: interrupted")
   );
 
   sqlite3_progress_handler(db.handle(), 0, nullptr, nullptr);

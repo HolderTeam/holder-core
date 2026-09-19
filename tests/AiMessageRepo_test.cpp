@@ -781,13 +781,15 @@ TEST_CASE(
       repo.get(msg.message_id),
       Catch::Matchers::ContainsSubstring("get ai message failed: interrupted")
   );
+  // SQLite 3.41+ can report the interrupt while preparing the statement, earlier versions while
+  // stepping it. The operation name and "interrupted" are the stable part; the phase is not.
   REQUIRE_THROWS_WITH(
       repo.list_by_thread("thread-1"),
-      Catch::Matchers::ContainsSubstring("prepare list ai messages failed: interrupted")
+      Catch::Matchers::ContainsSubstring("list ai messages failed: interrupted")
   );
   REQUIRE_THROWS_WITH(
       repo.list_deleted_by_project("proj-1"),
-      Catch::Matchers::ContainsSubstring("prepare list deleted ai messages failed: interrupted")
+      Catch::Matchers::ContainsSubstring("list deleted ai messages failed: interrupted")
   );
   sqlite3_progress_handler(db.handle(), 0, nullptr, nullptr);
 }
