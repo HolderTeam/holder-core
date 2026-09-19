@@ -18,8 +18,11 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
-#include <wincred.h>
+// wincred.h requires Windows types; preserve this include order when formatting.
+// clang-format off
 #include <windows.h>
+#include <wincred.h>
+// clang-format on
 #endif
 
 #include <cstdint>
