@@ -70,6 +70,12 @@ Optional compiler caching and coverage tools:
 sudo dnf install -y ccache lcov gcovr
 ```
 
+Optional memory checks and LLVM 18 analysis/formatting tools:
+
+```sh
+sudo dnf install -y valgrind libasan libubsan libtsan clang18-tools-extra
+```
+
 ### Ubuntu / Debian
 
 ```sh
@@ -88,6 +94,36 @@ sudo apt install -y ccache lcov gcovr
 `make.sh` automatically uses ccache when installed (`HOLDER_CCACHE=0` disables
 it). `./make.sh coverage` uses GCC/gcov, lcov and genhtml; gcovr adds a JSON report.
 
+### Diagnostic commands
+
+```sh
+./make.sh warnings Debug         # Build libholder with warnings as errors
+./make.sh memcheck               # Run tests under Valgrind
+./make.sh memcheck 'UUID'         # Select CTest names with a regular expression
+./make.sh san address,undefined  # Build and test with ASan and UBSan
+./make.sh san thread             # Build and test with ThreadSanitizer
+./make.sh tidy                   # Run clang-tidy on source and test files
+```
+
+These commands use separate `build-warnings`, `build-memcheck`, `build-san`, and
+`build-tidy` directories. Warnings, memory checks, and sanitizer builds default
+to Debug. Set `HOLDER_MEMCHECK_BUILD_TYPE` to change the Valgrind build type, or
+pass the build type after the sanitizer list for `san`.
+
+Valgrind reports definite and possible leaks, tracks uninitialized values, and
+returns failure for detected memory errors. `HOLDER_CTEST_TIMEOUT` overrides
+the per-test timeout: 300 seconds for Valgrind and the single ThreadSanitizer
+suite, 30 seconds for individual ASan/UBSan tests. Set
+`HOLDER_SAN_DETECT_LEAKS=1` to enable ASan leak detection. On Linux, the
+ThreadSanitizer suite runs through `setarch -R`, as in holder-daemon.
+
+`tidy` prefers `clang-tidy-18` and supports Fedora's `run-clang-tidy-18` name,
+with unversioned tools as a fallback. Set `HOLDER_CLANG_TIDY` and
+`HOLDER_RUN_CLANG_TIDY` to select another installed version. On this Fedora 45
+setup, Clang 18 reports errors in GCC 16's standard-library headers; use a
+compatible newer Clang toolchain for analysis. Formatting requires
+`clang-format-18`.
+
 ### Moving an existing checkout between systems
 
 Do not reuse CMake caches or compiled output from the previous OS/toolchain.
@@ -97,8 +133,8 @@ Use a fresh build directory, for example:
 BUILD_DIR=out/build/fedora ./make.sh
 ```
 
-The coverage command uses its own fixed `build-coverage` directory; move aside
-any copied version of that directory before running coverage on the new system.
+Coverage and diagnostic commands use their own fixed build directories listed
+above; move aside any copied versions before running them on the new system.
 
 ## Consumption model
 

@@ -1,3 +1,6 @@
+option(HOLDER_CORE_CATCH_DISCOVER_TESTS "Discover Catch2 tests as individual CTest tests" ON)
+option(HOLDER_CORE_TSAN_USE_SETARCH "Run tests through setarch -R for ThreadSanitizer on Linux" OFF)
+
 find_package(Catch2 3 QUIET)
 if(NOT Catch2_FOUND)
   find_package(Catch2 REQUIRED)
@@ -98,11 +101,16 @@ set(HOLDER_CORE_TEST_ENVIRONMENT
   "HOLDER_TEST_KEYSTORE_DIR=${CMAKE_CURRENT_BINARY_DIR}/test-keystore"
 )
 
-if(COMMAND catch_discover_tests)
+if(HOLDER_CORE_CATCH_DISCOVER_TESTS AND COMMAND catch_discover_tests)
   catch_discover_tests(holder_core_tests
     PROPERTIES
       ENVIRONMENT "${HOLDER_CORE_TEST_ENVIRONMENT}"
   )
+elseif(HOLDER_CORE_TSAN_USE_SETARCH AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  find_program(SETARCH_EXECUTABLE setarch REQUIRED)
+  add_test(NAME holder_core_tests
+    COMMAND ${SETARCH_EXECUTABLE} ${CMAKE_SYSTEM_PROCESSOR} -R $<TARGET_FILE:holder_core_tests>)
+  set_tests_properties(holder_core_tests PROPERTIES ENVIRONMENT "${HOLDER_CORE_TEST_ENVIRONMENT}")
 else()
   add_test(NAME holder_core_tests COMMAND holder_core_tests)
   set_tests_properties(holder_core_tests PROPERTIES ENVIRONMENT "${HOLDER_CORE_TEST_ENVIRONMENT}")
