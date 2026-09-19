@@ -1554,11 +1554,10 @@ TEST_CASE(
 
   store.trash(card.card_id, 999);
 
+  // read_file() closes its stream before returning. Holding the trash file open across restore()
+  // would make the rename fail on Windows, which refuses to rename a file that has an open handle.
   const auto trash_rel = holder::core::card_trash_rel_path(card.card_id);
-  std::ifstream trash_file(project_root / trash_rel, std::ios::binary);
-  const std::string trash_raw{
-      std::istreambuf_iterator<char>(trash_file), std::istreambuf_iterator<char>()
-  };
+  const auto trash_raw = read_file(project_root / trash_rel);
   const auto trash_parsed = holder::core::parse_card_file(trash_raw);
   REQUIRE(trash_parsed.card.deleted_at.has_value());
   REQUIRE(trash_parsed.card.deleted_at.value() == 999);
@@ -1568,10 +1567,7 @@ TEST_CASE(
   store.restore(card.card_id, 1000);
 
   const auto live_rel = holder::core::card_rel_path(card.card_id);
-  std::ifstream live_file(project_root / live_rel, std::ios::binary);
-  const std::string live_raw{
-      std::istreambuf_iterator<char>(live_file), std::istreambuf_iterator<char>()
-  };
+  const auto live_raw = read_file(project_root / live_rel);
   const auto live_parsed = holder::core::parse_card_file(live_raw);
   REQUIRE_FALSE(live_parsed.card.deleted_at.has_value());
   REQUIRE(live_parsed.card.updated_at == 1000);
