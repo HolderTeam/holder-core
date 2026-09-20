@@ -355,7 +355,7 @@ std::vector<holder::model::Resource> ResourceRepo::list_for_card(
     if (rc != SQLITE_ROW) {
       throw std::runtime_error(
           std::string("list card resources failed: ") + sqlite3_errmsg(db_.handle())
-      ); // LCOV_EXCL_LINE - SQLite step fault requires engine injection.
+      );
     }
     resources.push_back(get(text_column(stmt.get(), 0)).value());
   }

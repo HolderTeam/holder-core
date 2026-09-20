@@ -4,9 +4,14 @@
 #include <holder/holder.h>
 #include <nlohmann/json.hpp>
 
+#include <atomic>
+#include <chrono>
 #include <functional>
+#include <future>
 #include <memory>
 #include <string>
+#include <thread>
+#include <vector>
 
 namespace {
 
@@ -18,7 +23,7 @@ struct ProviderProbe {
   std::function<void()> on_put;
   std::function<void()> on_get;
   std::function<void()> on_destroy;
-  int destroyed = 0;
+  std::atomic<int> destroyed{0};
   int replacement_result = -1;
   bool destroyed_in_callback = false;
 };
@@ -199,8 +204,8 @@ TEST_CASE("C API asset operations retain providers replaced inside callbacks", "
   }
   REQUIRE(original->replacement_result == HOLDER_OK);
   REQUIRE_FALSE(original->destroyed_in_callback);
-  REQUIRE(original->destroyed == 1);
-  REQUIRE(replacement->destroyed == 0);
+  REQUIRE(original->destroyed.load() == 1);
+  REQUIRE(replacement->destroyed.load() == 0);
 }
 
 TEST_CASE("C API storage provider cleanup can register another provider", "[capi][resource]") {
@@ -214,6 +219,84 @@ TEST_CASE("C API storage provider cleanup can register another provider", "[capi
   };
   REQUIRE(register_probe("lifetime-cleanup", original) == HOLDER_OK);
   REQUIRE(register_probe("lifetime-cleanup", replacement) == HOLDER_OK);
-  REQUIRE(original->destroyed == 1);
+  REQUIRE(original->destroyed.load() == 1);
   REQUIRE(original->replacement_result == HOLDER_OK);
+}
+
+TEST_CASE(
+    "C API retains an active provider during concurrent replacements",
+    "[capi][resource][concurrency][stress]"
+) {
+  using namespace std::chrono_literals;
+  const char* name = "lifetime-concurrent";
+  AssetFixture fixture(name);
+  auto original = std::make_shared<ProviderProbe>(fixture.root / "objects");
+  REQUIRE(register_probe(name, original) == HOLDER_OK);
+  std::vector<ProbeOwner> replacements;
+  for (int i = 0; i < 128; ++i)
+    replacements.push_back(std::make_shared<ProviderProbe>(fixture.root / "objects"));
+
+  std::promise<void> entered;
+  auto entered_future = entered.get_future();
+  std::promise<void> replaced;
+  auto replaced_future = replaced.get_future();
+  bool callback_synchronized = false;
+  bool retained_during_replacement = false;
+  const auto during_callback = [&] {
+    entered.set_value();
+    callback_synchronized = replaced_future.wait_for(10s) == std::future_status::ready;
+    retained_during_replacement = original->destroyed.load() == 0;
+  };
+  std::string resource_id, asset_id, placement_id;
+  SECTION("import") { original->on_put = during_callback; }
+  SECTION("retrieve") {
+    const auto imported = fixture.import();
+    resource_id = imported.at("resource_id").get<std::string>();
+    asset_id = imported.at("asset_id").get<std::string>();
+    const auto resource = call_json([&](char** out, holder_error** err) {
+      return holder_resource_get(fixture.context.get(), resource_id.c_str(), out, err);
+    });
+    placement_id =
+        resource.at("assets").at(0).at("placements").at(0).at("placement_id").get<std::string>();
+    original->on_get = during_callback;
+  }
+  bool registrations_ok = true;
+  std::jthread worker([&] {
+    if (entered_future.wait_for(10s) == std::future_status::ready) {
+      for (const auto& replacement : replacements)
+        if (register_probe(name, replacement) != HOLDER_OK) registrations_ok = false;
+    } else {
+      registrations_ok = false;
+    }
+    replaced.set_value();
+  });
+  if (resource_id.empty()) {
+    fixture.import();
+  } else {
+    holder_error* error = nullptr;
+    const auto destination = (fixture.root / "concurrent-download.txt").string();
+    const auto result = holder_asset_retrieve(
+        fixture.context.get(),
+        resource_id.c_str(),
+        asset_id.c_str(),
+        placement_id.c_str(),
+        destination.c_str(),
+        &error
+    );
+    holder_error_destroy(error);
+    REQUIRE(result == HOLDER_OK);
+    std::ifstream downloaded(destination);
+    REQUIRE(
+        std::string((std::istreambuf_iterator<char>(downloaded)), {}) == "provider lifetime bytes"
+    );
+  }
+  worker.join();
+  REQUIRE(registrations_ok);
+  REQUIRE(callback_synchronized);
+  REQUIRE(retained_during_replacement);
+  REQUIRE_FALSE(original->destroyed_in_callback);
+  REQUIRE(original->destroyed.load() == 1);
+  for (std::size_t i = 0; i + 1 < replacements.size(); ++i)
+    REQUIRE(replacements[i]->destroyed.load() == 1);
+  REQUIRE(replacements.back()->destroyed.load() == 0);
 }

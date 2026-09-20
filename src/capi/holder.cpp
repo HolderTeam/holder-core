@@ -159,8 +159,9 @@ nlohmann::json project_to_json(const holder::model::Project& project) {
       {"name", project.name},
       {"root_path", project.root_path},
       {"privacy_mode", project.privacy_mode},
-      {"id_scheme", holder::model::to_string(project.id_scheme)
-      }, // LCOV_EXCL_LINE - gcov artefact: multi-line initializer is executed but never counted.
+      // LCOV_EXCL_START - gcov artefact: multi-line initializer is executed but never counted.
+      {"id_scheme", holder::model::to_string(project.id_scheme)},
+      // LCOV_EXCL_STOP
       {"created_at", project.created_at},
       {"updated_at", project.updated_at},
   };
@@ -729,15 +730,17 @@ holder::card::MilestoneUpdate milestone_update_from_json(const nlohmann::json& b
   holder::card::MilestoneUpdate update;
   if (body.contains("start_at")) {
     if (body.at("start_at").is_null()) {
-      throw std::invalid_argument("start_at must not be null"
-      ); // LCOV_EXCL_LINE - C ABI validates null before helper dispatch.
+      // LCOV_EXCL_START - C ABI validates null before helper dispatch.
+      throw std::invalid_argument("start_at must not be null");
+      // LCOV_EXCL_STOP
     }
     update.start_at = body.at("start_at").get<long long>();
   }
   if (body.contains("all_day")) {
     if (body.at("all_day").is_null()) {
-      throw std::invalid_argument("all_day must not be null"
-      ); // LCOV_EXCL_LINE - C ABI validates null before helper dispatch.
+      // LCOV_EXCL_START - C ABI validates null before helper dispatch.
+      throw std::invalid_argument("all_day must not be null");
+      // LCOV_EXCL_STOP
     }
     update.all_day = body.at("all_day").get<bool>();
   }
@@ -2190,9 +2193,9 @@ int holder_card_move_json(
 
     const auto moved = card_repo.get(card_id);
     if (!moved.has_value()) {
-      throw std::runtime_error(
-          "card not found after move: " + std::string(card_id)
-      ); // LCOV_EXCL_LINE
+      // LCOV_EXCL_START
+      throw std::runtime_error("card not found after move: " + std::string(card_id));
+      // LCOV_EXCL_STOP
     }
 
     nlohmann::json response;
@@ -2465,11 +2468,9 @@ int holder_card_update_content(
       // CardStore::update_content above already throws "card not found" for this exact
       // condition, so this branch is unreachable given the current implementation -- kept as
       // defense-in-depth in case that invariant ever changes.
-      return set_error(
-          out_error,
-          HOLDER_ERROR_RUNTIME,
-          "card not found: " + std::string(card_id)
-      ); // LCOV_EXCL_LINE
+      // LCOV_EXCL_START
+      return set_error(out_error, HOLDER_ERROR_RUNTIME, "card not found: " + std::string(card_id));
+      // LCOV_EXCL_STOP
     }
 
     auto* out = duplicate_string(card_to_json(updated.value()).dump());
@@ -3995,8 +3996,9 @@ int holder_git_probe_remote_url(
 
     nlohmann::json body = {
         {"url", url},
-        {"status", holder::git::remote_probe_status_name(probe.status)
-        }, // LCOV_EXCL_LINE - gcov artefact: multi-line initializer is executed but never counted.
+        // LCOV_EXCL_START - gcov artefact: multi-line initializer is executed but never counted.
+        {"status", holder::git::remote_probe_status_name(probe.status)},
+        // LCOV_EXCL_STOP
         {"remote_has_head", probe.remote_has_head},
         {"error_message",
          probe.error_message.empty() ? nlohmann::json(nullptr) : nlohmann::json(probe.error_message)
@@ -4397,10 +4399,12 @@ int holder_git_sync_now(
         {"push_attempted", false},
         {"push_status", nullptr},
         {"push_error", nullptr},
-        {"push_ahead_count", 0
-        }, // LCOV_EXCL_LINE - gcov artefact: multi-line initializer is executed but never counted.
-        {"push_behind_count", 0
-        }, // LCOV_EXCL_LINE - gcov artefact: multi-line initializer is executed but never counted.
+        // LCOV_EXCL_START - gcov artefact: multi-line initializer is executed but never counted.
+        {"push_ahead_count", 0},
+        // LCOV_EXCL_STOP
+        // LCOV_EXCL_START - gcov artefact: multi-line initializer is executed but never counted.
+        {"push_behind_count", 0},
+        // LCOV_EXCL_STOP
         {"push_local_head_commit", nullptr},
     };
 

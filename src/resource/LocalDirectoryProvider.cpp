@@ -23,10 +23,9 @@ void copy_file_streaming(const std::filesystem::path& source, const std::filesys
   if (::chmod(target.c_str(), S_IRUSR | S_IWUSR) != 0) {
     // target has just been created by this process; only an external filesystem
     // or ownership change can make this fail.
-    throw StorageError(
-        StorageErrorCode::Permission,
-        "failed to secure target object"
-    ); // LCOV_EXCL_LINE
+    // LCOV_EXCL_START
+    throw StorageError(StorageErrorCode::Permission, "failed to secure target object");
+    // LCOV_EXCL_STOP
   }
 #endif
   std::array<char, 64 * 1024> buffer{};
@@ -38,10 +37,9 @@ void copy_file_streaming(const std::filesystem::path& source, const std::filesys
   if (!input.eof() || !output) {
     // Mid-stream device failures are not safely injectable with regular files;
     // open/create failures and integrity failures are covered separately.
-    throw StorageError(
-        StorageErrorCode::Capacity,
-        "failed while copying storage object"
-    ); // LCOV_EXCL_LINE
+    // LCOV_EXCL_START
+    throw StorageError(StorageErrorCode::Capacity, "failed while copying storage object");
+    // LCOV_EXCL_STOP
   }
 }
 
@@ -59,10 +57,9 @@ LocalDirectoryProvider::LocalDirectoryProvider(std::filesystem::path root)
     // std::filesystem::absolute() cannot produce an empty path for a
     // successfully constructed provider, but retain the guard for
     // implementations with different path semantics.
-    throw StorageError(
-        StorageErrorCode::InvalidConfiguration,
-        "local storage root is empty"
-    ); // LCOV_EXCL_LINE
+    // LCOV_EXCL_START
+    throw StorageError(StorageErrorCode::InvalidConfiguration, "local storage root is empty");
+    // LCOV_EXCL_STOP
   }
 }
 
@@ -85,10 +82,9 @@ std::filesystem::path LocalDirectoryProvider::resolve(const std::string& object_
     // Rooted keys and every dot/dot-dot component were rejected above, so lexical joining
     // cannot escape root_ on any platform. This is a final defence if filesystem path
     // semantics ever change.
-    throw StorageError(
-        StorageErrorCode::InvalidConfiguration,
-        "storage object escapes root"
-    ); // LCOV_EXCL_LINE
+    // LCOV_EXCL_START
+    throw StorageError(StorageErrorCode::InvalidConfiguration, "storage object escapes root");
+    // LCOV_EXCL_STOP
   }
   return result;
 }
@@ -117,10 +113,9 @@ void LocalDirectoryProvider::put(
     if (copied.byte_size != stored_size || copied.sha256 != stored_sha256) {
       // The source is hashed immediately before this same-process copy. A
       // mismatch requires concurrent external mutation or storage corruption.
-      throw StorageError(
-          StorageErrorCode::Integrity,
-          "copied object integrity mismatch"
-      ); // LCOV_EXCL_LINE
+      // LCOV_EXCL_START
+      throw StorageError(StorageErrorCode::Integrity, "copied object integrity mismatch");
+      // LCOV_EXCL_STOP
     }
     std::filesystem::rename(temporary, target);
   } catch (...) {

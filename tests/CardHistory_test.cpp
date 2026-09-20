@@ -1156,7 +1156,27 @@ TEST_CASE("Card history shortens an oversized diff line", "[history][git]") {
   write_commit(repo, card_id, "Large line", "", "Add card Large line");
   const auto old_oid = repo.head_oid();
   REQUIRE(old_oid.has_value());
-  write_commit(repo, card_id, "Large line", std::string(20'000, 'x'), "Update card Large line");
+  const std::string suffix = "... [line shortened]";
+  const std::size_t prefix_limit = 16 * 1024 - suffix.size();
+  std::string body;
+  std::string expected_prefix;
+  SECTION("ASCII") {
+    body = std::string(20'000, 'x');
+    expected_prefix = body.substr(0, prefix_limit);
+  }
+  SECTION("two-byte UTF-8") {
+    expected_prefix = std::string(prefix_limit - 1, 'x');
+    body = expected_prefix + "é" + std::string(4'000, 'x');
+  }
+  SECTION("three-byte UTF-8") {
+    expected_prefix = std::string(prefix_limit - 2, 'x');
+    body = expected_prefix + "€" + std::string(4'000, 'x');
+  }
+  SECTION("four-byte UTF-8") {
+    expected_prefix = std::string(prefix_limit - 3, 'x');
+    body = expected_prefix + "😀" + std::string(4'000, 'x');
+  }
+  write_commit(repo, card_id, "Large line", body, "Update card Large line");
 
   holder::model::Project project;
   project.project_id = "project-history";
@@ -1171,6 +1191,7 @@ TEST_CASE("Card history shortens an oversized diff line", "[history][git]") {
       });
   REQUIRE(added != comparison.lines.end());
   CHECK(added->text.size() <= 16 * 1024);
+  CHECK(added->text == expected_prefix + suffix);
 }
 
 TEST_CASE("Card history decrypts encrypted project versions", "[history][git][privacy]") {
@@ -1339,4 +1360,14 @@ TEST_CASE("Card history reads leave an existing repository unchanged", "[history
   CHECK(read_file_bytes(head_path) == head_file_before);
   CHECK(read_file_bytes(card_path) == card_before);
   CHECK(read_file_bytes(untracked_path) == untracked_before);
+}
+
+TEST_CASE("Card history rejects limits outside the supported range", "[history]") {
+  holder::model::Project project;
+  for (const std::size_t limit : {std::size_t(0), std::size_t(201)}) {
+    REQUIRE_THROWS_WITH(
+        holder::history::CardHistoryService().list(project, "card-history", limit),
+        "history limit must be between 1 and 200"
+    );
+  }
 }

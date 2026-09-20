@@ -5,8 +5,9 @@ namespace holder::core {
 const std::vector<LinkKindInfo>& link_kind_catalog() {
   static const std::vector<LinkKindInfo> kCatalog = {
       // General / symmetric
-      {"related_to", "Related to", "Related to"
-      }, // LCOV_EXCL_LINE - gcov artefact: static initializer entry is executed but never counted.
+      // LCOV_EXCL_START - gcov artefact: static initializer entry is executed but never counted.
+      {"related_to", "Related to", "Related to"},
+      // LCOV_EXCL_STOP
       {"similar_to", "Similar to", "Similar to"},
       {"opposite_of", "Opposite of", "Opposite of"},
       {"alternative_to", "Alternative to", "Alternative to"},

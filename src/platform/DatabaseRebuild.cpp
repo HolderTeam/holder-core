@@ -73,8 +73,10 @@ std::string health_name(DatabaseHealth health) {
   case DatabaseHealth::Corrupt:
     return "corrupt";
   // rebuild_database_projection rejects IoError before constructing a report.
+  // LCOV_EXCL_START
   case DatabaseHealth::IoError:
-    return "io_error"; // LCOV_EXCL_LINE
+    return "io_error";
+    // LCOV_EXCL_STOP
   }
   return "unknown"; // LCOV_EXCL_LINE
 }
@@ -314,14 +316,17 @@ DatabaseHealthResult inspect_database_health(const std::filesystem::path& path) 
       is_sqlite_corruption_failure(step_rc)) { // LCOV_EXCL_LINE
     return {
         DatabaseHealth::Corrupt,
-        !result.empty() ? result
-                        : (!message.empty() ? message : "quick_check failed"), // LCOV_EXCL_LINE
-    }; // LCOV_EXCL_LINE
+        // LCOV_EXCL_START
+        !result.empty() ? result : (!message.empty() ? message : "quick_check failed"),
+    };
+    // LCOV_EXCL_STOP
   }
   return {
       DatabaseHealth::IoError,
+      // LCOV_EXCL_START
       !message.empty() ? message : "quick_check could not complete"
-  }; // LCOV_EXCL_LINE
+  };
+  // LCOV_EXCL_STOP
 }
 
 bool database_rebuild_is_ready(const std::filesystem::path& readiness_path) {
@@ -353,8 +358,9 @@ void mark_database_rebuild_ready(const std::filesystem::path& readiness_path) {
 #ifndef _WIN32
   if (::chmod(temporary.c_str(), S_IRUSR | S_IWUSR) != 0) {
     // temporary was just created by this process in a writable directory.
-    throw std::runtime_error("failed to restrict database rebuild readiness marker"
-    ); // LCOV_EXCL_LINE
+    // LCOV_EXCL_START
+    throw std::runtime_error("failed to restrict database rebuild readiness marker");
+    // LCOV_EXCL_STOP
   }
 #endif
   std::error_code ec;
@@ -678,9 +684,11 @@ DatabaseRebuildReport rebuild_database_projection(const DatabaseRebuildRequest& 
         // Strict recovery rejects encrypted projects whose durable key material is absent,
         // so this fallback generator is deliberately unreachable. The callback is still
         // required by recover_project_roots' shared API.
+        // LCOV_EXCL_START
         [] {
           return std::string("unused-in-strict-recovery");
-        }, // LCOV_EXCL_LINE
+        },
+        // LCOV_EXCL_STOP
         true
     );
     if (request.hooks.restore_after_projects) request.hooks.restore_after_projects(rebuilt);
@@ -724,9 +732,11 @@ DatabaseRebuildReport rebuild_database_projection(const DatabaseRebuildRequest& 
     if (final_health.health != DatabaseHealth::Healthy) {
       // The same file was fully validated immediately before an atomic rename;
       // only external mutation/storage failure can invalidate it here.
+      // LCOV_EXCL_START
       throw std::runtime_error(
           "replacement database failed final health check: " + final_health.detail
-      ); // LCOV_EXCL_LINE
+      );
+      // LCOV_EXCL_STOP
     }
   } catch (...) { // LCOV_EXCL_LINE
     // Recovery from an external failure during rename/fsync/final re-open. The
@@ -735,14 +745,12 @@ DatabaseRebuildReport rebuild_database_projection(const DatabaseRebuildRequest& 
     std::filesystem::remove(request.database_path, ignored); // LCOV_EXCL_LINE
     if (!backup_dir.empty() && health.health == DatabaseHealth::Healthy) { // LCOV_EXCL_LINE
       move_if_exists(backup_dir / "holder.db", request.database_path); // LCOV_EXCL_LINE
-      move_if_exists(
-          backup_dir / "holder.db-wal",
-          request.database_path.string() + "-wal"
-      ); // LCOV_EXCL_LINE
-      move_if_exists(
-          backup_dir / "holder.db-shm",
-          request.database_path.string() + "-shm"
-      ); // LCOV_EXCL_LINE
+      // LCOV_EXCL_START
+      move_if_exists(backup_dir / "holder.db-wal", request.database_path.string() + "-wal");
+      // LCOV_EXCL_STOP
+      // LCOV_EXCL_START
+      move_if_exists(backup_dir / "holder.db-shm", request.database_path.string() + "-shm");
+      // LCOV_EXCL_STOP
     }
     throw; // LCOV_EXCL_LINE
   } // LCOV_EXCL_LINE

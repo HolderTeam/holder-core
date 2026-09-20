@@ -3347,6 +3347,32 @@ TEST_CASE(
   );
   clear_expected_error();
 
+  REQUIRE(holder_resource_get(context, "missing-resource", &json, &error) == HOLDER_ERROR_RUNTIME);
+  REQUIRE(json == nullptr);
+  clear_expected_error();
+  REQUIRE(
+      holder_asset_put_json(context, "missing-resource", "{}", &json, &error) ==
+      HOLDER_ERROR_RUNTIME
+  );
+  REQUIRE(json == nullptr);
+  clear_expected_error();
+  REQUIRE(holder_location_get(context, "missing-location", &json, &error) == HOLDER_ERROR_RUNTIME);
+  REQUIRE(json == nullptr);
+  clear_expected_error();
+  REQUIRE(
+      holder_asset_import_file(
+          context,
+          "project-1",
+          "card-1",
+          "missing-location",
+          "/tmp/source",
+          &json,
+          &error
+      ) == HOLDER_ERROR_RUNTIME
+  );
+  REQUIRE(json == nullptr);
+  clear_expected_error();
+
   REQUIRE(holder_asset_get(context, "missing-asset", &json, &error) == HOLDER_ERROR_RUNTIME);
   clear_expected_error();
   REQUIRE(holder_resource_delete(context, "missing-resource", &error) == HOLDER_ERROR_RUNTIME);

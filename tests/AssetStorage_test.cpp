@@ -609,7 +609,19 @@ TEST_CASE("Asset import stores, links, deduplicates and retrieves", "[asset]") {
   location.project_id = project.project_id;
   location.name = "Local Assets";
   location.provider = "local_directory";
-  location.configuration = {{"prefix", "family"}};
+  std::string prefix;
+  std::string expected_prefix;
+  SECTION("plain prefix") {
+    prefix = "family";
+    expected_prefix = "family/";
+  }
+  SECTION("surrounding slashes") {
+    prefix = "///family///";
+    expected_prefix = "family/";
+  }
+  SECTION("only slashes") { prefix = "///"; }
+  SECTION("empty prefix") {}
+  location.configuration = {{"prefix", prefix}};
   location.created_at = 1;
   location.updated_at = 1;
   holder::resource::LocationRepo(db).put(location);
@@ -657,6 +669,21 @@ TEST_CASE("Asset import stores, links, deduplicates and retrieves", "[asset]") {
   REQUIRE(git.commits.size() == 1);
 
   const auto& placement = bundle->assets[0].placements[0];
+  REQUIRE(
+      placement.object_key ==
+      expected_prefix + project.project_id + "/" + first.asset_id + ".holderasset"
+  );
+  REQUIRE_THROWS_WITH(
+      importer.retrieve(
+          first.resource_id,
+          first.asset_id,
+          "missing-placement",
+          provider,
+          dir / "missing.jpg"
+      ),
+      Catch::Matchers::ContainsSubstring("placement not found in asset")
+  );
+  REQUIRE_FALSE(std::filesystem::exists(dir / "missing.jpg"));
   importer.retrieve(
       first.resource_id,
       first.asset_id,
@@ -684,6 +711,14 @@ TEST_CASE("Asset import stores, links, deduplicates and retrieves", "[asset]") {
   REQUIRE_FALSE(std::filesystem::exists(failed_destination));
   REQUIRE_FALSE(std::filesystem::exists(dir / "staging" / (placement.placement_id + ".download")));
 
+  db.exec("UPDATE cards SET rel_path = 'cards/wrong.md' WHERE card_id = 'card-1234';");
+  REQUIRE_THROWS_WITH(
+      holder::resource::ResourceStore(db, nullptr, &git).remove(first.resource_id),
+      Catch::Matchers::ContainsSubstring("card rel_path does not match card_id")
+  );
+  REQUIRE(holder::resource::ResourceRepo(db).get(first.resource_id).has_value());
+  REQUIRE(git.commits.size() == 1);
+  db.exec("UPDATE cards SET rel_path = '" + card.rel_path + "' WHERE card_id = 'card-1234';");
   holder::resource::ResourceStore(db, nullptr, &git).remove(first.resource_id);
   REQUIRE_FALSE(holder::resource::ResourceRepo(db).get(first.resource_id).has_value());
   REQUIRE(holder::card::LinkRepo(db).list_outgoing(project.project_id, card.card_id).empty());
