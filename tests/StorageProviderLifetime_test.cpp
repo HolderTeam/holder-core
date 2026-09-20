@@ -10,7 +10,6 @@
 #include <future>
 #include <memory>
 #include <string>
-#include <thread>
 #include <vector>
 
 namespace {
@@ -261,7 +260,7 @@ TEST_CASE(
     original->on_get = during_callback;
   }
   bool registrations_ok = true;
-  std::jthread worker([&] {
+  auto worker = std::async(std::launch::async, [&] {
     if (entered_future.wait_for(10s) == std::future_status::ready) {
       for (const auto& replacement : replacements)
         if (register_probe(name, replacement) != HOLDER_OK) registrations_ok = false;
@@ -290,7 +289,7 @@ TEST_CASE(
         std::string((std::istreambuf_iterator<char>(downloaded)), {}) == "provider lifetime bytes"
     );
   }
-  worker.join();
+  worker.get();
   REQUIRE(registrations_ok);
   REQUIRE(callback_synchronized);
   REQUIRE(retained_during_replacement);

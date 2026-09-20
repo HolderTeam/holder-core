@@ -831,6 +831,9 @@ TEST_CASE(
       std::istreambuf_iterator<char>(resource_file),
       std::istreambuf_iterator<char>()
   };
+  // Windows cannot delete these manifests while the test holds them open.
+  location_file.close();
+  resource_file.close();
   REQUIRE(location_raw.rfind("HolderPriv1\n", 0) == 0);
   REQUIRE(resource_raw.rfind("HolderPriv1\n", 0) == 0);
   REQUIRE(resource_raw.find("Boiler") == std::string::npos);
