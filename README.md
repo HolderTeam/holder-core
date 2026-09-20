@@ -142,9 +142,34 @@ HOLDER_CLANG_TIDY=/path/to/clang-tidy-18 \
 HOLDER_RUN_CLANG_TIDY=/path/to/run-clang-tidy-18 ./make.sh tidy
 ```
 
+On Fedora with GCC 16 headers, Clang 18 cannot parse the system C++ headers.
+Install Fedora's current analysis tools and select them explicitly:
+
+```sh
+sudo dnf install -y clang-tools-extra
+HOLDER_CLANG_TIDY=clang-tidy HOLDER_RUN_CLANG_TIDY=run-clang-tidy ./make.sh tidy
+```
+
 The repository's `.clang-tidy` enables analyzer and selected bug checks explicitly
 and treats their warnings as errors. Formatting requires `clang-format-18`,
 provided separately by `clang18-tools-extra` on Fedora.
+
+The normal suite includes a bounded, deterministic malformed-manifest corpus and
+concurrent storage-provider replacement checks, tagged `[stress]`. The corpus
+tries every truncated prefix and 512 byte mutations of each resource/location
+manifest; successful parses must round-trip to stable canonical manifests.
+The provider test performs 128 replacements while an import/retrieval callback
+is active and checks cleanup ownership. Run these alongside Git concurrency tests:
+
+```sh
+./build/tests/holder_core_tests '[stress],[concurrency]'
+ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+  ./build-san/tests/holder_core_tests '[stress],[concurrency]'
+```
+
+The second command requires a preceding ASan/UBSan build, rather than a thread
+sanitizer build in `build-san`. `./make.sh san thread` includes these tests too.
+These bounded checks complement sanitizers; they are not exhaustive fuzzing.
 
 ### Moving an existing checkout between systems
 
