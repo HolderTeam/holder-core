@@ -1,0 +1,5 @@
+# Invalid-value tests deliberately exercise fixed-underlying-type enums, and Catch2
+# combines enum flags. The opt-in enum-range checker reports both as errors.
+Checks: '-*,clang-analyzer-*,-clang-analyzer-optin.core.EnumCastOutOfRange,bugprone-use-after-move,bugprone-dangling-handle,bugprone-infinite-loop,bugprone-sizeof-expression,bugprone-suspicious-memory-comparison,bugprone-undefined-memory-manipulation'
+WarningsAsErrors: '*'
+HeaderFilterRegex: '(^|/)(src|include)/'

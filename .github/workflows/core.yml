@@ -71,6 +71,12 @@ jobs:
       - name: Install
         run: cmake --install build --prefix out/install/linux
 
+      - name: Verify installed package
+        run: |
+          cmake -S tests/installed-consumer -B out/consumer -DCMAKE_PREFIX_PATH="${{ github.workspace }}/out/install/linux"
+          cmake --build out/consumer --parallel
+          ctest --test-dir out/consumer --output-on-failure
+
       - name: Coverage
         run: ./make.sh coverage
 
@@ -128,6 +134,12 @@ jobs:
       - name: Install
         run: cmake --install build --prefix out/install/macos
 
+      - name: Verify installed package
+        run: |
+          cmake -S tests/installed-consumer -B out/consumer -DCMAKE_PREFIX_PATH="${{ github.workspace }}/out/install/macos;$(brew --prefix);$(brew --prefix openssl@3)"
+          cmake --build out/consumer --parallel
+          ctest --test-dir out/consumer --output-on-failure
+
   windows:
     runs-on: windows-latest
 
@@ -178,3 +190,16 @@ jobs:
 
       - name: Install
         run: cmake --install out/build/windows-vcpkg-debug --prefix out/install/windows
+
+      - name: Verify installed package
+        shell: pwsh
+        run: |
+          cmake -S tests/installed-consumer -B out/consumer -G Ninja -DCMAKE_BUILD_TYPE=Debug `
+            "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            "-DVCPKG_INSTALLED_DIR=${{ github.workspace }}/../.vcpkg-holder-core" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows -DVCPKG_MANIFEST_MODE=OFF `
+            "-DCMAKE_PREFIX_PATH=${{ github.workspace }}/out/install/windows"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build out/consumer --parallel
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ctest --test-dir out/consumer --output-on-failure

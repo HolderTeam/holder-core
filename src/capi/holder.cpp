@@ -159,8 +159,9 @@ nlohmann::json project_to_json(const holder::model::Project& project) {
       {"name", project.name},
       {"root_path", project.root_path},
       {"privacy_mode", project.privacy_mode},
-      {"id_scheme", holder::model::to_string(project.id_scheme)
-      }, // LCOV_EXCL_LINE - gcov artefact: multi-line initializer is executed but never counted.
+      // LCOV_EXCL_START - gcov artefact: multi-line initializer is executed but never counted.
+      {"id_scheme", holder::model::to_string(project.id_scheme)},
+      // LCOV_EXCL_STOP
       {"created_at", project.created_at},
       {"updated_at", project.updated_at},
   };
@@ -412,8 +413,8 @@ holder::resource::StorageErrorCode storage_error_code_from_int(int value) {
   }
 }
 
-// Owns a C-ABI storage provider's user_data/destroy_user_data pair for exactly as long as
-// it's installed in the registry below -- see holder_storage_provider_register's ownership
+// Owns a C-ABI storage provider's user_data/destroy_user_data pair while registered or
+// retained by an in-flight operation -- see holder_storage_provider_register's ownership
 // contract in holder.h. Implements holder::resource::StorageProvider by calling the C
 // callbacks and translating a nonzero return into a typed StorageError, the same shape
 // CApiKeyringProviderHandle uses for the keyring seam.
@@ -530,31 +531,21 @@ std::map<std::string, std::shared_ptr<CApiStorageProviderHandle>>& storage_provi
 // holder-desktop's own local-storage Location provider string (see
 // resources_tool_view.vala) -- Locations are portable/git-synced, so a client-specific
 // name here would silently fail to resolve a Location another client created.
-holder::resource::StorageProvider& resolve_storage_provider(
+std::shared_ptr<holder::resource::StorageProvider> resolve_storage_provider(
     holder_context* context,
     const std::string& provider_name
 ) {
   if (provider_name == "local_directory") {
-    static std::mutex local_mutex;
-    static std::
-        map<std::filesystem::path, std::unique_ptr<holder::resource::LocalDirectoryProvider>>
-            local_by_root;
-    const auto root = context->data_dir / "resource-store";
-    std::lock_guard<std::mutex> lock(local_mutex);
-    auto it = local_by_root.find(root);
-    if (it == local_by_root.end()) {
-      it = local_by_root
-               .emplace(root, std::make_unique<holder::resource::LocalDirectoryProvider>(root))
-               .first;
-    }
-    return *it->second;
+    return std::make_shared<holder::resource::LocalDirectoryProvider>(
+        context->data_dir / "resource-store"
+    );
   }
   std::lock_guard<std::mutex> lock(storage_provider_registry_mutex());
   auto it = storage_provider_registry().find(provider_name);
   if (it == storage_provider_registry().end()) {
     throw std::runtime_error("no storage provider registered for: " + provider_name);
   }
-  return *it->second;
+  return it->second;
 }
 
 int return_json(const nlohmann::json& body, char** out_json, holder_error** out_error) {
@@ -739,15 +730,17 @@ holder::card::MilestoneUpdate milestone_update_from_json(const nlohmann::json& b
   holder::card::MilestoneUpdate update;
   if (body.contains("start_at")) {
     if (body.at("start_at").is_null()) {
-      throw std::invalid_argument("start_at must not be null"
-      ); // LCOV_EXCL_LINE - C ABI validates null before helper dispatch.
+      // LCOV_EXCL_START - C ABI validates null before helper dispatch.
+      throw std::invalid_argument("start_at must not be null");
+      // LCOV_EXCL_STOP
     }
     update.start_at = body.at("start_at").get<long long>();
   }
   if (body.contains("all_day")) {
     if (body.at("all_day").is_null()) {
-      throw std::invalid_argument("all_day must not be null"
-      ); // LCOV_EXCL_LINE - C ABI validates null before helper dispatch.
+      // LCOV_EXCL_START - C ABI validates null before helper dispatch.
+      throw std::invalid_argument("all_day must not be null");
+      // LCOV_EXCL_STOP
     }
     update.all_day = body.at("all_day").get<bool>();
   }
@@ -1480,16 +1473,16 @@ int holder_storage_provider_register(
         user_data,
         destroy_user_data
     );
-    // LCOV_EXCL_START
   } catch (const std::bad_alloc&) {
+    // Allocation failed before the handle could take the unconditionally transferred data.
+    if (destroy_user_data != nullptr) destroy_user_data(user_data);
     return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
   }
-  // LCOV_EXCL_STOP
 
   if (provider_name == nullptr || provider_name[0] == '\0') {
     return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "provider_name must not be empty");
   }
-  if (std::string(provider_name) == "local_directory") {
+  if (std::strcmp(provider_name, "local_directory") == 0) {
     return set_error(
         out_error,
         HOLDER_ERROR_INVALID_ARGUMENT,
@@ -1505,8 +1498,12 @@ int holder_storage_provider_register(
   }
 
   try {
-    std::lock_guard<std::mutex> lock(storage_provider_registry_mutex());
-    storage_provider_registry()[provider_name] = std::move(handle);
+    {
+      std::lock_guard<std::mutex> lock(storage_provider_registry_mutex());
+      storage_provider_registry()[provider_name].swap(handle);
+    }
+    // Retire the previous provider outside the lock: its cleanup callback may reenter
+    // registration. Active operations keep their own shared ownership until completion.
     return HOLDER_OK;
     // LCOV_EXCL_START
   } catch (const std::bad_alloc&) {
@@ -1556,8 +1553,8 @@ int holder_asset_import_file(
         context->data_dir / "server" / "asset-staging",
         holder::identity::uuid_v4
     );
-    auto& provider = resolve_storage_provider(context, location->provider);
-    const auto result = service.import_file(request, provider);
+    const auto provider = resolve_storage_provider(context, location->provider);
+    const auto result = service.import_file(request, *provider);
     return nlohmann::json{
         {"resource_id", result.resource_id},
         {"asset_id", result.asset_id},
@@ -1612,12 +1609,12 @@ int holder_asset_retrieve(
         context->data_dir / "server" / "asset-staging",
         holder::identity::uuid_v4
     );
-    auto& provider = resolve_storage_provider(context, location->provider);
+    const auto provider = resolve_storage_provider(context, location->provider);
     service.retrieve(
         resource_id,
         asset_id,
         placement_id,
-        provider,
+        *provider,
         std::filesystem::path(destination_file_path)
     );
   });
@@ -2196,9 +2193,9 @@ int holder_card_move_json(
 
     const auto moved = card_repo.get(card_id);
     if (!moved.has_value()) {
-      throw std::runtime_error(
-          "card not found after move: " + std::string(card_id)
-      ); // LCOV_EXCL_LINE
+      // LCOV_EXCL_START
+      throw std::runtime_error("card not found after move: " + std::string(card_id));
+      // LCOV_EXCL_STOP
     }
 
     nlohmann::json response;
@@ -2471,11 +2468,9 @@ int holder_card_update_content(
       // CardStore::update_content above already throws "card not found" for this exact
       // condition, so this branch is unreachable given the current implementation -- kept as
       // defense-in-depth in case that invariant ever changes.
-      return set_error(
-          out_error,
-          HOLDER_ERROR_RUNTIME,
-          "card not found: " + std::string(card_id)
-      ); // LCOV_EXCL_LINE
+      // LCOV_EXCL_START
+      return set_error(out_error, HOLDER_ERROR_RUNTIME, "card not found: " + std::string(card_id));
+      // LCOV_EXCL_STOP
     }
 
     auto* out = duplicate_string(card_to_json(updated.value()).dump());
@@ -3792,12 +3787,11 @@ int holder_git_set_ssh_signer(
   std::shared_ptr<CApiSshSignerHandle> handle;
   try {
     handle = std::make_shared<CApiSshSignerHandle>(user_data, destroy_user_data);
-    // LCOV_EXCL_START
   } catch (const std::bad_alloc&) {
-    // user_data was never captured; nothing to release.
+    // Allocation failed before the handle could take the unconditionally transferred data.
+    if (destroy_user_data != nullptr) destroy_user_data(user_data);
     return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
   }
-  // LCOV_EXCL_STOP
 
   if (context == nullptr) {
     return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
@@ -3934,8 +3928,9 @@ int holder_git_test_remote(
       );
     }
     const auto& project = project_opt.value();
+    // GCC misses this ternary arm; git_test_remote's explicit-branch test asserts its value.
     const std::string resolved_branch = (branch != nullptr && branch[0] != '\0')
-                                            ? std::string(branch)
+                                            ? std::string(branch) // LCOV_EXCL_LINE
                                             : "local_default";
 
     nlohmann::json body = {
@@ -4002,8 +3997,9 @@ int holder_git_probe_remote_url(
 
     nlohmann::json body = {
         {"url", url},
-        {"status", holder::git::remote_probe_status_name(probe.status)
-        }, // LCOV_EXCL_LINE - gcov artefact: multi-line initializer is executed but never counted.
+        // LCOV_EXCL_START - gcov artefact: multi-line initializer is executed but never counted.
+        {"status", holder::git::remote_probe_status_name(probe.status)},
+        // LCOV_EXCL_STOP
         {"remote_has_head", probe.remote_has_head},
         {"error_message",
          probe.error_message.empty() ? nlohmann::json(nullptr) : nlohmann::json(probe.error_message)
@@ -4404,10 +4400,12 @@ int holder_git_sync_now(
         {"push_attempted", false},
         {"push_status", nullptr},
         {"push_error", nullptr},
-        {"push_ahead_count", 0
-        }, // LCOV_EXCL_LINE - gcov artefact: multi-line initializer is executed but never counted.
-        {"push_behind_count", 0
-        }, // LCOV_EXCL_LINE - gcov artefact: multi-line initializer is executed but never counted.
+        // LCOV_EXCL_START - gcov artefact: multi-line initializer is executed but never counted.
+        {"push_ahead_count", 0},
+        // LCOV_EXCL_STOP
+        // LCOV_EXCL_START - gcov artefact: multi-line initializer is executed but never counted.
+        {"push_behind_count", 0},
+        // LCOV_EXCL_STOP
         {"push_local_head_commit", nullptr},
     };
 
@@ -4482,11 +4480,11 @@ int holder_keyring_set_provider(
   std::shared_ptr<CApiKeyringProviderHandle> handle;
   try {
     handle = std::make_shared<CApiKeyringProviderHandle>(user_data, destroy_user_data);
-    // LCOV_EXCL_START
   } catch (const std::bad_alloc&) {
+    // Allocation failed before the handle could take the unconditionally transferred data.
+    if (destroy_user_data != nullptr) destroy_user_data(user_data);
     return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
   }
-  // LCOV_EXCL_STOP
 
   if (lookup_fn == nullptr || store_fn == nullptr || remove_fn == nullptr) {
     return set_error(

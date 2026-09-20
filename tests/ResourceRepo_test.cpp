@@ -32,6 +32,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <random>
 #include <string>
 
 #include <sqlite3.h>
@@ -607,6 +608,9 @@ TEST_CASE("Resource and Location repositories report nested sqlite scan failures
   CHECK(observes_sqlite_failure(db, "find asset hash failed", [&] {
     (void)resources.find_by_asset_hash("project-1234", std::string(64, 'a'));
   }));
+  CHECK(observes_sqlite_failure(db, "list card resources failed", [&] {
+    (void)resources.list_for_card("project-1234", "card-1234");
+  }));
   CHECK(observes_sqlite_failure(db, "list resources failed", [&] {
     (void)resources.list("project-1234");
   }));
@@ -827,6 +831,9 @@ TEST_CASE(
       std::istreambuf_iterator<char>(resource_file),
       std::istreambuf_iterator<char>()
   };
+  // Windows cannot delete these manifests while the test holds them open.
+  location_file.close();
+  resource_file.close();
   REQUIRE(location_raw.rfind("HolderPriv1\n", 0) == 0);
   REQUIRE(resource_raw.rfind("HolderPriv1\n", 0) == 0);
   REQUIRE(resource_raw.find("Boiler") == std::string::npos);
@@ -853,7 +860,19 @@ TEST_CASE(
   );
   holder::resource::ResourceStore(db, nullptr, &git).remove("resource-1234");
   REQUIRE_FALSE(holder::resource::ResourceRepo(db).get("resource-1234").has_value());
+  REQUIRE_FALSE(
+      std::filesystem::exists(project_root / holder::resource::resource_rel_path("resource-1234"))
+  );
+  holder::store::Rebuilder(db, nullptr).rebuild_project(project);
+  REQUIRE_FALSE(holder::resource::ResourceRepo(db).get("resource-1234").has_value());
+  REQUIRE(holder::resource::LocationRepo(db).get("location-1234").has_value());
   holder::resource::LocationStore(db, nullptr, &git).remove("location-1234");
+  REQUIRE_FALSE(holder::resource::LocationRepo(db).get("location-1234").has_value());
+  REQUIRE_FALSE(
+      std::filesystem::exists(project_root / holder::resource::location_rel_path("location-1234"))
+  );
+  holder::store::Rebuilder(db, nullptr).rebuild_project(project);
+  REQUIRE_FALSE(holder::resource::ResourceRepo(db).get("resource-1234").has_value());
   REQUIRE_FALSE(holder::resource::LocationRepo(db).get("location-1234").has_value());
 }
 
@@ -971,4 +990,57 @@ TEST_CASE(
         Catch::Matchers::ContainsSubstring("delete failed")
     );
   }
+}
+
+TEST_CASE(
+    "Manifest parsers withstand a bounded deterministic mutation corpus",
+    "[resource][stress]"
+) {
+  std::mt19937 random(0x484f4c44);
+  std::size_t accepted = 0;
+  std::size_t rejected = 0;
+  const auto exercise = [&](const std::string& seed, auto parse, auto render) {
+    std::vector<std::string> corpus{seed, "", "null", "[]", "{}", std::string(128, '[')};
+    for (std::size_t end = 0; end < seed.size(); ++end)
+      corpus.push_back(seed.substr(0, end));
+    for (int iteration = 0; iteration < 512; ++iteration) {
+      auto input = seed;
+      const auto edits = 1 + random() % 8;
+      for (unsigned int edit = 0; edit < edits; ++edit) {
+        const auto offset = random() % input.size();
+        input[offset] = static_cast<char>(random() % 256);
+      }
+      corpus.push_back(std::move(input));
+    }
+    for (std::size_t index = 0; index < corpus.size(); ++index) {
+      INFO("mutation seed 0x484f4c44, case " << index);
+      std::optional<decltype(parse(seed))> parsed;
+      try {
+        parsed = parse(corpus[index]);
+      } catch (const nlohmann::json::exception&) {
+        ++rejected;
+        continue;
+      } catch (const std::runtime_error&) {
+        ++rejected;
+        continue;
+      }
+      ++accepted;
+      // Successful parses must produce a stable, valid durable representation.
+      // Keep assertions outside the parser's exception handler.
+      const auto canonical = render(*parsed);
+      REQUIRE(render(parse(canonical)) == canonical);
+    }
+  };
+  exercise(
+      holder::resource::render_resource_manifest(sample_bundle()),
+      holder::resource::parse_resource_manifest,
+      holder::resource::render_resource_manifest
+  );
+  exercise(
+      holder::resource::render_location_manifest(sample_location()),
+      holder::resource::parse_location_manifest,
+      holder::resource::render_location_manifest
+  );
+  REQUIRE(accepted >= 2);
+  REQUIRE(rejected > 1000);
 }

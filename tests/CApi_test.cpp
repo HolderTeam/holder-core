@@ -31,6 +31,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <string>
@@ -570,8 +571,14 @@ TEST_CASE("C API creates a plain project defaulting root_path and privacy_mode",
       holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
   );
 
+  const char* privacy_mode = nullptr;
+  SECTION("null privacy mode uses the default") {}
+  SECTION("empty privacy mode uses the default") { privacy_mode = ""; }
+  SECTION("explicit plain privacy mode") { privacy_mode = "plain"; }
   char* json = nullptr;
-  REQUIRE(holder_project_create(context, "Home", nullptr, nullptr, &json, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_project_create(context, "Home", nullptr, privacy_mode, &json, &error) == HOLDER_OK
+  );
   REQUIRE(json != nullptr);
   REQUIRE(error == nullptr);
 
@@ -3346,6 +3353,32 @@ TEST_CASE(
   );
   clear_expected_error();
 
+  REQUIRE(holder_resource_get(context, "missing-resource", &json, &error) == HOLDER_ERROR_RUNTIME);
+  REQUIRE(json == nullptr);
+  clear_expected_error();
+  REQUIRE(
+      holder_asset_put_json(context, "missing-resource", "{}", &json, &error) ==
+      HOLDER_ERROR_RUNTIME
+  );
+  REQUIRE(json == nullptr);
+  clear_expected_error();
+  REQUIRE(holder_location_get(context, "missing-location", &json, &error) == HOLDER_ERROR_RUNTIME);
+  REQUIRE(json == nullptr);
+  clear_expected_error();
+  REQUIRE(
+      holder_asset_import_file(
+          context,
+          "project-1",
+          "card-1",
+          "missing-location",
+          "/tmp/source",
+          &json,
+          &error
+      ) == HOLDER_ERROR_RUNTIME
+  );
+  REQUIRE(json == nullptr);
+  clear_expected_error();
+
   REQUIRE(holder_asset_get(context, "missing-asset", &json, &error) == HOLDER_ERROR_RUNTIME);
   clear_expected_error();
   REQUIRE(holder_resource_delete(context, "missing-resource", &error) == HOLDER_ERROR_RUNTIME);
@@ -4944,10 +4977,19 @@ TEST_CASE("C API git_test_remote reports remote_unset when unconfigured", "[capi
       holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
   );
 
+  const char* branch = nullptr;
+  std::string expected_branch = "local_default";
+  SECTION("default branch") {}
+  SECTION("empty branch") { branch = ""; }
+  SECTION("explicit branch") {
+    branch = "release";
+    expected_branch = "release";
+  }
   char* json = nullptr;
-  REQUIRE(holder_git_test_remote(context, "project-1", nullptr, &json, &error) == HOLDER_OK);
+  REQUIRE(holder_git_test_remote(context, "project-1", branch, &json, &error) == HOLDER_OK);
   const auto body = nlohmann::json::parse(json);
   REQUIRE(body["status"] == "remote_unset");
+  REQUIRE(body["branch"] == expected_branch);
   REQUIRE(body["remote_has_head"] == false);
   REQUIRE_FALSE(body["error_message"].is_null());
 
@@ -5318,6 +5360,8 @@ TEST_CASE(
   json = nullptr;
   REQUIRE(holder_card_list(peer_b, "project-1", &json, &error) == HOLDER_OK);
   const auto cards = nlohmann::json::parse(json);
+  holder_string_free(json);
+  json = nullptr;
   REQUIRE(cards.size() == 4);
 
   std::optional<std::string> conflicted_copy_id;
@@ -5515,6 +5559,7 @@ TEST_CASE(
     REQUIRE(first_destroy_count == 1); // unchanged
   }
 
+  holder_error_destroy(error);
   if (context != nullptr) {
     holder_context_destroy(context);
   }
@@ -6001,6 +6046,7 @@ TEST_CASE(
       ) == HOLDER_ERROR_INVALID_ARGUMENT
   );
   REQUIRE(destroy_count == 1);
+  holder_error_destroy(error);
 
   holder::privacy::platform_keyring_clear_external_provider();
 }
@@ -6384,19 +6430,21 @@ TEST_CASE(
   }
 
   REQUIRE(destroy_count == 1);
+  holder_error_destroy(error);
 }
 
 TEST_CASE(
     "C API storage_provider_register destroys user_data exactly once on replace",
     "[capi][resource]"
 ) {
-  int first_destroy_count = 0;
-  int second_destroy_count = 0;
-  auto destroy_first = [](void* user_data) {
-    *static_cast<int*>(user_data) += 1;
-  };
-  auto destroy_second = [](void* user_data) {
-    *static_cast<int*>(user_data) += 1;
+  // The registry can retain a provider until process exit, even if an assertion fails.
+  // Give each provider shared ownership of its counter instead of a pointer into this stack.
+  auto first_destroy_count = std::make_shared<int>(0);
+  auto second_destroy_count = std::make_shared<int>(0);
+  auto destroy = [](void* user_data) {
+    const std::unique_ptr<std::shared_ptr<int>> count(static_cast<std::shared_ptr<int>*>(user_data)
+    );
+    ++**count;
   };
   holder_error* error = nullptr;
 
@@ -6407,12 +6455,12 @@ TEST_CASE(
           fake_storage_get,
           fake_storage_exists,
           fake_storage_remove,
-          &first_destroy_count,
-          destroy_first,
+          new std::shared_ptr<int>(first_destroy_count),
+          destroy,
           &error
       ) == HOLDER_OK
   );
-  REQUIRE(first_destroy_count == 0);
+  REQUIRE(*first_destroy_count == 0);
 
   REQUIRE(
       holder_storage_provider_register(
@@ -6421,13 +6469,13 @@ TEST_CASE(
           fake_storage_get,
           fake_storage_exists,
           fake_storage_remove,
-          &second_destroy_count,
-          destroy_second,
+          new std::shared_ptr<int>(second_destroy_count),
+          destroy,
           &error
       ) == HOLDER_OK
   );
-  REQUIRE(first_destroy_count == 1);
-  REQUIRE(second_destroy_count == 0);
+  REQUIRE(*first_destroy_count == 1);
+  REQUIRE(*second_destroy_count == 0);
 }
 
 TEST_CASE(
@@ -7016,6 +7064,8 @@ TEST_CASE(
       holder_recovery_token_export(context, "project-1", "", &json, &error) ==
       HOLDER_ERROR_INVALID_ARGUMENT
   );
+  holder_error_destroy(error);
+  error = nullptr;
 
   REQUIRE(
       holder_recovery_token_export(context, "project-1", "1234", &json, &error) ==
@@ -9284,6 +9334,34 @@ TEST_CASE(
   );
   holder_error_destroy(error);
   error = nullptr;
+
+  {
+    // A damaged projection may retain a placement whose location has disappeared.
+    holder::platform::Db damaged;
+    damaged.open(data_dir / "server" / "holder.db");
+    damaged.exec("PRAGMA foreign_keys=OFF;");
+    damaged.exec(
+        "UPDATE asset_placements SET location_id = 'missing-location' WHERE placement_id = 'placement-1234';"
+    );
+    const auto destination = data_dir / "missing-location-download";
+    REQUIRE(
+        holder_asset_retrieve(
+            context,
+            "resource-1234",
+            "asset-1234",
+            "placement-1234",
+            destination.string().c_str(),
+            &error
+        ) == HOLDER_ERROR_RUNTIME
+    );
+    REQUIRE(std::string(holder_error_message(error)) == "location not found: missing-location");
+    REQUIRE_FALSE(std::filesystem::exists(destination));
+    holder_error_destroy(error);
+    error = nullptr;
+    damaged.exec(
+        "UPDATE asset_placements SET location_id = 'location-1234' WHERE placement_id = 'placement-1234';"
+    );
+  }
 
   json = nullptr;
   REQUIRE(holder_asset_delete(context, "asset-5678", &json, &error) == HOLDER_OK);

@@ -937,8 +937,10 @@ typedef int (*holder_storage_remove_fn)(
 //
 // OWNERSHIP: unconditional from the moment this is called, exactly like
 // holder_keyring_set_provider -- destroy_user_data runs exactly once, either immediately if
-// this call fails for any reason, or later when a subsequent call for the same
-// provider_name replaces this provider.
+// this call fails for any reason, or after a subsequent registration replaces this
+// provider and all in-flight asset operations using it finish (or at process exit).
+// Replacement does not interrupt active operations. Cleanup runs without the registry
+// lock held, so it may register another provider when triggered by replacement.
 int holder_storage_provider_register(
     const char* provider_name,
     holder_storage_put_fn put_fn,

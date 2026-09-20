@@ -6,6 +6,23 @@ if(NOT Catch2_FOUND)
   find_package(Catch2 REQUIRED)
 endif()
 
+# Exercise unconditional C ABI callback ownership even when make_shared fails.
+# Linker wrapping keeps allocation fault injection out of the main test process.
+# _Znwm is operator new(size_t) in the 64-bit Itanium C++ ABI.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SIZEOF_VOID_P EQUAL 8
+   AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  add_executable(holder_core_allocation_tests CApiAllocation_test.cpp)
+  target_link_libraries(holder_core_allocation_tests PRIVATE Holder::Core)
+  target_link_options(holder_core_allocation_tests PRIVATE "LINKER:--wrap=_Znwm")
+  if(HOLDER_CORE_TSAN_USE_SETARCH)
+    find_program(SETARCH_EXECUTABLE setarch REQUIRED)
+    add_test(NAME "C API allocation failures release callback data"
+      COMMAND ${SETARCH_EXECUTABLE} ${CMAKE_SYSTEM_PROCESSOR} -R $<TARGET_FILE:holder_core_allocation_tests>)
+  else()
+    add_test(NAME "C API allocation failures release callback data" COMMAND holder_core_allocation_tests)
+  endif()
+endif()
+
 if(TARGET Catch2::Catch2)
   include(Catch)
 endif()
@@ -67,6 +84,7 @@ add_executable(holder_core_tests
   ResourceRepo_test.cpp
   SecretStore_test.cpp
   StartupRecovery_test.cpp
+  StorageProviderLifetime_test.cpp
   TagExtractor_test.cpp
   TagLineEditor_test.cpp
   TagRepo_test.cpp

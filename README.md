@@ -70,7 +70,7 @@ Optional compiler caching and coverage tools:
 sudo dnf install -y ccache lcov gcovr
 ```
 
-Optional memory checks and LLVM 18 analysis/formatting tools:
+Optional memory checks and Clang 18 analysis/formatting tools:
 
 ```sh
 sudo dnf install -y valgrind libasan libubsan libtsan clang18-tools-extra
@@ -112,17 +112,64 @@ pass the build type after the sanitizer list for `san`.
 
 Valgrind reports definite and possible leaks, tracks uninitialized values, and
 returns failure for detected memory errors. `HOLDER_CTEST_TIMEOUT` overrides
-the per-test timeout: 300 seconds for Valgrind and the single ThreadSanitizer
-suite, 30 seconds for individual ASan/UBSan tests. Set
+the per-test timeout: 900 seconds for Valgrind (including the 5 MB encryption
+round trip), 300 seconds for the single ThreadSanitizer suite, and 30 seconds
+for individual ASan/UBSan tests. Set
 `HOLDER_SAN_DETECT_LEAKS=1` to enable ASan leak detection. On Linux, the
 ThreadSanitizer suite runs through `setarch -R`, as in holder-daemon.
 
-`tidy` prefers `clang-tidy-18` and supports Fedora's `run-clang-tidy-18` name,
-with unversioned tools as a fallback. Set `HOLDER_CLANG_TIDY` and
-`HOLDER_RUN_CLANG_TIDY` to select another installed version. On this Fedora 45
-setup, Clang 18 reports errors in GCC 16's standard-library headers; use a
-compatible newer Clang toolchain for analysis. Formatting requires
-`clang-format-18`.
+On Fedora 45, the uninstrumented glibc timezone code can report a race inside
+`tzset_internal` during concurrent libgit2 signature creation. The narrowly scoped
+`tools/tsan/glibc.supp` documents glibc's internal lock and the instrumentation
+limitation. Opt in only for that report, using an absolute path because CTest
+runs from the test build directory:
+
+```sh
+HOLDER_TSAN_SUPPRESSIONS="$PWD/tools/tsan/glibc.supp" ./make.sh san thread
+```
+
+Clang 18 is the project's supported/default tidy version. `./make.sh tidy`
+requires `clang-tidy-18` and `run-clang-tidy-18` on `PATH`; it never automatically
+selects unversioned tools or another version. Fedora's `clang18-tools-extra`
+package supplies both executables. If either is missing, the command fails with
+installation guidance before configuring the build.
+
+Explicit executable overrides remain available through `HOLDER_CLANG_TIDY` and
+`HOLDER_RUN_CLANG_TIDY`, for example for a Clang 18 installation outside `PATH`:
+
+```sh
+HOLDER_CLANG_TIDY=/path/to/clang-tidy-18 \
+HOLDER_RUN_CLANG_TIDY=/path/to/run-clang-tidy-18 ./make.sh tidy
+```
+
+On Fedora with GCC 16 headers, Clang 18 cannot parse the system C++ headers.
+Install Fedora's current analysis tools and select them explicitly:
+
+```sh
+sudo dnf install -y clang-tools-extra
+HOLDER_CLANG_TIDY=clang-tidy HOLDER_RUN_CLANG_TIDY=run-clang-tidy ./make.sh tidy
+```
+
+The repository's `.clang-tidy` enables analyzer and selected bug checks explicitly
+and treats their warnings as errors. Formatting requires `clang-format-18`,
+provided separately by `clang18-tools-extra` on Fedora.
+
+The normal suite includes a bounded, deterministic malformed-manifest corpus and
+concurrent storage-provider replacement checks, tagged `[stress]`. The corpus
+tries every truncated prefix and 512 byte mutations of each resource/location
+manifest; successful parses must round-trip to stable canonical manifests.
+The provider test performs 128 replacements while an import/retrieval callback
+is active and checks cleanup ownership. Run these alongside Git concurrency tests:
+
+```sh
+./build/tests/holder_core_tests '[stress],[concurrency]'
+ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+  ./build-san/tests/holder_core_tests '[stress],[concurrency]'
+```
+
+The second command requires a preceding ASan/UBSan build, rather than a thread
+sanitizer build in `build-san`. `./make.sh san thread` includes these tests too.
+These bounded checks complement sanitizers; they are not exhaustive fuzzing.
 
 ### Moving an existing checkout between systems
 

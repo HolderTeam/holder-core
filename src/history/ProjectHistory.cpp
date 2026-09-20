@@ -40,8 +40,9 @@ std::optional<std::string> milestone_summary(const std::vector<holder::model::Mi
 ) {
   if (milestones.empty()) return std::nullopt;
   constexpr std::size_t kShownMilestones = 3;
+  // GCC misses this ternary arm; the historical-object detail test asserts the singular text.
   std::string summary = milestones.size() == 1
-                            ? "Milestone: "
+                            ? "Milestone: " // LCOV_EXCL_LINE
                             : "Milestones (" + std::to_string(milestones.size()) + "): ";
   for (std::size_t index = 0; index < milestones.size() && index < kShownMilestones; ++index) {
     if (index > 0) summary += ", ";
@@ -81,8 +82,9 @@ std::optional<std::string> resource_attachment_summary(const holder::model::Reso
 ) {
   if (bundle.assets.empty()) return std::nullopt;
   constexpr std::size_t kShownAttachmentNames = 3;
+  // GCC misses this ternary arm; the historical-object detail test asserts the singular text.
   std::string summary = bundle.assets.size() == 1
-                            ? "Attachment: "
+                            ? "Attachment: " // LCOV_EXCL_LINE
                             : "Attachments (" + std::to_string(bundle.assets.size()) + "): ";
   for (std::size_t index = 0; index < bundle.assets.size() && index < kShownAttachmentNames;
        ++index) {
