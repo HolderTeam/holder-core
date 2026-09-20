@@ -4971,10 +4971,19 @@ TEST_CASE("C API git_test_remote reports remote_unset when unconfigured", "[capi
       holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
   );
 
+  const char* branch = nullptr;
+  std::string expected_branch = "local_default";
+  SECTION("default branch") {}
+  SECTION("empty branch") { branch = ""; }
+  SECTION("explicit branch") {
+    branch = "release";
+    expected_branch = "release";
+  }
   char* json = nullptr;
-  REQUIRE(holder_git_test_remote(context, "project-1", nullptr, &json, &error) == HOLDER_OK);
+  REQUIRE(holder_git_test_remote(context, "project-1", branch, &json, &error) == HOLDER_OK);
   const auto body = nlohmann::json::parse(json);
   REQUIRE(body["status"] == "remote_unset");
+  REQUIRE(body["branch"] == expected_branch);
   REQUIRE(body["remote_has_head"] == false);
   REQUIRE_FALSE(body["error_message"].is_null());
 
@@ -9319,6 +9328,34 @@ TEST_CASE(
   );
   holder_error_destroy(error);
   error = nullptr;
+
+  {
+    // A damaged projection may retain a placement whose location has disappeared.
+    holder::platform::Db damaged;
+    damaged.open(data_dir / "server" / "holder.db");
+    damaged.exec("PRAGMA foreign_keys=OFF;");
+    damaged.exec(
+        "UPDATE asset_placements SET location_id = 'missing-location' WHERE placement_id = 'placement-1234';"
+    );
+    const auto destination = data_dir / "missing-location-download";
+    REQUIRE(
+        holder_asset_retrieve(
+            context,
+            "resource-1234",
+            "asset-1234",
+            "placement-1234",
+            destination.string().c_str(),
+            &error
+        ) == HOLDER_ERROR_RUNTIME
+    );
+    REQUIRE(std::string(holder_error_message(error)) == "location not found: missing-location");
+    REQUIRE_FALSE(std::filesystem::exists(destination));
+    holder_error_destroy(error);
+    error = nullptr;
+    damaged.exec(
+        "UPDATE asset_placements SET location_id = 'location-1234' WHERE placement_id = 'placement-1234';"
+    );
+  }
 
   json = nullptr;
   REQUIRE(holder_asset_delete(context, "asset-5678", &json, &error) == HOLDER_OK);

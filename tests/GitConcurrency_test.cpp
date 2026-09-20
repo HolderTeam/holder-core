@@ -16,6 +16,7 @@
 #include "project/ProjectRepo.h"
 
 #include <git2.h>
+#include <spdlog/spdlog.h>
 
 #include <atomic>
 #include <chrono>
@@ -316,6 +317,11 @@ TEST_CASE(
   // project (which acquires that project's lock for the CardStore's lifetime)
   // and then waits on a barrier; the barrier can only complete if the locks are
   // independent.
+  // spdlog's system-library singleton uses a C++ static guard, whose fast path
+  // is invisible to TSan in an uninstrumented shared library. Initialize it on
+  // this thread so worker creation establishes an observable happens-before
+  // edge even when this is the first test in a randomized run.
+  REQUIRE(spdlog::default_logger() != nullptr);
   constexpr int kProjects = 6;
   const std::string sql = schema_sql();
 
