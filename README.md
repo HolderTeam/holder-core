@@ -70,10 +70,10 @@ Optional compiler caching and coverage tools:
 sudo dnf install -y ccache lcov gcovr
 ```
 
-Optional memory checks, static analysis, and LLVM 18 formatting tools:
+Optional memory checks and Clang 18 analysis/formatting tools:
 
 ```sh
-sudo dnf install -y valgrind libasan libubsan libtsan clang-tools-extra clang18-tools-extra
+sudo dnf install -y valgrind libasan libubsan libtsan clang18-tools-extra
 ```
 
 ### Ubuntu / Debian
@@ -112,20 +112,34 @@ pass the build type after the sanitizer list for `san`.
 
 Valgrind reports definite and possible leaks, tracks uninitialized values, and
 returns failure for detected memory errors. `HOLDER_CTEST_TIMEOUT` overrides
-the per-test timeout: 300 seconds for Valgrind and the single ThreadSanitizer
-suite, 30 seconds for individual ASan/UBSan tests. Set
+the per-test timeout: 900 seconds for Valgrind (including the 5 MB encryption
+round trip), 300 seconds for the single ThreadSanitizer suite, and 30 seconds
+for individual ASan/UBSan tests. Set
 `HOLDER_SAN_DETECT_LEAKS=1` to enable ASan leak detection. On Linux, the
 ThreadSanitizer suite runs through `setarch -R`, as in holder-daemon.
 
-`tidy` prefers `clang-tidy-18` and supports Fedora's `run-clang-tidy-18` name,
-with unversioned tools as a fallback. Set `HOLDER_CLANG_TIDY` and
-`HOLDER_RUN_CLANG_TIDY` to select another installed version. On this Fedora 45
-setup, Clang 18 reports errors in GCC 16's standard-library headers; use a
-compatible newer Clang toolchain for analysis. Fedora's `clang-tools-extra`
-package supplies current, unversioned tools; run them with:
+On Fedora 45, the uninstrumented glibc timezone code can report a race inside
+`tzset_internal` during concurrent libgit2 signature creation. The narrowly scoped
+`tools/tsan/glibc.supp` documents glibc's internal lock and the instrumentation
+limitation. Opt in only for that report, using an absolute path because CTest
+runs from the test build directory:
 
 ```sh
-HOLDER_CLANG_TIDY=clang-tidy HOLDER_RUN_CLANG_TIDY=run-clang-tidy ./make.sh tidy
+HOLDER_TSAN_SUPPRESSIONS="$PWD/tools/tsan/glibc.supp" ./make.sh san thread
+```
+
+Clang 18 is the project's supported/default tidy version. `./make.sh tidy`
+requires `clang-tidy-18` and `run-clang-tidy-18` on `PATH`; it never automatically
+selects unversioned tools or another version. Fedora's `clang18-tools-extra`
+package supplies both executables. If either is missing, the command fails with
+installation guidance before configuring the build.
+
+Explicit executable overrides remain available through `HOLDER_CLANG_TIDY` and
+`HOLDER_RUN_CLANG_TIDY`, for example for a Clang 18 installation outside `PATH`:
+
+```sh
+HOLDER_CLANG_TIDY=/path/to/clang-tidy-18 \
+HOLDER_RUN_CLANG_TIDY=/path/to/run-clang-tidy-18 ./make.sh tidy
 ```
 
 The repository's `.clang-tidy` enables analyzer and selected bug checks explicitly

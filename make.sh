@@ -163,7 +163,7 @@ run_tests() {
 require_tool() {
   if ! command -v "${1}" >/dev/null 2>&1; then
     echo "Missing dependency: ${1} is required for ./make.sh ${MODE}." >&2
-    echo "See README.md for diagnostic tool packages." >&2
+    echo "${2:-See README.md for diagnostic tool packages.}" >&2
     exit 1
   fi
 }
@@ -201,7 +201,7 @@ memcheck_all() {
     test_args+=(-R "${test_regex}")
   fi
   ctest --test-dir "${build_dir}" -T memcheck --output-on-failure --no-tests=error \
-    --timeout "${HOLDER_CTEST_TIMEOUT:-300}" "${test_args[@]}"
+    --timeout "${HOLDER_CTEST_TIMEOUT:-900}" "${test_args[@]}"
 }
 
 san_all() {
@@ -250,23 +250,17 @@ san_all() {
 tidy_all() {
   local build_dir="build-tidy"
   local source_regex
-  local tidy_bin="clang-tidy"
-  local tidy_runner="run-clang-tidy"
+  local tidy_bin="${HOLDER_CLANG_TIDY:-clang-tidy-18}"
+  local tidy_runner="${HOLDER_RUN_CLANG_TIDY:-run-clang-tidy-18}"
   local gcc_version gcc_major
   local -a tidy_extra_args=()
 
   source_regex="^${PWD}/(src|include|tests)/.*\\.(cpp|cc|cxx|h|hpp)$"
 
-  if command -v clang-tidy-18 >/dev/null 2>&1; then
-    tidy_bin="clang-tidy-18"
-    if command -v run-clang-tidy-18 >/dev/null 2>&1; then
-      tidy_runner="run-clang-tidy-18"
-    fi
-  fi
-  tidy_bin="${HOLDER_CLANG_TIDY:-${tidy_bin}}"
-  tidy_runner="${HOLDER_RUN_CLANG_TIDY:-${tidy_runner}}"
-  require_tool "${tidy_bin}"
-  require_tool "${tidy_runner}"
+  require_tool "${tidy_bin}" \
+    "Install clang-tidy-18 or explicitly set HOLDER_CLANG_TIDY (see README.md)."
+  require_tool "${tidy_runner}" \
+    "Install run-clang-tidy-18 or explicitly set HOLDER_RUN_CLANG_TIDY (see README.md)."
 
   if command -v g++ >/dev/null 2>&1; then
     gcc_version="$(g++ -dumpfullversion -dumpversion)"
