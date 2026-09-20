@@ -857,7 +857,19 @@ TEST_CASE(
   );
   holder::resource::ResourceStore(db, nullptr, &git).remove("resource-1234");
   REQUIRE_FALSE(holder::resource::ResourceRepo(db).get("resource-1234").has_value());
+  REQUIRE_FALSE(
+      std::filesystem::exists(project_root / holder::resource::resource_rel_path("resource-1234"))
+  );
+  holder::store::Rebuilder(db, nullptr).rebuild_project(project);
+  REQUIRE_FALSE(holder::resource::ResourceRepo(db).get("resource-1234").has_value());
+  REQUIRE(holder::resource::LocationRepo(db).get("location-1234").has_value());
   holder::resource::LocationStore(db, nullptr, &git).remove("location-1234");
+  REQUIRE_FALSE(holder::resource::LocationRepo(db).get("location-1234").has_value());
+  REQUIRE_FALSE(
+      std::filesystem::exists(project_root / holder::resource::location_rel_path("location-1234"))
+  );
+  holder::store::Rebuilder(db, nullptr).rebuild_project(project);
+  REQUIRE_FALSE(holder::resource::ResourceRepo(db).get("resource-1234").has_value());
   REQUIRE_FALSE(holder::resource::LocationRepo(db).get("location-1234").has_value());
 }
 

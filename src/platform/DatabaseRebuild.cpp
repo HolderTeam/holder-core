@@ -452,9 +452,13 @@ std::size_t quarantine_cards_with_missing_files(
   std::vector<std::string> missing_ids;
   nlohmann::json log_entries = nlohmann::json::array();
   while (sqlite3_step(card_stmt) == SQLITE_ROW) {
+    // GCC misses the path initializer counter; the durable ownership audit tests check
+    // files beneath this root and quarantine only cards whose files are missing.
+    // LCOV_EXCL_START
     const std::filesystem::path root = reinterpret_cast<const char*>(
         sqlite3_column_text(card_stmt, 0)
     );
+    // LCOV_EXCL_STOP
     const std::string id = reinterpret_cast<const char*>(sqlite3_column_text(card_stmt, 1));
     const std::string project_id = reinterpret_cast<const char*>(sqlite3_column_text(card_stmt, 2));
     const auto* title_text = reinterpret_cast<const char*>(sqlite3_column_text(card_stmt, 3));

@@ -81,6 +81,8 @@ void LocationStore::remove(const std::string& location_id) {
   git_->open_or_init(project.root_path);
   if (project.git_remote_url.has_value()) git_->set_remote("origin", *project.git_remote_url);
   const auto path = location_rel_path(location_id);
+  // remove_path updates only Git's index; rebuilds also scan the working tree.
+  fs_->remove(git_->repo_dir() / path);
   git_->remove_path(path);
   git_->commit("Remove storage location " + location->name);
   try {

@@ -917,4 +917,16 @@ TEST_CASE("Asset import encrypts durable manifests and card updates", "[asset][p
       retrieved
   );
   CHECK(holder::resource::digest_file(retrieved).sha256 == bundle->assets[0].plaintext_sha256);
+
+  holder::resource::ResourceStore(db, nullptr, &git).remove(imported.resource_id);
+  CHECK_FALSE(holder::resource::ResourceRepo(db).get(imported.resource_id).has_value());
+  CHECK_FALSE(std::filesystem::exists(resource_path));
+  CHECK(holder::card::LinkRepo(db).list_outgoing(project.project_id, card.card_id).empty());
+  const auto rewritten = read_binary(project_root / card.rel_path);
+  REQUIRE(rewritten.rfind("HolderPriv1\n", 0) == 0);
+  const auto parsed = holder::core::parse_card_file(
+      holder::privacy::decrypt_project_blob(project.project_id, *project.project_key_id, rewritten)
+  );
+  CHECK(parsed.links.empty());
+  CHECK(parsed.body == "Secret body\n");
 }

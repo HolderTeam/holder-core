@@ -299,8 +299,9 @@ CardHistoryPage CardHistoryService::list(
   repo.open_existing(project.root_path);
   CardHistoryPage page;
   page.head_oid = repo.head_oid();
+  // GCC misses this initializer counter; the live/Trash history test asserts both paths.
   const std::vector<std::filesystem::path> paths{
-      holder::core::card_rel_path(card_id),
+      holder::core::card_rel_path(card_id), // LCOV_EXCL_LINE
       holder::core::card_trash_rel_path(card_id)
   };
   auto raw_cursor = cursor;

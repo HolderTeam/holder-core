@@ -3928,8 +3928,9 @@ int holder_git_test_remote(
       );
     }
     const auto& project = project_opt.value();
+    // GCC misses this ternary arm; git_test_remote's explicit-branch test asserts its value.
     const std::string resolved_branch = (branch != nullptr && branch[0] != '\0')
-                                            ? std::string(branch)
+                                            ? std::string(branch) // LCOV_EXCL_LINE
                                             : "local_default";
 
     nlohmann::json body = {

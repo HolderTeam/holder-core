@@ -571,8 +571,14 @@ TEST_CASE("C API creates a plain project defaulting root_path and privacy_mode",
       holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
   );
 
+  const char* privacy_mode = nullptr;
+  SECTION("null privacy mode uses the default") {}
+  SECTION("empty privacy mode uses the default") { privacy_mode = ""; }
+  SECTION("explicit plain privacy mode") { privacy_mode = "plain"; }
   char* json = nullptr;
-  REQUIRE(holder_project_create(context, "Home", nullptr, nullptr, &json, &error) == HOLDER_OK);
+  REQUIRE(
+      holder_project_create(context, "Home", nullptr, privacy_mode, &json, &error) == HOLDER_OK
+  );
   REQUIRE(json != nullptr);
   REQUIRE(error == nullptr);
 

@@ -42,13 +42,7 @@ std::string encode_manifest(const holder::model::Project& project, const std::st
 
 std::string decode_manifest(const holder::model::Project& project, const std::string& raw) {
   if (project.privacy_mode != "encrypted_git") return raw;
-  // project_key_id() itself is exercised by the missing-key removal test; GCC
-  // assigns no counter to this split argument line.
-  return holder::privacy::decrypt_project_blob(
-      project.project_id,
-      project_key_id(project),
-      raw // LCOV_EXCL_LINE
-  ); // LCOV_EXCL_LINE
+  return holder::privacy::decrypt_project_blob(project.project_id, project_key_id(project), raw);
 }
 
 long long now_epoch_seconds() {
@@ -156,6 +150,8 @@ void ResourceStore::remove(const std::string& resource_id) {
     git_->stage_path(card_path);
     staged_paths.push_back(card_path);
   }
+  // remove_path updates only Git's index; rebuilds also scan the working tree.
+  fs_->remove(git_->repo_dir() / path);
   git_->remove_path(path);
   staged_paths.push_back(path);
   if (project.privacy_mode == "encrypted_git") {
