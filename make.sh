@@ -111,6 +111,10 @@ cmake_build() {
 }
 
 jobs() {
+  if [ -n "${NUMBER_OF_PROCESSORS:-}" ]; then
+    printf '%s\n' "${NUMBER_OF_PROCESSORS}"
+    return
+  fi
   if command -v nproc >/dev/null 2>&1; then
     nproc
   else

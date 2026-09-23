@@ -17,6 +17,13 @@ The daemon still owns process supervision, HTTP routes, local model runners, pla
 ./make.sh
 ```
 
+The portable entrypoints used by the Holder farm are:
+
+```bash
+./make.sh build
+./make.sh test
+```
+
 That configures CMake, builds `libholder` and the core tests, and runs CTest.
 Install the dependencies below first. A C++20 compiler and CMake 3.22 or newer
 are required; Ninja is recommended.
