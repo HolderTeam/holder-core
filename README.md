@@ -101,6 +101,18 @@ sudo apt install -y ccache lcov gcovr
 `make.sh` automatically uses ccache when installed (`HOLDER_CCACHE=0` disables
 it). `./make.sh coverage` uses GCC/gcov, lcov and genhtml; gcovr adds a JSON report.
 
+### macOS (Homebrew)
+
+With Xcode Command Line Tools and Homebrew installed:
+
+```sh
+brew install cmake ninja git pkg-config \
+  sqlite libgit2 libsodium md4c openssl@3 \
+  nlohmann-json yaml-cpp spdlog catch2
+
+./make.sh
+```
+
 ### Diagnostic commands
 
 ```sh
