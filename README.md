@@ -54,6 +54,10 @@ a library-only build, configure with `-DBUILD_TESTING=OFF`. On Linux, optional
 libsecret development files enable desktop keyring integration; the commands
 below include them.
 
+ccache is recommended to speed up rebuilds. `make.sh` automatically enables it
+when installed; set `HOLDER_CCACHE=0` to disable it. Use `ccache --show-stats` to
+inspect cache use.
+
 ### Fedora
 
 ```sh
@@ -106,7 +110,7 @@ it). `./make.sh coverage` uses GCC/gcov, lcov and genhtml; gcovr adds a JSON rep
 With Xcode Command Line Tools and Homebrew installed:
 
 ```sh
-brew install cmake ninja git pkg-config \
+brew install cmake ninja git pkg-config ccache \
   sqlite libgit2 libsodium md4c openssl@3 \
   nlohmann-json yaml-cpp spdlog catch2
 
