@@ -535,6 +535,184 @@ TEST_CASE("C API lists cards as JSON", "[capi]") {
   holder_context_destroy(context);
 }
 
+TEST_CASE("C API lists complete cards from authoritative files with opaque pagination", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
+
+  char* json = nullptr;
+  REQUIRE(
+      holder_project_create(context, "Complete page", nullptr, nullptr, &json, &error) == HOLDER_OK
+  );
+  const auto project = nlohmann::json::parse(json);
+  const auto project_id = project.at("project_id").get<std::string>();
+  holder_string_free(json);
+
+  std::map<std::string, std::string> expected;
+  std::string trashed_card_id;
+  for (int index = 0; index < 4; ++index) {
+    json = nullptr;
+    const auto title = "Card " + std::to_string(index);
+    const auto content = "Authoritative body " + std::to_string(index);
+    REQUIRE(
+        holder_card_create(
+            context,
+            project_id.c_str(),
+            title.c_str(),
+            content.c_str(),
+            nullptr,
+            &json,
+            &error
+        ) == HOLDER_OK
+    );
+    const auto card = nlohmann::json::parse(json);
+    const auto card_id = card.at("card_id").get<std::string>();
+    holder_string_free(json);
+    if (index == 1) {
+      trashed_card_id = card_id;
+    } else {
+      expected[card_id] = content;
+    }
+  }
+  REQUIRE(holder_card_delete(context, trashed_card_id.c_str(), &error) == HOLDER_OK);
+
+  // Complete reads must not depend on the disposable full-text projection.
+  {
+    holder::platform::Db db;
+    db.open(data_dir / "server" / "holder.db");
+    db.exec("DROP TABLE cards_fts;");
+  }
+
+  std::vector<std::string> received_ids;
+  std::string cursor;
+  while (true) {
+    json = nullptr;
+    REQUIRE(
+        holder_card_list_complete_page(
+            context,
+            project_id.c_str(),
+            cursor.empty() ? nullptr : cursor.c_str(),
+            1,
+            &json,
+            &error
+        ) == HOLDER_OK
+    );
+    const auto page = nlohmann::json::parse(json);
+    holder_string_free(json);
+    REQUIRE(page.at("cards").size() == 1);
+    const auto& card = page.at("cards").at(0);
+    const auto card_id = card.at("card_id").get<std::string>();
+    received_ids.push_back(card_id);
+    REQUIRE(card.at("content") == expected.at(card_id));
+    REQUIRE(card.at("project_id") == project_id);
+    REQUIRE(card.at("deleted_at").is_null());
+
+    if (page.at("next_cursor").is_null()) break;
+    cursor = page.at("next_cursor").get<std::string>();
+    REQUIRE(cursor == card_id);
+  }
+
+  std::vector<std::string> expected_ids;
+  for (const auto& [card_id, content] : expected) {
+    (void)content;
+    expected_ids.push_back(card_id);
+  }
+  REQUIRE(received_ids == expected_ids);
+
+  json = nullptr;
+  REQUIRE(holder_card_list(context, project_id.c_str(), &json, &error) == HOLDER_OK);
+  const auto metadata_only = nlohmann::json::parse(json);
+  holder_string_free(json);
+  REQUIRE(metadata_only.size() == expected.size());
+  REQUIRE_FALSE(metadata_only.at(0).contains("content"));
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API complete-card pages validate arguments and report missing content", "[capi]") {
+  holder_error* error = nullptr;
+  char* json = nullptr;
+  REQUIRE(
+      holder_card_list_complete_page(nullptr, "project-1", nullptr, 1, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
+  REQUIRE(
+      holder_card_list_complete_page(context, "", nullptr, 1, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+  REQUIRE(
+      holder_card_list_complete_page(context, "project-1", nullptr, 0, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+  REQUIRE(
+      holder_card_list_complete_page(
+          context,
+          "project-1",
+          nullptr,
+          HOLDER_CARD_LIST_COMPLETE_MAX_LIMIT + 1,
+          &json,
+          &error
+      ) == HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+  REQUIRE(
+      holder_card_list_complete_page(context, "project-1", nullptr, 1, nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  holder_error_destroy(error);
+  error = nullptr;
+
+  REQUIRE(
+      holder_project_create(context, "Missing content", nullptr, nullptr, &json, &error) ==
+      HOLDER_OK
+  );
+  const auto project = nlohmann::json::parse(json);
+  const auto project_id = project.at("project_id").get<std::string>();
+  const auto root_path = project.at("root_path").get<std::string>();
+  holder_string_free(json);
+  json = nullptr;
+  REQUIRE(
+      holder_card_create(context, project_id.c_str(), "Card", "body", nullptr, &json, &error) ==
+      HOLDER_OK
+  );
+  const auto card = nlohmann::json::parse(json);
+  const auto card_id = card.at("card_id").get<std::string>();
+  const auto rel_path = card.at("rel_path").get<std::string>();
+  holder_string_free(json);
+  REQUIRE(std::filesystem::remove(std::filesystem::path(root_path) / rel_path));
+
+  json = nullptr;
+  REQUIRE(
+      holder_card_list_complete_page(context, project_id.c_str(), nullptr, 10, &json, &error) ==
+      HOLDER_ERROR_RUNTIME
+  );
+  REQUIRE(json == nullptr);
+  REQUIRE(
+      std::string(holder_error_message(error)).find("card content missing: " + card_id) !=
+      std::string::npos
+  );
+  holder_error_destroy(error);
+  holder_context_destroy(context);
+}
+
 TEST_CASE("C API reports invalid card list arguments", "[capi]") {
   holder_error* error = nullptr;
   char* json = nullptr;

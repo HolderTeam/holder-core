@@ -1699,6 +1699,66 @@ int holder_card_list(
   } // LCOV_EXCL_LINE
 }
 
+int holder_card_list_complete_page(
+    holder_context* context,
+    const char* project_id,
+    const char* cursor,
+    int limit,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (project_id == nullptr || project_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "project_id must not be empty");
+  }
+  if (limit <= 0 || limit > HOLDER_CARD_LIST_COMPLETE_MAX_LIMIT) {
+    return set_error(
+        out_error,
+        HOLDER_ERROR_INVALID_ARGUMENT,
+        "limit must be between 1 and " + std::to_string(HOLDER_CARD_LIST_COMPLETE_MAX_LIMIT)
+    );
+  }
+
+  try {
+    const std::optional<std::string> after_card_id = cursor != nullptr && cursor[0] != '\0'
+                                                         ? std::optional<std::string>(cursor)
+                                                         : std::nullopt;
+    holder::card::CardStore store(context->db, &context->fts);
+    const auto page = store.list_complete_page(project_id, after_card_id, limit);
+
+    nlohmann::json cards = nlohmann::json::array();
+    for (const auto& record : page.cards) {
+      auto card = card_to_json(record.card);
+      card["content"] = record.content;
+      cards.push_back(std::move(card));
+    }
+    nlohmann::json body = {{"cards", std::move(cards)}};
+    body["next_cursor"] = page.next_cursor.has_value() ? nlohmann::json(*page.next_cursor)
+                                                       : nlohmann::json(nullptr);
+
+    auto* out = duplicate_string(body.dump());
+    if (out == nullptr) {
+      return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed"); // LCOV_EXCL_LINE
+    }
+    *out_json = out;
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed"); // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error); // LCOV_EXCL_LINE
+  } // LCOV_EXCL_LINE
+}
+
 // Flexible card-listing query bundling CardRepo::list_roots/list_children/list_all/
 // list_recent_page (plus, optionally, count_children_not_deleted) behind one request_json
 // shape, so callers pick a view instead of the C API growing a one-off function per listing

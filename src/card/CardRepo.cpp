@@ -345,6 +345,55 @@ std::vector<holder::model::Card> CardRepo::list_all(const std::string& project_i
   return out;
 } // LCOV_EXCL_LINE
 
+std::vector<holder::model::Card> CardRepo::list_page_by_card_id(
+    const std::string& project_id,
+    const std::optional<std::string>& after_card_id,
+    int limit
+) const {
+  static constexpr const char* SQL_FIRST =
+      "SELECT card_id, project_id, title, rel_path, parent_card_id, sort_key, "
+      "created_at, updated_at, deleted_at "
+      "FROM cards WHERE project_id = ? AND deleted_at IS NULL "
+      "ORDER BY card_id ASC LIMIT ?;";
+  static constexpr const char* SQL_PAGE =
+      "SELECT card_id, project_id, title, rel_path, parent_card_id, sort_key, "
+      "created_at, updated_at, deleted_at "
+      "FROM cards WHERE project_id = ? AND deleted_at IS NULL AND card_id > ? "
+      "ORDER BY card_id ASC LIMIT ?;";
+
+  sqlite3_stmt* stmt = nullptr;
+  if (sqlite3_prepare_v2(
+          db_.handle(),
+          after_card_id.has_value() ? SQL_PAGE : SQL_FIRST,
+          -1,
+          &stmt,
+          nullptr
+      ) != SQLITE_OK) {
+    throw_sqlite(db_.handle(), "prepare list card-id page failed");
+  }
+  bind_text(stmt, 1, project_id);
+  if (after_card_id.has_value()) {
+    bind_text(stmt, 2, *after_card_id);
+    sqlite3_bind_int(stmt, 3, limit);
+  } else {
+    sqlite3_bind_int(stmt, 2, limit);
+  }
+
+  std::vector<holder::model::Card> out;
+  while (true) {
+    const int rc = sqlite3_step(stmt);
+    if (rc == SQLITE_ROW) {
+      out.push_back(read_card(stmt));
+      continue;
+    }
+    if (rc == SQLITE_DONE) break;
+    sqlite3_finalize(stmt); // LCOV_EXCL_LINE
+    throw_sqlite(db_.handle(), "list card-id page failed"); // LCOV_EXCL_LINE
+  }
+  sqlite3_finalize(stmt);
+  return out;
+}
+
 int CardRepo::count_all_not_deleted(const std::string& project_id) const {
   static constexpr const char* SQL =
       "SELECT COUNT(*) FROM cards WHERE project_id = ? AND deleted_at IS NULL;";

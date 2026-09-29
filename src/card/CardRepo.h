@@ -39,6 +39,13 @@ class CardRepo {
       const std::string& parent_card_id
   ) const;
   std::vector<holder::model::Card> list_all(const std::string& project_id) const;
+  // Stable card_id-ordered page for bulk extraction. after_card_id is an exclusive cursor;
+  // nullopt selects the first page. Never includes soft-deleted cards.
+  std::vector<holder::model::Card> list_page_by_card_id(
+      const std::string& project_id,
+      const std::optional<std::string>& after_card_id,
+      int limit
+  ) const;
 
   // Cursor-paginated, most-recently-updated first (ties broken by card_id descending, for
   // stable pagination across calls) -- distinct from list_all's sort_key-then-updated_at

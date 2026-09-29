@@ -33,6 +33,7 @@
 #include <limits>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -1197,6 +1198,63 @@ TEST_CASE("CardStore update_content throws when card is missing", "[cardstore]")
       store.update_content("missing", "x", std::nullopt, 2),
       Catch::Matchers::ContainsSubstring("card not found: missing")
   );
+}
+
+TEST_CASE("CardStore complete pages read encrypted authoritative content", "[cardstore]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+
+  holder::project::ProjectRepo project_repo(db);
+  holder::model::Project project;
+  project.project_id = "proj-encrypted-page";
+  project.name = "Encrypted page";
+  project.root_path = (dir / "project_repo").string();
+  project.privacy_mode = "encrypted_git";
+  project.created_at = 1;
+  project.updated_at = 1;
+  project_repo.create(project);
+  holder::test::EnvGuard keystore_env("HOLDER_TEST_KEYSTORE_DIR", (dir / "keystore").string());
+  holder::git::RealGitOps bootstrap_git;
+  holder::privacy::ensure_encrypted_project_ready(
+      bootstrap_git,
+      project_repo,
+      project.project_id,
+      project.root_path,
+      std::nullopt,
+      2,
+      []() {
+        return std::string("key-complete-page");
+      }
+  );
+
+  holder::index::FtsIndexer fts(db);
+  holder::card::CardStore store(db, &fts);
+  for (const auto& [card_id, body] : std::vector<std::pair<std::string, std::string>>{
+           {"encpage1", "first secret body"},
+           {"encpage2", "second secret body"},
+       }) {
+    holder::model::Card card;
+    card.card_id = card_id;
+    card.project_id = project.project_id;
+    card.title = card_id;
+    card.created_at = 1;
+    card.updated_at = 1;
+    store.create(card, body);
+  }
+
+  const auto first = store.list_complete_page(project.project_id, std::nullopt, 1);
+  REQUIRE(first.cards.size() == 1);
+  REQUIRE(first.cards[0].card.card_id == "encpage1");
+  REQUIRE(first.cards[0].content == "first secret body");
+  REQUIRE(first.next_cursor == std::optional<std::string>("encpage1"));
+
+  const auto second = store.list_complete_page(project.project_id, first.next_cursor, 1);
+  REQUIRE(second.cards.size() == 1);
+  REQUIRE(second.cards[0].card.card_id == "encpage2");
+  REQUIRE(second.cards[0].content == "second secret body");
+  REQUIRE_FALSE(second.next_cursor.has_value());
 }
 
 TEST_CASE("CardStore move exercises error and no-op branches", "[cardstore]") {

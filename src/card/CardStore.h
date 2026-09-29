@@ -66,6 +66,16 @@ struct BatchCardInput {
   std::vector<holder::model::Milestone> milestones;
 };
 
+struct CompleteCardRecord {
+  holder::model::Card card;
+  std::string content;
+};
+
+struct CompleteCardPage {
+  std::vector<CompleteCardRecord> cards;
+  std::optional<std::string> next_cursor;
+};
+
 class CardStore {
  public:
   CardStore(
@@ -134,6 +144,13 @@ class CardStore {
   void hard_delete(const std::string& card_id);
   std::optional<holder::model::Card> get(const std::string& card_id) const;
   std::optional<std::string> get_content(const holder::model::Card& card);
+  // Reads one card_id-ordered page while holding one project operation lock across both the
+  // metadata query and every authoritative card-file read. after_card_id is exclusive.
+  CompleteCardPage list_complete_page(
+      const std::string& project_id,
+      const std::optional<std::string>& after_card_id,
+      int limit
+  );
 
   // add_tag/remove_tag are Holder's semantic tag operations -- the ones a client (Android's
   // Tools UI, GTK, holderctl) should call, rather than editing #tag text into a card's body

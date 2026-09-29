@@ -11,6 +11,8 @@ extern "C" {
 #define HOLDER_ERROR_RUNTIME 2
 #define HOLDER_ERROR_ALLOCATION 3
 
+#define HOLDER_CARD_LIST_COMPLETE_MAX_LIMIT 1000
+
 typedef struct holder_context holder_context;
 typedef struct holder_error holder_error;
 
@@ -115,6 +117,29 @@ int holder_location_delete(
 int holder_card_list(
     holder_context* context,
     const char* project_id,
+    char** out_json,
+    holder_error** out_error
+);
+
+// Returns one card_id-ordered page of live cards with the same metadata fields as
+// holder_card_list plus "content", read from each card's authoritative durable file. cursor is
+// opaque: pass NULL/empty for the first page, then pass back next_cursor unchanged. limit must
+// be between 1 and HOLDER_CARD_LIST_COMPLETE_MAX_LIMIT inclusive. Response shape:
+// {"cards": [{"card_id", "project_id", "title", "content", "rel_path",
+//              "parent_card_id", "sort_key", "created_at", "updated_at", "deleted_at"}, ...],
+//  "next_cursor": "..." | null}
+//
+// CONSISTENCY: metadata selection and all content reads in one call share the project's
+// process-local operation lock, so supported libholder operations in this process cannot
+// interleave within a page. There is no snapshot across page calls, and this does not coordinate
+// with raw filesystem changes or other processes. A missing file or any read, decryption, or
+// parsing failure fails the whole page; content is never sourced from the disposable FTS index or
+// silently replaced with an empty string. The returned JSON is released with holder_string_free.
+int holder_card_list_complete_page(
+    holder_context* context,
+    const char* project_id,
+    const char* cursor,
+    int limit,
     char** out_json,
     holder_error** out_error
 );

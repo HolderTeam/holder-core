@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <map>
 #include <stdexcept>
+#include <utility>
 
 namespace holder::card {
 namespace {
@@ -70,6 +71,27 @@ void assert_project_staged_blobs_safe(
     return;
   }
   holder::privacy::assert_encryption_index_paths_safe(project.root_path, relative_paths);
+}
+
+std::optional<std::string> read_card_content_locked(
+    holder::core::Fs& fs,
+    holder::git::GitOps& git,
+    const holder::model::Project& project,
+    const holder::model::Card& card
+) {
+  const std::string expected = holder::core::card_rel_path(card.card_id);
+  if (card.rel_path != expected) {
+    throw std::runtime_error("card rel_path does not match card_id");
+  }
+
+  const auto full_path = git.repo_dir() / card.rel_path;
+  if (!fs.exists(full_path)) {
+    return std::nullopt;
+  }
+
+  const auto raw = fs.read_file(full_path);
+  const auto plain = decode_card_blob(project, raw);
+  return holder::core::parse_card_file(plain).body;
 }
 
 } // namespace
@@ -829,19 +851,40 @@ std::optional<std::string> CardStore::get_content(const holder::model::Card& car
   auto operation = git_->lock_operation(project_opt->root_path);
   git_->open_or_init(project_opt->root_path);
 
-  const std::string expected = holder::core::card_rel_path(card.card_id);
-  if (card.rel_path != expected) {
-    throw std::runtime_error("card rel_path does not match card_id");
+  return read_card_content_locked(*fs_, *git_, project_opt.value(), card);
+}
+
+CompleteCardPage CardStore::list_complete_page(
+    const std::string& project_id,
+    const std::optional<std::string>& after_card_id,
+    int limit
+) {
+  if (limit <= 0) {
+    throw std::invalid_argument("limit must be positive");
   }
 
-  const auto full_path = git_->repo_dir() / card.rel_path;
-  if (!fs_->exists(full_path)) {
-    return std::nullopt;
+  const auto project = require_project(project_id);
+  // Match every existing CardStore operation's lock order: resolve the project first, then
+  // acquire the per-repository guard before repository, filesystem, or card-row work.
+  auto operation = git_->lock_operation(project.root_path);
+  git_->open_or_init(project.root_path);
+
+  auto metadata = card_repo_.list_page_by_card_id(project_id, after_card_id, limit + 1);
+  CompleteCardPage page;
+  if (metadata.size() > static_cast<std::size_t>(limit)) {
+    metadata.resize(static_cast<std::size_t>(limit));
+    page.next_cursor = metadata.back().card_id;
   }
 
-  const auto raw = fs_->read_file(full_path);
-  const auto plain = decode_card_blob(project_opt.value(), raw);
-  return holder::core::parse_card_file(plain).body;
+  page.cards.reserve(metadata.size());
+  for (auto& card : metadata) {
+    auto content = read_card_content_locked(*fs_, *git_, project, card);
+    if (!content.has_value()) {
+      throw std::runtime_error("card content missing: " + card.card_id);
+    }
+    page.cards.push_back({std::move(card), std::move(*content)});
+  }
+  return page;
 }
 
 AddTagResult CardStore::add_tag(
