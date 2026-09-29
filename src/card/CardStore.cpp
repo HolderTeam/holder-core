@@ -288,16 +288,18 @@ void CardStore::update_content(
   }
 
   const auto full_path = git_->repo_dir() / card.rel_path;
-  bool unchanged = false;
+  bool body_unchanged = false;
   std::vector<holder::model::Milestone> existing_milestones;
   if (fs_->exists(full_path)) {
     const auto plain = decode_card_blob(project, fs_->read_file(full_path));
     const auto parsed = holder::core::parse_card_file(plain);
-    unchanged = (parsed.body == content);
+    body_unchanged = (parsed.body == content);
     existing_milestones = parsed.milestones;
   }
+  const bool title_changed = title.has_value() && title.value() != card.title;
+  const bool file_changed = !body_unchanged || title_changed;
 
-  if (!unchanged) {
+  if (file_changed) {
     auto updated_card = card;
     if (title.has_value()) {
       updated_card.title = title.value();
@@ -307,7 +309,7 @@ void CardStore::update_content(
     write_card_file(*git_, project, updated_card, links, existing_milestones, content);
   }
 
-  if (!unchanged) {
+  if (file_changed) {
     git_->stage_path(card.rel_path);
     assert_project_staged_blobs_safe(project, {card.rel_path});
   }
@@ -325,7 +327,7 @@ void CardStore::update_content(
   tag_repo_
       .set_tags_for_card(card.project_id, card_id, holder::core::extract_tags(content), updated_at);
 
-  if (!unchanged) {
+  if (file_changed) {
     const std::string commit_title = title.has_value() ? title.value() : card.title;
     git_->commit("Update card " + commit_title);
   }

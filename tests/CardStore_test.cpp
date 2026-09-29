@@ -463,6 +463,43 @@ TEST_CASE("CardStore update skips commit when content unchanged", "[cardstore]")
   REQUIRE(parsed.body == "same");
 }
 
+TEST_CASE("CardStore persists a title-only update in durable front matter", "[cardstore]") {
+  const auto dir = make_temp_dir();
+  const auto db_path = dir / "holder.db";
+
+  holder::platform::Db db;
+  db.open(db_path);
+  apply_schema(db);
+  const auto project_root = dir / "project_repo";
+  create_project(db, "proj-1", project_root.string());
+
+  holder::index::FtsIndexer fts(db);
+  holder::card::CardStore store(db, &fts);
+  holder::model::Card card;
+  card.card_id = "title001";
+  card.project_id = "proj-1";
+  card.title = "Original";
+  card.created_at = 10;
+  card.updated_at = 10;
+
+  store.create(card, "unchanged body");
+  const int before = count_commits(project_root);
+  store.update_content(card.card_id, "unchanged body", std::string("Renamed"), 20);
+
+  REQUIRE(count_commits(project_root) == before + 1);
+  const auto raw = read_file(project_root / holder::core::card_rel_path(card.card_id));
+  const auto parsed = holder::core::parse_card_file(raw);
+  REQUIRE(parsed.has_front_matter);
+  REQUIRE(parsed.card.title == "Renamed");
+  REQUIRE(parsed.card.updated_at == 20);
+  REQUIRE(parsed.body == "unchanged body");
+
+  const auto stored = holder::card::CardRepo(db).get(card.card_id);
+  REQUIRE(stored.has_value());
+  REQUIRE(stored->title == "Renamed");
+  REQUIRE(stored->updated_at == 20);
+}
+
 TEST_CASE("CardStore update creates commit when content changes", "[cardstore]") {
   const auto dir = make_temp_dir();
   const auto db_path = dir / "holder.db";
