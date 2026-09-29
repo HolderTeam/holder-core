@@ -1,0 +1,44 @@
+name: Native sanitizers
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  address-undefined:
+    name: ASan + UBSan / Ubuntu 26.04
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out holder-core
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install build and test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            cmake \
+            catch2 \
+            ninja-build \
+            pkg-config \
+            libssl-dev \
+            nlohmann-json3-dev \
+            libyaml-cpp-dev \
+            libspdlog-dev \
+            libsqlite3-dev \
+            libsodium-dev \
+            libgit2-dev \
+            libmd4c-dev \
+            libsecret-1-dev
+
+      - name: Run holder-core tests with ASan and UBSan
+        env:
+          TMPDIR: ${{ runner.temp }}
+          XDG_RUNTIME_DIR: ${{ runner.temp }}
+        run: ./make.sh san address,undefined
