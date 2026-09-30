@@ -152,6 +152,7 @@ add_library(holder STATIC
   src/git/EcdsaDerSigningCredentialProvider.cpp
   src/git/GitOps.cpp
   src/git/GitRepo.cpp
+  src/git/GitHubHostTrust.cpp
   src/git/RepoLocks.cpp
   src/git/RepoSyncMetrics.cpp
   src/git/RevisionReferenceResolver.cpp

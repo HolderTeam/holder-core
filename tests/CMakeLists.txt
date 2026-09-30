@@ -79,6 +79,7 @@ add_executable(holder_core_tests
   RealFs_test.cpp
   Reindexer_test.cpp
   RemoteProbe_test.cpp
+  GitHubHostTrust_test.cpp
   RepoSyncMetrics_test.cpp
   RevisionReferenceResolver_test.cpp
   ResourceRepo_test.cpp

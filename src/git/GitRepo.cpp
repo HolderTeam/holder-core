@@ -1,6 +1,7 @@
 #include "git/GitRepo.h"
 
 #include "git/SshAgentAndFileCredentialProvider.h"
+#include "git/GitHubHostTrust.h"
 
 #include <git2.h>
 #include <spdlog/spdlog.h>
@@ -323,6 +324,7 @@ static git_remote_callbacks make_remote_callbacks(GitCredentialProvider* provide
   const int rc = git_remote_init_callbacks(&callbacks, GIT_REMOTE_CALLBACKS_VERSION);
   if (rc != 0) throw git_err("git_remote_init_callbacks failed", rc); // LCOV_EXCL_LINE
   callbacks.credentials = git_credential_acquire_cb;
+  callbacks.certificate_check = check_github_host_certificate;
   callbacks.payload = provider;
   return callbacks;
 }
