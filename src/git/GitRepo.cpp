@@ -318,6 +318,7 @@ static int git_credential_acquire_cb(
 }
 
 static git_remote_callbacks make_remote_callbacks(GitCredentialProvider* provider) {
+  if (provider != nullptr) provider->begin_operation();
   git_remote_callbacks callbacks{};
   const int rc = git_remote_init_callbacks(&callbacks, GIT_REMOTE_CALLBACKS_VERSION);
   if (rc != 0) throw git_err("git_remote_init_callbacks failed", rc); // LCOV_EXCL_LINE

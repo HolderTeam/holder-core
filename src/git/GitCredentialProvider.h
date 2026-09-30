@@ -15,6 +15,10 @@ class GitCredentialProvider {
  public:
   virtual ~GitCredentialProvider() = default; // LCOV_EXCL_LINE
 
+  // Called before each remote operation so retrying providers start with their
+  // preferred credential again. Stateless providers need no setup.
+  virtual void begin_operation() {}
+
   // Mirrors libgit2's git_credential_acquire_cb contract, minus the payload
   // parameter (each provider instance is its own payload). Returns true and
   // sets *out if a credential was produced for this request; returns false
