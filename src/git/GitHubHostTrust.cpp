@@ -1,5 +1,10 @@
 #include "git/GitHubHostTrust.h"
+#if __has_include(<git2/sys/errors.h>)
 #include <git2/sys/errors.h>
+#else
+// Older libgit2 releases expose git_error_set_str in the public error header.
+#include <git2/errors.h>
+#endif
 
 #include <sodium.h>
 
