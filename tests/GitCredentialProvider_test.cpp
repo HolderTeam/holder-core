@@ -4,17 +4,20 @@
 #include <catch2/catch.hpp>
 #endif
 
+#include "core_test_helpers.h"
 #include "git/EcdsaDerSigningCredentialProvider.h"
 #include "git/GitRepo.h"
 #include "git/SshAgentAndFileCredentialProvider.h"
 
 #include <git2.h>
+#include <git2/sys/credential.h>
 #include <openssl/bn.h>
 #include <openssl/core_names.h>
 #include <openssl/ecdsa.h>
 #include <openssl/evp.h>
 
 #include <cstdlib>
+#include <fstream>
 #include <memory>
 #include <stdexcept>
 #include <vector>
@@ -49,14 +52,14 @@ std::vector<unsigned char> dummy_p256_ssh_pubkey_blob() {
   EVP_PKEY_get_octet_string_param(key, OSSL_PKEY_PARAM_PUB_KEY, q.data(), q.size(), &q_len);
   EVP_PKEY_free(key);
 
-  auto append_ssh_string = [](std::vector<unsigned char>& out, const unsigned char* data, size_t len
-                           ) {
-    out.push_back(static_cast<unsigned char>((len >> 24) & 0xFF));
-    out.push_back(static_cast<unsigned char>((len >> 16) & 0xFF));
-    out.push_back(static_cast<unsigned char>((len >> 8) & 0xFF));
-    out.push_back(static_cast<unsigned char>(len & 0xFF));
-    out.insert(out.end(), data, data + len);
-  };
+  auto append_ssh_string =
+      [](std::vector<unsigned char>& out, const unsigned char* data, size_t len) {
+        out.push_back(static_cast<unsigned char>((len >> 24) & 0xFF));
+        out.push_back(static_cast<unsigned char>((len >> 16) & 0xFF));
+        out.push_back(static_cast<unsigned char>((len >> 8) & 0xFF));
+        out.push_back(static_cast<unsigned char>(len & 0xFF));
+        out.insert(out.end(), data, data + len);
+      };
 
   std::vector<unsigned char> blob;
   const std::string type = "ecdsa-sha2-nistp256";
@@ -68,6 +71,121 @@ std::vector<unsigned char> dummy_p256_ssh_pubkey_blob() {
 }
 
 } // namespace
+
+TEST_CASE("SSH credentials advance from agent to files and reset per operation", "[git]") {
+  holder::git::GitRepo repo; // Initializes libgit2.
+  const auto home = holder::test::make_temp_dir();
+  std::filesystem::create_directories(home / ".ssh");
+  std::ofstream(home / ".ssh/id_ed25519") << "test identity";
+  std::ofstream(home / ".ssh/id_rsa") << "test identity";
+  holder::test::EnvGuard home_guard("HOME", home.string());
+#ifdef _WIN32
+  holder::test::EnvGuard profile_guard("USERPROFILE", home.string());
+  SECTION("HOME takes precedence") {
+    holder::test::EnvGuard different_profile("USERPROFILE", (home / "unused").string());
+    holder::git::SshAgentAndFileCredentialProvider provider;
+    git_credential* raw = nullptr;
+    REQUIRE(provider.acquire(&raw, "ssh://example.invalid/repo", "git", GIT_CREDENTIAL_SSH_KEY));
+    git_credential_free(raw);
+    REQUIRE(provider.acquire(&raw, "ssh://example.invalid/repo", "git", GIT_CREDENTIAL_SSH_KEY));
+    std::unique_ptr<git_credential, decltype(&git_credential_free)> cred(raw, git_credential_free);
+    REQUIRE(
+        std::string(reinterpret_cast<git_credential_ssh_key*>(raw)->privatekey) ==
+        home.string() + "/.ssh/id_ed25519"
+    );
+  }
+  SECTION("USERPROFILE supplies home when HOME is unset") {
+    holder::test::EnvUnsetGuard unset_home("HOME");
+#else
+  SECTION("HOME supplies home") {
+#endif
+    holder::git::SshAgentAndFileCredentialProvider provider;
+    auto acquire = [&]() {
+      git_credential* raw = nullptr;
+      REQUIRE(
+          provider.acquire(&raw, "ssh://example.invalid/repo", "alice", GIT_CREDENTIAL_SSH_KEY)
+      );
+      return std::unique_ptr<git_credential, decltype(&git_credential_free)>(
+          raw,
+          git_credential_free
+      );
+    };
+    {
+      auto cred = acquire();
+      REQUIRE(reinterpret_cast<git_credential_ssh_key*>(cred.get())->privatekey == nullptr);
+    }
+    for (const auto* name : {"id_ed25519", "id_rsa"}) {
+      auto cred = acquire();
+      REQUIRE(std::string(git_credential_get_username(cred.get())) == "alice");
+      REQUIRE(
+          std::string(reinterpret_cast<git_credential_ssh_key*>(cred.get())->privatekey) ==
+          home.string() + "/.ssh/" + name
+      );
+    }
+    git_credential* raw = nullptr;
+    REQUIRE_FALSE(
+        provider.acquire(&raw, "ssh://example.invalid/repo", "alice", GIT_CREDENTIAL_SSH_KEY)
+    );
+    REQUIRE(raw == nullptr);
+    provider.begin_operation();
+    auto cred = acquire();
+    REQUIRE(reinterpret_cast<git_credential_ssh_key*>(cred.get())->privatekey == nullptr);
+  }
+  std::filesystem::remove_all(home);
+}
+
+TEST_CASE("SSH file credentials skip missing keys and decline memory-only requests", "[git]") {
+  holder::git::GitRepo repo;
+  const auto home = holder::test::make_temp_dir();
+  std::filesystem::create_directories(home / ".ssh");
+  std::ofstream(home / ".ssh/id_rsa") << "test identity";
+  holder::test::EnvGuard home_guard("HOME", home.string());
+  holder::git::SshAgentAndFileCredentialProvider provider;
+  git_credential* raw = nullptr;
+  REQUIRE_FALSE(
+      provider.acquire(&raw, "ssh://example.invalid/repo", "git", GIT_CREDENTIAL_SSH_MEMORY)
+  );
+  REQUIRE(provider.acquire(&raw, "ssh://example.invalid/repo", "git", GIT_CREDENTIAL_SSH_KEY));
+  git_credential_free(raw);
+  REQUIRE(provider.acquire(&raw, "ssh://example.invalid/repo", "git", GIT_CREDENTIAL_SSH_KEY));
+  std::unique_ptr<git_credential, decltype(&git_credential_free)> cred(raw, git_credential_free);
+  REQUIRE(
+      std::string(reinterpret_cast<git_credential_ssh_key*>(raw)->privatekey) ==
+      home.string() + "/.ssh/id_rsa"
+  );
+  std::filesystem::remove_all(home);
+}
+
+// Opt-in: the caller supplies a disposable SSH remote and isolated HOME with
+// its trusted known_hosts entry. Never run against a production repository.
+TEST_CASE("Git over SSH can push probe and fetch", "[.ssh-smoke]") {
+  const char* url = std::getenv("HOLDER_TEST_SSH_REMOTE_URL");
+  if (url == nullptr) SKIP("Set HOLDER_TEST_SSH_REMOTE_URL to a disposable SSH remote");
+  REQUIRE((git_libgit2_features() & GIT_FEATURE_SSH) != 0);
+  holder::test::EnvGuard branch_guard("GIT_DEFAULT_BRANCH", "ssh-smoke");
+  const auto root = holder::test::make_temp_dir();
+  {
+    holder::git::GitRepo source;
+    source.open_or_init(root / "source");
+    source.write_file("ssh-smoke.txt", "Git over SSH\n");
+    source.stage_path("ssh-smoke.txt");
+    source.commit("SSH smoke test");
+    source.set_remote("origin", url);
+    const auto pushed = source.push_branch("origin", "ssh-smoke", true);
+    INFO(pushed.error_message);
+    REQUIRE(pushed.status == holder::git::PushStatus::Pushed);
+    REQUIRE(source.probe_remote("origin").status == holder::git::RemoteProbeStatus::Reachable);
+    holder::git::GitRepo destination;
+    destination.open_or_init(root / "destination");
+    destination.set_remote("origin", url);
+    destination.pull_remote_ff_only("origin");
+    std::ifstream fetched(root / "destination/ssh-smoke.txt");
+    std::string contents;
+    std::getline(fetched, contents);
+    REQUIRE(contents == "Git over SSH");
+  }
+  std::filesystem::remove_all(root);
+}
 
 TEST_CASE(
     "EcdsaDerSigningCredentialProvider reshapes DER signature to SSH mpint wire format",
@@ -129,7 +247,8 @@ TEST_CASE(
 
   SECTION("malformed DER yields an empty result") {
     const std::vector<unsigned char> not_der = {0xDE, 0xAD, 0xBE, 0xEF};
-    const auto wire = EcdsaDerSigningCredentialProvider::der_to_ssh_wire_signature_for_tests(not_der
+    const auto wire = EcdsaDerSigningCredentialProvider::der_to_ssh_wire_signature_for_tests(
+        not_der
     );
     REQUIRE(wire.empty());
   }
@@ -262,7 +381,8 @@ TEST_CASE("EcdsaDerSigningCredentialProvider only handles GIT_CREDENTIAL_SSH_CUS
         provider.acquire(&cred, "ssh://example.invalid/repo.git", "git", GIT_CREDENTIAL_SSH_CUSTOM);
     REQUIRE(produced);
     REQUIRE(cred != nullptr);
-    REQUIRE_FALSE(sign_called
+    REQUIRE_FALSE(
+        sign_called
     ); // acquire() only builds the credential; signing happens later, during auth.
     git_credential_free(cred);
   }
@@ -298,7 +418,8 @@ TEST_CASE(
 
   SECTION("URL has no username: falls back to the provider's default") {
     git_credential* cred = nullptr;
-    REQUIRE(provider.acquire(&cred, "ssh://example.invalid/repo.git", "", GIT_CREDENTIAL_SSH_CUSTOM)
+    REQUIRE(
+        provider.acquire(&cred, "ssh://example.invalid/repo.git", "", GIT_CREDENTIAL_SSH_CUSTOM)
     );
     REQUIRE(std::string(git_credential_get_username(cred)) == "git");
     git_credential_free(cred);
