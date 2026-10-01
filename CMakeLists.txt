@@ -8,6 +8,7 @@ include(CMakePackageConfigHelpers)
 include(CTest)
 
 option(HOLDER_CORE_WARNINGS_AS_ERRORS "Treat Holder core warnings as errors" OFF)
+option(HOLDER_CORE_SDK "Install a self-describing redistributable SDK" OFF)
 
 # Opt-in sanitizer instrumentation, e.g. -DHOLDER_CORE_SANITIZE=thread or
 # -DHOLDER_CORE_SANITIZE=address,undefined. Applied to every target in this
@@ -196,6 +197,7 @@ add_library(holder STATIC
   src/sync/PullConflictResolution.cpp
 )
 add_library(Holder::Core ALIAS holder)
+target_compile_features(holder PUBLIC cxx_std_20)
 set_target_properties(holder PROPERTIES
   EXPORT_NAME Core
   POSITION_INDEPENDENT_CODE ON
@@ -281,6 +283,8 @@ install(DIRECTORY include/
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
   FILES_MATCHING PATTERN "*.h"
 )
+install(FILES schema/schema.sql DESTINATION ${CMAKE_INSTALL_DATADIR}/holder/schema)
+install(FILES resources/WELCOME.md DESTINATION ${CMAKE_INSTALL_DATADIR}/holder/resources)
 install(EXPORT holderTargets
   NAMESPACE Holder::
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/holder
@@ -301,3 +305,41 @@ install(FILES
   "${CMAKE_CURRENT_BINARY_DIR}/holderConfigVersion.cmake"
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/holder
 )
+
+if(HOLDER_CORE_SDK)
+  if(NOT CMAKE_BUILD_TYPE MATCHES "^(RelWithDebInfo|Release)$")
+    message(FATAL_ERROR "SDK builds require RelWithDebInfo or Release")
+  endif()
+  find_package(Git REQUIRED)
+  execute_process(
+    COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    OUTPUT_VARIABLE HOLDER_CORE_COMMIT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE HOLDER_CORE_GIT_RESULT
+  )
+  string(LENGTH "${HOLDER_CORE_COMMIT}" HOLDER_CORE_COMMIT_LENGTH)
+  if(NOT HOLDER_CORE_GIT_RESULT EQUAL 0 OR NOT HOLDER_CORE_COMMIT MATCHES "^[0-9a-f]+$" OR NOT HOLDER_CORE_COMMIT_LENGTH EQUAL 40)
+    message(FATAL_ERROR "SDK builds require a holder-core Git checkout")
+  endif()
+  if(WIN32)
+    set(HOLDER_SDK_PLATFORM windows)
+  elseif(APPLE)
+    set(HOLDER_SDK_PLATFORM macos)
+  elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(HOLDER_SDK_PLATFORM linux)
+  else()
+    message(FATAL_ERROR "Unsupported SDK platform: ${CMAKE_SYSTEM_NAME}")
+  endif()
+  string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" HOLDER_SDK_ARCHITECTURE)
+  if(HOLDER_SDK_ARCHITECTURE MATCHES "^(amd64|x86_64)$")
+    set(HOLDER_SDK_ARCHITECTURE x86_64)
+  elseif(HOLDER_SDK_ARCHITECTURE MATCHES "^(arm64|aarch64)$")
+    set(HOLDER_SDK_ARCHITECTURE arm64)
+  else()
+    message(FATAL_ERROR "Unsupported SDK architecture: ${CMAKE_SYSTEM_PROCESSOR}")
+  endif()
+  configure_file(cmake/libholder-manifest.json.in
+    "${CMAKE_CURRENT_BINARY_DIR}/libholder-manifest.json" @ONLY)
+  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/libholder-manifest.json" DESTINATION .)
+endif()

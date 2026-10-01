@@ -216,6 +216,25 @@ Holder::Core
 
 The first supported consumer is `holder-daemon`, which can use `third_party/holder-core` as a submodule or a sibling checkout during local development.
 
-This repository can install headers, `libholder`, and CMake package files for smoke testing, but the project is not promising a stable C++ ABI yet. Do not ship a separate runtime `libholder` package until there is a real external native consumer.
+Tagged `v<VERSION>` releases produce static libholder SDK archives for Linux x86_64,
+macOS arm64, and Windows x86_64, each in `RelWithDebInfo` and `Release`.
+Each archive has `include/`, `lib/`, CMake package files, the schema and
+welcome resource under `share/holder/`, and a
+`libholder-manifest.json` recording the exact commit, build type, platform,
+architecture, and compiler. Windows archives also carry the vcpkg runtime
+DLLs and license notices in `bin/` and `share/vcpkg-licenses/`.
+
+On Linux and macOS, the SDK uses distribution or Homebrew libraries; consumers
+must install the same dependency packages listed above and provide compatible
+versions. `find_package(holder CONFIG REQUIRED)` and `Holder::Core` expose the
+link dependencies through CMake. A static `libholder` archive does not contain
+those libraries. The project is not promising a stable C++ ABI across SDK
+releases yet, so consumers should pin the exact release and verify the manifest.
+
+The `libholder SDK release` workflow builds, tests, installs, archives, and
+smoke-tests each configuration. A `v<VERSION>` tag publishes all six archives
+as GitHub Release assets after every matrix job succeeds. Manual workflow runs
+validate SDKs without publishing a release. Existing consumer builds continue
+to use source until the separate consumer migration is implemented.
 
 Future non-C++ consumers, such as a C# frontend, should use a separate thin C ABI wrapper rather than binding directly to the C++ API.
