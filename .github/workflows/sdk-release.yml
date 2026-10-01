@@ -1,6 +1,14 @@
 name: libholder SDK release
 
 on:
+  pull_request:
+    paths:
+      - .github/workflows/sdk-release.yml
+      - scripts/package-sdk.py
+      - cmake/libholder-manifest.json.in
+      - cmake/holderConfig.cmake.in
+      - CMakeLists.txt
+      - VERSION
   push:
     tags:
       - 'v*'
