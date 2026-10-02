@@ -25,7 +25,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            debhelper cmake ninja-build pkgconf libssl-dev libsqlite3-dev \
+            build-essential debhelper cmake ninja-build pkgconf libssl-dev libsqlite3-dev \
             libsodium-dev libgit2-dev libmd4c-dev libsecret-1-dev \
             nlohmann-json3-dev libspdlog-dev libyaml-cpp-dev
 
