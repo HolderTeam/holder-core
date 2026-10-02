@@ -1,0 +1,71 @@
+name: Python SDK integration
+
+on:
+  workflow_run:
+    workflows: ['libholder SDK release']
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/python-integration.yml
+      - scripts/select-sdk-integration.py
+      - scripts/publish-sdk-snapshot.py
+      - tests/test_select_sdk_integration.py
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  select-sdk:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'workflow_run' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      commit: ${{ steps.select.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Test downstream SDK selection
+        run: python3 -m unittest discover -s tests -p test_select_sdk_integration.py -v
+      - name: Download the triggering publication's validated index
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v4
+        with:
+          name: snapshot-index
+          path: out/trigger-index
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+      - id: select
+        name: Verify the exact published SDK and its green core run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SDK_RUN_ID: ${{ github.event.workflow_run.id }}
+        shell: bash
+        run: |
+          options=()
+          if [[ "$GITHUB_EVENT_NAME" == workflow_run ]]; then
+            options=(--index out/trigger-index/sdk-index.json --sdk-run-id "$SDK_RUN_ID")
+          fi
+          python3 scripts/select-sdk-integration.py --repository "$GITHUB_REPOSITORY" "${options[@]}"
+      - name: Record the SDK under test
+        env:
+          CORE_COMMIT: ${{ steps.select.outputs.commit }}
+        run: |
+          echo "Python integration tests core SDK [\`$CORE_COMMIT\`](https://github.com/$GITHUB_REPOSITORY/releases/tag/sdk-$CORE_COMMIT)." >> "$GITHUB_STEP_SUMMARY"
+
+  python:
+    needs: select-sdk
+    uses: HolderTeam/holder-python/.github/workflows/ci.yml@main
+    with:
+      core_ref: ${{ needs.select-sdk.outputs.commit }}
+      python_ref: main
+    permissions:
+      contents: read
