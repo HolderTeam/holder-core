@@ -4,7 +4,10 @@ on:
   pull_request:
     paths:
       - .github/workflows/sdk-release.yml
+      - .github/workflows/core.yml
       - scripts/package-sdk.py
+      - scripts/publish-sdk-snapshot.py
+      - tests/test_publish_sdk_snapshot.py
       - cmake/libholder-manifest.json.in
       - cmake/holder.pc.in
       - cmake/holderConfig.cmake.in
@@ -14,12 +17,38 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+  workflow_run:
+    workflows: ['Holder core']
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: read
 
 jobs:
+  publication-tests:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+      - name: Test SDK publication and promotion
+        run: python3 -m unittest discover -s tests -p test_publish_sdk_snapshot.py -v
+
   sdk:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     strategy:
       fail-fast: false
       matrix:
@@ -47,6 +76,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           persist-credentials: false
 
       - name: Check release tag
@@ -169,9 +199,72 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  validate-snapshot:
+    needs: [sdk, publication-tests]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sdk-*
+          path: out/snapshot-assets
+          merge-multiple: true
+      - name: Validate the complete snapshot and generate its index
+        run: >-
+          python3 scripts/publish-sdk-snapshot.py
+          --assets out/snapshot-assets --index out/snapshot-index/sdk-index.json
+          --repository "$GITHUB_REPOSITORY" --commit "$(git rev-parse HEAD)"
+          --sdk-run-id "$GITHUB_RUN_ID" --validate-only
+      - uses: actions/upload-artifact@v4
+        with:
+          name: snapshot-index
+          path: out/snapshot-index/sdk-index.json
+          if-no-files-found: error
+          retention-days: 7
+
+  snapshot:
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    needs: validate-snapshot
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    concurrency:
+      group: libholder-latest-green-publication
+      queue: max
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sdk-*
+          path: out/snapshot-assets
+          merge-multiple: true
+      - name: Publish the immutable snapshot and promote latest-green
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CORE_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: >-
+          python3 scripts/publish-sdk-snapshot.py
+          --assets out/snapshot-assets --index out/snapshot-index/sdk-index.json
+          --repository "$GITHUB_REPOSITORY" --commit "$(git rev-parse HEAD)"
+          --core-run-id "$CORE_RUN_ID" --sdk-run-id "$GITHUB_RUN_ID"
+
   release:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: sdk
+    needs: [sdk, validate-snapshot]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
