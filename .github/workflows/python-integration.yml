@@ -55,6 +55,11 @@ jobs:
             options=(--index out/trigger-index/sdk-index.json --sdk-run-id "$SDK_RUN_ID")
           fi
           python3 scripts/select-sdk-integration.py --repository "$GITHUB_REPOSITORY" "${options[@]}"
+      - name: Record the SDK under test
+        env:
+          CORE_COMMIT: ${{ steps.select.outputs.commit }}
+        run: |
+          echo "Python integration tests core SDK [\`$CORE_COMMIT\`](https://github.com/$GITHUB_REPOSITORY/releases/tag/sdk-$CORE_COMMIT)." >> "$GITHUB_STEP_SUMMARY"
 
   python:
     needs: select-sdk
