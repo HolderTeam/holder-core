@@ -81,12 +81,30 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
+      - name: Set vcpkg paths
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          "VCPKG_ROOT=${{ github.workspace }}\.vcpkg" >> $env:GITHUB_ENV
+          "VCPKG_DEFAULT_BINARY_CACHE=${{ github.workspace }}\.vcpkg-binary-cache" >> $env:GITHUB_ENV
+
+      - name: Restore vcpkg binary package cache
+        if: runner.os == 'Windows'
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'CMakePresets.json') }}-sdk-${{ matrix.build_type }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'CMakePresets.json') }}-
+            vcpkg-${{ runner.os }}-
+
       - name: Bootstrap vcpkg
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          git clone https://github.com/microsoft/vcpkg "$env:GITHUB_WORKSPACE/.vcpkg"
-          & "$env:GITHUB_WORKSPACE/.vcpkg/bootstrap-vcpkg.bat" -disableMetrics
+          git clone https://github.com/microsoft/vcpkg "$env:VCPKG_ROOT"
+          & "$env:VCPKG_ROOT/bootstrap-vcpkg.bat" -disableMetrics
+          New-Item -ItemType Directory -Force "$env:VCPKG_DEFAULT_BINARY_CACHE" | Out-Null
 
       - name: Configure Unix SDK
         if: runner.os != 'Windows'
@@ -135,6 +153,13 @@ jobs:
             --vcpkg-installed "$env:GITHUB_WORKSPACE/vcpkg_installed" `
             --vcpkg-root "$env:GITHUB_WORKSPACE/.vcpkg"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Save vcpkg binary package cache
+        if: runner.os == 'Windows' && success() && github.event_name != 'pull_request'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'CMakePresets.json') }}-sdk-${{ matrix.build_type }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Upload validated SDK
         uses: actions/upload-artifact@v4
