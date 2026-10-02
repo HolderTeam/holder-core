@@ -1,0 +1,76 @@
+name: SDK consumer tooling
+
+on:
+  pull_request:
+    paths:
+      - .github/actions/core-sdk/**
+      - .github/workflows/sdk-consumer.yml
+      - scripts/core-sdk.py
+      - tests/test_core_sdk.py
+  push:
+    branches: [main]
+    paths:
+      - .github/actions/core-sdk/**
+      - .github/workflows/sdk-consumer.yml
+      - scripts/core-sdk.py
+      - tests/test_core_sdk.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    outputs:
+      commit: ${{ steps.core.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Test selection, cache and manifest validation
+        run: python3 -m unittest discover -s tests -p test_core_sdk.py -v
+      - id: core
+        uses: ./.github/actions/core-sdk
+        with:
+          command: resolve
+  consume:
+    needs: resolve
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+        build-type: [Release, RelWithDebInfo]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+      - uses: ./.github/actions/core-sdk
+        with:
+          commit: ${{ needs.resolve.outputs.commit }}
+          build-type: ${{ matrix.build-type }}
+      - name: Install Linux development dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config libssl-dev nlohmann-json3-dev libyaml-cpp-dev libspdlog-dev libsqlite3-dev libsodium-dev libgit2-dev libmd4c-dev libsecret-1-dev
+      - name: Install macOS development dependencies
+        if: runner.os == 'macOS'
+        run: brew install ninja pkg-config nlohmann-json yaml-cpp spdlog sqlite libsodium libgit2 md4c openssl@3
+      - name: Build and run an external SDK consumer
+        shell: bash
+        run: |
+          options=()
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            options=(-DCMAKE_TOOLCHAIN_FILE="$HOLDER_CORE_SDK/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_INSTALLED_DIR="$HOLDER_CORE_SDK/vcpkg/installed" -DVCPKG_TARGET_TRIPLET=x64-windows -DVCPKG_MANIFEST_MODE=OFF -DVCPKG_APPLOCAL_DEPS=OFF)
+            export PATH="$HOLDER_CORE_SDK/bin:$PATH"
+          elif [[ "$RUNNER_OS" == macOS ]]; then
+            options=(-DCMAKE_PREFIX_PATH="$(brew --prefix);$(brew --prefix openssl@3)" -DOPENSSL_ROOT_DIR="$(brew --prefix openssl@3)")
+          fi
+          cmake -S tests/installed-consumer -B out/consumer -G Ninja -DCMAKE_BUILD_TYPE="$HOLDER_CORE_BUILD_TYPE" -Dholder_DIR="$HOLDER_CORE_SDK/lib/cmake/holder" "${options[@]}"
+          cmake --build out/consumer --parallel
+          ctest --test-dir out/consumer --output-on-failure

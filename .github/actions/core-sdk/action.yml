@@ -1,0 +1,67 @@
+name: Select or fetch libholder SDK
+description: Resolve core once and fetch a verified immutable SDK for each consumer host
+inputs:
+  command:
+    description: resolve uploads the run-wide selection; fetch downloads and verifies it
+    default: fetch
+  core-ref:
+    description: latest-green, a full commit SHA, or a version tag (resolve only)
+    default: latest-green
+  commit:
+    description: Run-wide resolved core commit (required for fetch)
+  build-type:
+    description: RelWithDebInfo for development; Release for shipping
+    default: RelWithDebInfo
+outputs:
+  commit:
+    description: Resolved core commit
+    value: ${{ steps.resolve.outputs.commit }}
+  sdk:
+    description: Verified SDK installation path
+    value: ${{ steps.fetch.outputs.sdk }}
+runs:
+  using: composite
+  steps:
+    - name: Validate operation
+      shell: bash
+      env:
+        COMMAND: ${{ inputs.command }}
+        CORE_COMMIT: ${{ inputs.commit }}
+      run: |
+        case "$COMMAND" in
+          resolve) ;;
+          fetch) test -n "$CORE_COMMIT" ;;
+          *) echo "command must be resolve or fetch" >&2; exit 1 ;;
+        esac
+    - id: resolve
+      if: inputs.command == 'resolve'
+      shell: bash
+      env:
+        CORE_REF: ${{ inputs.core-ref }}
+        SDK_TOOL: ${{ github.action_path }}/../../../scripts/core-sdk.py
+        GH_TOKEN: ${{ github.token }}
+      run: python "$SDK_TOOL" resolve --core-ref "$CORE_REF"
+    - if: inputs.command == 'resolve'
+      uses: actions/upload-artifact@v4
+      with:
+        name: core-selection
+        path: out/core-selection.json
+        if-no-files-found: error
+    - if: inputs.command == 'fetch'
+      uses: actions/download-artifact@v4
+      with:
+        name: core-selection
+        path: out
+    - if: inputs.command == 'fetch'
+      uses: actions/cache@v4
+      with:
+        path: .core-sdk
+        key: core-sdk-${{ inputs.commit }}-${{ runner.os }}-${{ runner.arch }}-${{ inputs.build-type }}-v1
+    - id: fetch
+      if: inputs.command == 'fetch'
+      shell: bash
+      env:
+        CORE_COMMIT: ${{ inputs.commit }}
+        BUILD_TYPE: ${{ inputs.build-type }}
+        SDK_TOOL: ${{ github.action_path }}/../../../scripts/core-sdk.py
+      run: python "$SDK_TOOL" fetch --expected-commit "$CORE_COMMIT" --build-type "$BUILD_TYPE" --github-env
