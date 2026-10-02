@@ -63,6 +63,7 @@ jobs:
 
   daemon:
     needs: select-sdk
+    # Validate daemon #58's prerequisite branch; use main after it merges.
     uses: HolderTeam/holder-daemon/.github/workflows/ci.yml@consume-core-sdk
     with:
       core_ref: ${{ needs.select-sdk.outputs.commit }}
