@@ -255,9 +255,7 @@ symlink, `libholder.a`, CMake targets, and `holder.pc` for pkg-config. The
 Ubuntu 24.04, then compiles external static and shared consumers against them.
 
 The manual `Upload libholder to Launchpad` workflow prepares signed source
-uploads for noble and resolute. It requires a `PPA_GPG_PRIVATE_KEY` Actions
-secret in `holder-core`, configured for the same PPA key used by the existing
-Holder uploads. Launchpad builds each series with its own
+uploads for noble and resolute. Launchpad builds each series with its own
 compiler, dependencies, and hardening flags. These packages do not use the
 GitHub Linux SDK archive. Check Launchpad binary build/publication results
 before relying on an uploaded package.
