@@ -7,4 +7,5 @@ build-warnings
 build-tsan
 out
 .vcpkg
+.core-sdk
 *~

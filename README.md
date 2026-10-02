@@ -279,6 +279,32 @@ commit and configuration, and resolve the pointer again for a new build. A
 whole Holder Framework RC or release pins an exact core version across its
 components; ordinary development does not require dependency version bumps.
 
+### Shared SDK consumer tool
+
+`scripts/core-sdk.py` provides selection, checksummed caching and archive/manifest
+validation for every consumer. Run it from the consumer's working directory:
+
+```sh
+python3 ../holder-core/scripts/core-sdk.py resolve
+export HOLDER_CORE_SDK="$(python3 ../holder-core/scripts/core-sdk.py fetch)"
+```
+
+`resolve --core-ref <version-tag-or-full-SHA>` pins a release. `fetch --build-type
+Release` selects shipping binaries; development defaults to `RelWithDebInfo`.
+The script writes `out/core-selection.json` once, then uses that immutable
+selection for every fetch. It never falls back to compiling core.
+
+GitHub consumers use `HolderTeam/holder-core/.github/actions/core-sdk@main`
+with `command: resolve` once, then pass its `commit` output to the action's
+default `fetch` operation in each platform job. The action transfers the
+selection artifact, caches the archive and exports `HOLDER_CORE_SDK`,
+`HOLDER_CORE_BUILD_TYPE` and Windows toolchain options in `CMAKE_ARGS`.
+Consumers select their generator and configure their own packaging tools.
+
+The installed CMake package exposes `holder_DATA_DIR`, `holder_SCHEMA_FILE`
+and `holder_WELCOME_FILE` alongside `Holder::Core` and `Holder::Shared`.
+These resource paths follow the selected installation, including relocation.
+
 ## Ubuntu packages
 
 `packaging/linux/debian` builds `libholder0` and `libholder-dev` from this

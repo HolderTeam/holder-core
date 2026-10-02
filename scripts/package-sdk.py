@@ -10,6 +10,7 @@ import subprocess
 import tarfile
 import tempfile
 import zipfile
+from sdk_dependencies import relocate_windows_packages
 
 
 def run(*args, env=None):
@@ -57,6 +58,7 @@ def main():
             # prebuilt files so consumers never bootstrap or build vcpkg.
             bundled = staged / "vcpkg"
             shutil.copytree(triplet, bundled / "installed" / "x64-windows")
+            relocate_windows_packages(bundled / "installed" / "x64-windows")
             shutil.copytree(args.vcpkg_root / "scripts", bundled / "scripts")
             (bundled / ".vcpkg-root").touch()
             dlls = list((triplet / "bin").glob("*.dll"))
