@@ -1,0 +1,5 @@
+usr/include/holder
+usr/lib/*/libholder.so
+usr/lib/*/libholder.a
+usr/lib/*/cmake/holder/*
+usr/lib/*/pkgconfig/holder.pc

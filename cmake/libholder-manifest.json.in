@@ -1,0 +1,8 @@
+{
+  "commit": "@HOLDER_CORE_COMMIT@",
+  "version": "@HOLDER_CORE_VERSION@",
+  "platform": "@HOLDER_SDK_PLATFORM@",
+  "architecture": "@HOLDER_SDK_ARCHITECTURE@",
+  "build_type": "@CMAKE_BUILD_TYPE@",
+  "compiler": "@CMAKE_CXX_COMPILER_ID@ @CMAKE_CXX_COMPILER_VERSION@"
+}

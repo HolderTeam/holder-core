@@ -1,0 +1,11 @@
+prefix=${pcfiledir}/@HOLDER_PC_PREFIX_REL@
+libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+
+Name: holder
+Description: Holder core library
+Version: @HOLDER_CORE_VERSION@
+Libs: -L${libdir} -lholder
+Libs.private: @HOLDER_PC_CXX_RUNTIME@ -pthread
+Cflags: -I${includedir}
+Requires.private: @HOLDER_PC_PRIVATE_REQUIRES@

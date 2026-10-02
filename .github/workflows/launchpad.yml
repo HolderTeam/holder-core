@@ -1,0 +1,93 @@
+name: Upload libholder to Launchpad
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Expected upstream VERSION (for example 0.2.0)
+        required: true
+      package_revision:
+        description: Debian package revision (increment for every replacement upload)
+        required: true
+        default: '1'
+
+permissions:
+  contents: read
+
+jobs:
+  upload:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        series: [noble, resolute]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install source packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            devscripts debhelper dput gnupg
+
+      - name: Prepare versioned source package
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          PACKAGE_REVISION: ${{ inputs.package_revision }}
+          SERIES: ${{ matrix.series }}
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          test "$INPUT_VERSION" = "$version"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo 'Launchpad source uploads require a stable numeric VERSION' >&2
+            exit 1
+          fi
+          if ! [[ "$PACKAGE_REVISION" =~ ^[1-9][0-9]*$ ]]; then
+            echo 'package_revision must be a positive integer' >&2
+            exit 1
+          fi
+          cp -a packaging/linux/debian debian
+          package_version="${version}-${PACKAGE_REVISION}~${SERIES}1"
+          cat > debian/changelog <<EOF
+          holder-core (${package_version}) ${SERIES}; urgency=medium
+
+            * Build libholder packages for ${SERIES}.
+
+           -- Holder Team <holdercardteam@gmail.com>  $(date -R)
+          EOF
+          git archive --format=tar --prefix="holder-core-${version}/" HEAD | gzip > "../holder-core_${version}.orig.tar.gz"
+
+      - name: Import PPA signing key
+        env:
+          PPA_GPG_PRIVATE_KEY: ${{ secrets.PPA_GPG_PRIVATE_KEY }}
+        run: |
+          if [ -z "$PPA_GPG_PRIVATE_KEY" ]; then
+            echo 'Configure PPA_GPG_PRIVATE_KEY for holder-core before uploading' >&2
+            exit 1
+          fi
+          mkdir -p ~/.gnupg
+          chmod 700 ~/.gnupg
+          echo "$PPA_GPG_PRIVATE_KEY" | gpg --batch --import
+          keyid="$(gpg --list-secret-keys --with-colons | awk -F: '/^sec:/ {print $5; exit}')"
+          test -n "$keyid"
+          echo "DEBSIGN_KEYID=$keyid" >> "$GITHUB_ENV"
+          cat > ~/.gnupg/gpg.conf <<EOF
+          batch
+          yes
+          pinentry-mode loopback
+          EOF
+          cat > ~/.gnupg/gpg-agent.conf <<EOF
+          allow-loopback-pinentry
+          EOF
+          gpgconf --kill gpg-agent
+
+      - name: Build signed source package
+        env:
+          DEBFULLNAME: Holder Team
+          DEBEMAIL: holdercardteam@gmail.com
+        run: debuild -S -d -k"$DEBSIGN_KEYID"
+
+      - name: Upload to Launchpad PPA
+        run: dput ppa:holderteam/holder ../holder-core_*_source.changes

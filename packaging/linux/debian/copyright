@@ -1,0 +1,13 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: holder-core
+Source: https://github.com/HolderTeam/holder-core
+
+Files: *
+Copyright: 2026 Holder Team
+License: GPL-3
+
+License: GPL-3
+ This package is licensed under the GNU General Public License, version 3.
+ .
+ On Debian systems, the full text of the GNU General Public License version 3
+ can be found in /usr/share/common-licenses/GPL-3.

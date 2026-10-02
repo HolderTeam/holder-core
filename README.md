@@ -216,6 +216,48 @@ Holder::Core
 
 The first supported consumer is `holder-daemon`, which can use `third_party/holder-core` as a submodule or a sibling checkout during local development.
 
-This repository can install headers, `libholder`, and CMake package files for smoke testing, but the project is not promising a stable C++ ABI yet. Do not ship a separate runtime `libholder` package until there is a real external native consumer.
+Set `-DHOLDER_CORE_BUILD_SHARED=ON` in a standalone CMake build to build and
+install both `libholder.a` (`Holder::Core`) and the shared library
+(`Holder::Shared`). On Linux the shared files are `libholder.so.0.2.0`,
+`libholder.so.0`, and `libholder.so`; ABI generation `0` is independent of the
+application version. An incompatible public ABI change requires a new SONAME
+and runtime package name. The default remains static-only for existing source
+consumers.
+
+Tagged `v<VERSION>` releases produce static libholder SDK archives for Linux x86_64,
+macOS arm64, and Windows x86_64, each in `RelWithDebInfo` and `Release`.
+Each archive has `include/`, `lib/`, CMake package files, the schema and
+welcome resource under `share/holder/`, and a
+`libholder-manifest.json` recording the exact commit, build type, platform,
+architecture, and compiler. Windows archives also carry the vcpkg runtime
+DLLs and license notices in `bin/` and `share/vcpkg-licenses/`.
+
+On Linux and macOS, the SDK uses distribution or Homebrew libraries; consumers
+must install the same dependency packages listed above and provide compatible
+versions. `find_package(holder CONFIG REQUIRED)` and `Holder::Core` expose the
+link dependencies through CMake. A static `libholder` archive does not contain
+those libraries. The project is not promising a stable C++ ABI across SDK
+releases yet, so consumers should pin the exact release and verify the manifest.
+
+The `libholder SDK release` workflow builds, tests, installs, archives, and
+smoke-tests each configuration. A `v<VERSION>` tag publishes all six archives
+as GitHub Release assets after every matrix job succeeds. Manual workflow runs
+validate SDKs without publishing a release. Existing consumer builds continue
+to use source until the separate consumer migration is implemented.
+
+## Ubuntu packages
+
+`packaging/linux/debian` builds `libholder0` and `libholder-dev` from this
+repository's CMake install output. `libholder0` carries the shared runtime and
+schema/resources. `libholder-dev` carries headers, the `libholder.so` linker
+symlink, `libholder.a`, CMake targets, and `holder.pc` for pkg-config. The
+`libholder Ubuntu packages` workflow builds and installs both packages on
+Ubuntu 24.04, then compiles external static and shared consumers against them.
+
+The manual `Upload libholder to Launchpad` workflow prepares signed source
+uploads for noble and resolute. Launchpad builds each series with its own
+compiler, dependencies, and hardening flags. These packages do not use the
+GitHub Linux SDK archive. Check Launchpad binary build/publication results
+before relying on an uploaded package.
 
 Future non-C++ consumers, such as a C# frontend, should use a separate thin C ABI wrapper rather than binding directly to the C++ API.
