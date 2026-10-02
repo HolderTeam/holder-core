@@ -145,7 +145,23 @@ class GitHub:
         self.api("git/refs/tags/latest-green", "PATCH", {"sha": commit, "force": True})
 
     def release(self, tag):
-        return self.api(f"releases/tags/{tag}", missing_ok=True)
+        release = self.api(f"releases/tags/{tag}", missing_ok=True)
+        if release is not None:
+            return release
+        # The tag endpoint returns published releases only. Drafts must be
+        # located in the authenticated release listing when resuming an upload.
+        page = 1
+        while True:
+            releases = self.api(f"releases?per_page=100&page={page}")
+            for release in releases:
+                if release["tag_name"] == tag:
+                    return self.release_by_id(release["id"])
+            if len(releases) < 100:
+                return None
+            page += 1
+
+    def release_by_id(self, release_id):
+        return self.api(f"releases/{release_id}")
 
     def create_draft(self, index):
         commit = index["commit"]
@@ -167,9 +183,13 @@ class GitHub:
         subprocess.run(["gh", "release", "upload", tag, *map(str, files),
                         "--repo", self.repository], check=True)
 
-    def download(self, tag, name, output):
-        subprocess.run(["gh", "release", "download", tag, "--pattern", name,
-                        "--output", str(output), "--repo", self.repository], check=True)
+    def download(self, asset_id, output):
+        # Asset IDs work for both drafts and published releases. Do not depend
+        # on tag-based download lookup while checking an unpublished snapshot.
+        with output.open("wb") as stream:
+            subprocess.run(["gh", "api", f"repos/{self.repository}/releases/assets/{asset_id}",
+                            "--header", "Accept: application/octet-stream"],
+                           stdout=stream, check=True)
 
     def publish_release(self, release_id):
         self.api(f"releases/{release_id}", "PATCH",
@@ -207,7 +227,7 @@ def verify_release(github, release, expected, draft=False):
     with tempfile.TemporaryDirectory(prefix="sdk-publication-") as temporary:
         root = Path(temporary)
         index_path = root / "sdk-index.json"
-        github.download(tag, "sdk-index.json", index_path)
+        github.download(remote_assets["sdk-index.json"]["id"], index_path)
         index = json.loads(index_path.read_text())
         validate_index(index, expected["repository"], expected["commit"])
         require(index["version"] == expected["version"], "Published SDK version mismatch")
@@ -221,7 +241,7 @@ def verify_release(github, release, expected, draft=False):
             digest = remote.get("digest")
             if digest is None:
                 downloaded = root / asset["name"]
-                github.download(tag, asset["name"], downloaded)
+                github.download(remote["id"], downloaded)
                 digest = f"sha256:{sha256(downloaded)}"
             require(digest == f"sha256:{asset['sha256']}", "Uploaded SDK checksum mismatch")
     return index
@@ -247,9 +267,9 @@ def publish_snapshot(github, index, files, index_path):
         for asset in release["assets"]:
             github.delete_draft_asset(asset["id"])
         github.upload(tag, [*files, index_path])
-        verify_release(github, github.release(tag), index, draft=True)
+        verify_release(github, github.release_by_id(release["id"]), index, draft=True)
         github.publish_release(release["id"])
-        require(not github.release(tag)["draft"], "SDK snapshot is still a draft")
+        require(not github.release_by_id(release["id"])["draft"], "SDK snapshot is still a draft")
 
     # Publication jobs are serialized by the workflow. Read the pointer only
     # after the snapshot is complete, and compare graph ancestry, not run times.
