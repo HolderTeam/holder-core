@@ -237,13 +237,39 @@ must install the same dependency packages listed above and provide compatible
 versions. `find_package(holder CONFIG REQUIRED)` and `Holder::Core` expose the
 link dependencies through CMake. A static `libholder` archive does not contain
 those libraries. The project is not promising a stable C++ ABI across SDK
-releases yet, so consumers should pin the exact release and verify the manifest.
+releases yet, so each consumer build should resolve one exact SDK revision and
+verify its manifest.
 
 The `libholder SDK release` workflow builds, tests, installs, archives, and
 smoke-tests each configuration. A `v<VERSION>` tag publishes all six archives
 as GitHub Release assets after every matrix job succeeds. Manual workflow runs
 validate SDKs without publishing a release. Existing consumer builds continue
 to use source until the separate consumer migration is implemented.
+
+Development builds should follow the newest green core build automatically.
+After `Holder core` CI succeeds for a push to `main`, the SDK workflow checks
+out that exact commit and validates all six configurations. It then publishes
+a prerelease named `sdk-<full-commit-SHA>` containing the six archives and
+`sdk-index.json`. The index identifies the commit and core/SDK workflow runs,
+and lists each archive's platform, architecture, configuration, size, download
+URL, and SHA-256 checksum. Published snapshots are retained and never
+overwritten by this workflow.
+
+The lightweight `latest-green` tag points to the newest fully published green
+snapshot. Failed candidates leave the previous snapshot available. Publication
+is queued and serialized, and an older completed run cannot move the pointer
+backward. Development consumers resolve this tag once per build or CI run:
+
+```sh
+gh api repos/HolderTeam/holder-core/git/ref/tags/latest-green --jq '.object.sha'
+```
+
+Download `sdk-index.json` from the `sdk-<resolved-SHA>` release, select the
+matching archive, check its SHA-256 checksum, and verify the archive's manifest
+against the resolved commit and configuration. Cache SDKs by that resolved
+commit and configuration, and resolve the pointer again for a new build. A
+whole Holder Framework RC or release pins an exact core version across its
+components; ordinary development does not require dependency version bumps.
 
 ## Ubuntu packages
 
