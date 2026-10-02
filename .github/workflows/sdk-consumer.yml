@@ -6,6 +6,7 @@ on:
       - .github/actions/core-sdk/**
       - .github/workflows/sdk-consumer.yml
       - scripts/core-sdk.py
+      - scripts/sdk_dependencies.py
       - tests/test_core_sdk.py
   push:
     branches: [main]
@@ -13,6 +14,7 @@ on:
       - .github/actions/core-sdk/**
       - .github/workflows/sdk-consumer.yml
       - scripts/core-sdk.py
+      - scripts/sdk_dependencies.py
       - tests/test_core_sdk.py
   workflow_dispatch:
 

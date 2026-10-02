@@ -13,6 +13,10 @@ import tarfile
 import tempfile
 import urllib.request
 import zipfile
+import sys
+
+sys.path.insert(0, str(Path(__file__).parent))
+from sdk_dependencies import relocate_windows_packages
 
 REPOSITORY = "HolderTeam/holder-core"
 API = f"https://api.github.com/repos/{REPOSITORY}/"
@@ -145,6 +149,9 @@ def fetch(selection, cache, system, architecture, build_type):
         if system == "windows":
             require((sdk / "vcpkg/scripts/buildsystems/vcpkg.cmake").is_file(),
                     "Windows SDK lacks bundled development dependencies; select a newer core snapshot")
+            # Normalize legacy snapshots as well as newly packaged SDKs. The
+            # cached archive is preserved and rechecked against its checksum.
+            relocate_windows_packages(sdk / "vcpkg/installed/x64-windows")
         target = root / "libholder-sdk"
         if target.exists():
             shutil.rmtree(target)

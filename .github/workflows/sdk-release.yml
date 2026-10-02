@@ -6,6 +6,7 @@ on:
       - .github/workflows/sdk-release.yml
       - .github/workflows/core.yml
       - scripts/package-sdk.py
+      - scripts/sdk_dependencies.py
       - scripts/publish-sdk-snapshot.py
       - tests/test_publish_sdk_snapshot.py
       - cmake/libholder-manifest.json.in

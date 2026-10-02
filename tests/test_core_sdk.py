@@ -155,6 +155,17 @@ class SDKTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "run-wide core commit"):
                     sdk.main()
 
+    def test_windows_package_configs_use_their_own_installation(self) -> None:
+        triplet = self.root / "sdk/vcpkg/installed/x64-windows"
+        config = triplet / "share/unofficial-sodium/unofficial-sodiumConfig.cmake"
+        config.parent.mkdir(parents=True)
+        config.write_text('set(library "${_VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib/sodium.lib")\n')
+        sdk.relocate_windows_packages(triplet)
+        self.assertEqual(config.read_text(), 'set(library "${CMAKE_CURRENT_LIST_DIR}/../../lib/sodium.lib")\n')
+        first = config.read_text()
+        sdk.relocate_windows_packages(triplet)
+        self.assertEqual(config.read_text(), first)
+
 
 if __name__ == "__main__":
     unittest.main()
