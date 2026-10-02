@@ -63,11 +63,9 @@ jobs:
 
   python:
     needs: select-sdk
-    # Use the consumer branch while validating this cross-repository call.
-    # Switch both references to main after the Python prerequisite merges.
-    uses: HolderTeam/holder-python/.github/workflows/ci.yml@reusable-sdk-integration
+    uses: HolderTeam/holder-python/.github/workflows/ci.yml@main
     with:
       core_ref: ${{ needs.select-sdk.outputs.commit }}
-      python_ref: reusable-sdk-integration
+      python_ref: main
     permissions:
       contents: read
