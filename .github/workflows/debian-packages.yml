@@ -44,6 +44,7 @@ jobs:
           test -L "${libdir}/libholder.so.0"
           readelf -d "${libdir}/libholder.so.0" | grep -F 'Library soname: [libholder.so.0]'
           test "$(pkg-config --modversion holder)" = "$(cat VERSION)"
+          mkdir -p out
           c++ tests/installed-consumer/main.cpp $(pkg-config --cflags --libs holder) -o out/holder-pkgconfig-smoke
           out/holder-pkgconfig-smoke
           cmake -S tests/installed-consumer -B out/package-shared -G Ninja \
