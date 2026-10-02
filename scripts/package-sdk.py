@@ -114,7 +114,8 @@ def main():
         if platform == "windows":
             configure += [f"-DCMAKE_TOOLCHAIN_FILE={sdk / 'vcpkg' / 'scripts' / 'buildsystems' / 'vcpkg.cmake'}",
                           f"-DVCPKG_INSTALLED_DIR={sdk / 'vcpkg' / 'installed'}",
-                          "-DVCPKG_TARGET_TRIPLET=x64-windows", "-DVCPKG_MANIFEST_MODE=OFF"]
+                          "-DVCPKG_TARGET_TRIPLET=x64-windows", "-DVCPKG_MANIFEST_MODE=OFF",
+                          "-DVCPKG_APPLOCAL_DEPS=OFF"]
         run(*configure)
         run("cmake", "--build", str(build), "--parallel")
         environment = os.environ.copy()

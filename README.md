@@ -235,7 +235,8 @@ Windows archives also include prebuilt dependency headers, import libraries,
 CMake packages, and vcpkg's CMake scripts under `vcpkg/`. Configure consumers
 with `-DCMAKE_TOOLCHAIN_FILE=<sdk>/vcpkg/scripts/buildsystems/vcpkg.cmake`,
 `-DVCPKG_INSTALLED_DIR=<sdk>/vcpkg/installed`,
-`-DVCPKG_TARGET_TRIPLET=x64-windows`, and `-DVCPKG_MANIFEST_MODE=OFF`.
+`-DVCPKG_TARGET_TRIPLET=x64-windows`, `-DVCPKG_MANIFEST_MODE=OFF`, and
+`-DVCPKG_APPLOCAL_DEPS=OFF` (the consumer supplies runtime DLLs from `bin/`).
 No vcpkg executable or dependency build is required. The archive smoke test
 uses these bundled files rather than the producer's dependency installation.
 
