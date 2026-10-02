@@ -65,12 +65,16 @@ class FakeGitHub:
     def release(self, tag):
         return copy.deepcopy(self.releases.get(tag))
 
+    def release_by_id(self, release_id):
+        return copy.deepcopy(next(release for release in self.releases.values()
+                                  if release["id"] == release_id))
+
     def create_draft(self, index):
         tag = index["snapshot_tag"]
         self.events.append(("create-draft", tag))
         self.releases[tag] = {"id": 1, "tag_name": tag, "draft": True,
                               "prerelease": True, "assets": []}
-        return self.release(tag)
+        return copy.deepcopy(self.releases[tag])
 
     def delete_draft_asset(self, asset_id):
         self.events.append(("delete-draft-asset", asset_id))
@@ -94,8 +98,13 @@ class FakeGitHub:
             if self.fail_upload:
                 raise RuntimeError("Upload interrupted")
 
-    def download(self, tag, name, output):
-        output.write_bytes(self.stored_files[tag, name])
+    def download(self, asset_id, output):
+        for tag, release in self.releases.items():
+            for asset in release["assets"]:
+                if asset["id"] == asset_id:
+                    output.write_bytes(self.stored_files[tag, asset["name"]])
+                    return
+        raise AssertionError(f"Unknown release asset: {asset_id}")
 
     def publish_release(self, release_id):
         self.events.append(("publish", release_id))
@@ -191,6 +200,13 @@ class PublicationTests(unittest.TestCase):
         self.assertEqual(self.github.tag("latest-green"), COMMIT)
         self.assertEqual(self.github.events[-1], ("create-tag", "latest-green"))
         self.assertLess(self.github.events.index(("publish", 1)), len(self.github.events) - 1)
+
+    def test_draft_verification_and_publication_use_release_id(self):
+        # The initial lookup finds no release. A later draft lookup by tag must
+        # not be needed: GitHub's tag endpoint returns published releases only.
+        with patch.object(self.github, "release", side_effect=[None]):
+            self.assertEqual(self.publish(), "promoted")
+        self.assertFalse(self.github.release_by_id(1)["draft"])
 
     def test_only_exact_green_main_core_run_can_publish(self):
         changes = [{"conclusion": "failure"}, {"status": "in_progress"},
@@ -291,7 +307,50 @@ class PublicationTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "401"):
                 github.release("sdk-test")
             run.return_value.stderr = "gh: Not Found (HTTP 404)"
-            self.assertIsNone(github.release("sdk-test"))
+            self.assertIsNone(github.api("releases/tags/sdk-test", missing_ok=True))
+
+    def test_release_lookup_finds_draft_missing_from_tag_endpoint(self):
+        github = publisher.GitHub(REPOSITORY)
+        draft = {"id": 12, "tag_name": self.index["snapshot_tag"], "draft": True}
+        with patch.object(github, "api", side_effect=[None, [draft], draft]) as api:
+            self.assertEqual(github.release(self.index["snapshot_tag"]), draft)
+        self.assertEqual(api.call_args_list[-1].args, ("releases/12",))
+
+    def test_draft_lookup_checks_later_pages(self):
+        github = publisher.GitHub(REPOSITORY)
+        draft = {"id": 12, "tag_name": self.index["snapshot_tag"], "draft": True}
+        first_page = [{"id": i, "tag_name": f"other-{i}"} for i in range(100)]
+        with patch.object(github, "api", side_effect=[None, first_page, [draft], draft]) as api:
+            self.assertEqual(github.release(self.index["snapshot_tag"]), draft)
+        self.assertEqual(api.call_args_list[2].args, ("releases?per_page=100&page=2",))
+
+    def test_published_lookup_does_not_scan_drafts(self):
+        github = publisher.GitHub(REPOSITORY)
+        published = {"id": 12, "tag_name": self.index["snapshot_tag"], "draft": False}
+        with patch.object(github, "api", return_value=published) as api:
+            self.assertEqual(github.release(self.index["snapshot_tag"]), published)
+        self.assertEqual(api.call_count, 1)
+
+    def test_missing_release_returns_none_after_authenticated_listing(self):
+        github = publisher.GitHub(REPOSITORY)
+        with patch.object(github, "api", side_effect=[None, []]):
+            self.assertIsNone(github.release(self.index["snapshot_tag"]))
+
+    def test_asset_download_uses_id_and_binary_response(self):
+        github = publisher.GitHub(REPOSITORY)
+        output = self.root / "downloaded-index"
+
+        def download(command, stdout, check):
+            self.assertEqual(command, [
+                "gh", "api", f"repos/{REPOSITORY}/releases/assets/123",
+                "--header", "Accept: application/octet-stream",
+            ])
+            self.assertTrue(check)
+            stdout.write(b"draft-asset-contents")
+
+        with patch.object(publisher.subprocess, "run", side_effect=download):
+            github.download(123, output)
+        self.assertEqual(output.read_bytes(), b"draft-asset-contents")
 
 
 if __name__ == "__main__":
