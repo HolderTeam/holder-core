@@ -216,6 +216,14 @@ Holder::Core
 
 The first supported consumer is `holder-daemon`, which can use `third_party/holder-core` as a submodule or a sibling checkout during local development.
 
+Set `-DHOLDER_CORE_BUILD_SHARED=ON` in a standalone CMake build to build and
+install both `libholder.a` (`Holder::Core`) and the shared library
+(`Holder::Shared`). On Linux the shared files are `libholder.so.0.2.0`,
+`libholder.so.0`, and `libholder.so`; ABI generation `0` is independent of the
+application version. An incompatible public ABI change requires a new SONAME
+and runtime package name. The default remains static-only for existing source
+consumers.
+
 Tagged `v<VERSION>` releases produce static libholder SDK archives for Linux x86_64,
 macOS arm64, and Windows x86_64, each in `RelWithDebInfo` and `Release`.
 Each archive has `include/`, `lib/`, CMake package files, the schema and
@@ -236,5 +244,22 @@ smoke-tests each configuration. A `v<VERSION>` tag publishes all six archives
 as GitHub Release assets after every matrix job succeeds. Manual workflow runs
 validate SDKs without publishing a release. Existing consumer builds continue
 to use source until the separate consumer migration is implemented.
+
+## Ubuntu packages
+
+`packaging/linux/debian` builds `libholder0` and `libholder-dev` from this
+repository's CMake install output. `libholder0` carries the shared runtime and
+schema/resources. `libholder-dev` carries headers, the `libholder.so` linker
+symlink, `libholder.a`, CMake targets, and `holder.pc` for pkg-config. The
+`libholder Ubuntu packages` workflow builds and installs both packages on
+Ubuntu 24.04, then compiles external static and shared consumers against them.
+
+The manual `Upload libholder to Launchpad` workflow prepares signed source
+uploads for noble and resolute. It requires a `PPA_GPG_PRIVATE_KEY` Actions
+secret in `holder-core`, configured for the same PPA key used by the existing
+Holder uploads. Launchpad builds each series with its own
+compiler, dependencies, and hardening flags. These packages do not use the
+GitHub Linux SDK archive. Check Launchpad binary build/publication results
+before relying on an uploaded package.
 
 Future non-C++ consumers, such as a C# frontend, should use a separate thin C ABI wrapper rather than binding directly to the C++ API.

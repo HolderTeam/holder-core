@@ -60,7 +60,7 @@ jobs:
           key: apt-${{ runner.os }}-${{ hashFiles('.github/workflows/core.yml') }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHOLDER_CORE_BUILD_SHARED=ON
 
       - name: Build
         run: cmake --build build --parallel
@@ -76,6 +76,9 @@ jobs:
           cmake -S tests/installed-consumer -B out/consumer -DCMAKE_PREFIX_PATH="${{ github.workspace }}/out/install/linux"
           cmake --build out/consumer --parallel
           ctest --test-dir out/consumer --output-on-failure
+          cmake -S tests/installed-consumer -B out/consumer-shared -DCMAKE_PREFIX_PATH="${{ github.workspace }}/out/install/linux" -DHOLDER_CONSUMER_SHARED=ON
+          cmake --build out/consumer-shared --parallel
+          ctest --test-dir out/consumer-shared --output-on-failure
 
       - name: Coverage
         run: ./make.sh coverage

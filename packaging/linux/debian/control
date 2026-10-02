@@ -1,0 +1,47 @@
+Source: holder-core
+Section: libs
+Priority: optional
+Maintainer: Holder Team <holdercardteam@gmail.com>
+Build-Depends: debhelper-compat (= 13),
+ cmake,
+ ninja-build,
+ pkgconf,
+ libssl-dev,
+ libsqlite3-dev,
+ libsodium-dev,
+ libgit2-dev,
+ libmd4c-dev,
+ libsecret-1-dev,
+ nlohmann-json3-dev,
+ libspdlog-dev,
+ libyaml-cpp-dev
+Standards-Version: 4.6.2
+Homepage: https://holder.team/
+Rules-Requires-Root: no
+
+Package: libholder0
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: Holder core shared library
+ Shared core storage, synchronization, privacy, and project functionality for
+ Holder applications. This package contains ABI generation 0 of libholder.
+
+Package: libholder-dev
+Section: libdevel
+Architecture: any
+Depends: libholder0 (= ${binary:Version}),
+ ${misc:Depends},
+ cmake,
+ pkgconf,
+ libssl-dev,
+ libsqlite3-dev,
+ libsodium-dev,
+ libgit2-dev,
+ libmd4c-dev,
+ libsecret-1-dev,
+ nlohmann-json3-dev,
+ libspdlog-dev,
+ libyaml-cpp-dev
+Description: Header files and development metadata for libholder
+ Public C and C++ headers, the unversioned linker symlink, static library,
+ pkg-config file, and CMake package for building Holder applications.

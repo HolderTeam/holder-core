@@ -1,0 +1,56 @@
+name: libholder Ubuntu packages
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/debian-packages.yml
+      - CMakeLists.txt
+      - cmake/**
+      - packaging/linux/debian/**
+      - tests/installed-consumer/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  noble:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            debhelper cmake ninja-build pkgconf libssl-dev libsqlite3-dev \
+            libsodium-dev libgit2-dev libmd4c-dev libsecret-1-dev \
+            nlohmann-json3-dev libspdlog-dev libyaml-cpp-dev
+
+      - name: Build Ubuntu binary packages from source
+        run: |
+          cp -a packaging/linux/debian debian
+          dpkg-buildpackage -b -us -uc -j2
+
+      - name: Install and verify packages
+        run: |
+          sudo apt-get install -y ../libholder0_*.deb ../libholder-dev_*.deb
+          multiarch="$(dpkg-architecture -qDEB_HOST_MULTIARCH)"
+          libdir="/usr/lib/${multiarch}"
+          test -f "${libdir}/libholder.a"
+          test -L "${libdir}/libholder.so"
+          test -L "${libdir}/libholder.so.0"
+          readelf -d "${libdir}/libholder.so.0" | grep -F 'Library soname: [libholder.so.0]'
+          test "$(pkg-config --modversion holder)" = "$(cat VERSION)"
+          c++ tests/installed-consumer/main.cpp $(pkg-config --cflags --libs holder) -o out/holder-pkgconfig-smoke
+          out/holder-pkgconfig-smoke
+          cmake -S tests/installed-consumer -B out/package-shared -G Ninja \
+            "-Dholder_DIR=${libdir}/cmake/holder" -DHOLDER_CONSUMER_SHARED=ON
+          cmake --build out/package-shared --parallel
+          ctest --test-dir out/package-shared --output-on-failure
+          cmake -S tests/installed-consumer -B out/package-static -G Ninja \
+            "-Dholder_DIR=${libdir}/cmake/holder"
+          cmake --build out/package-static --parallel
+          ctest --test-dir out/package-static --output-on-failure

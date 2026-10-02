@@ -6,6 +6,7 @@ on:
       - .github/workflows/sdk-release.yml
       - scripts/package-sdk.py
       - cmake/libholder-manifest.json.in
+      - cmake/holder.pc.in
       - cmake/holderConfig.cmake.in
       - CMakeLists.txt
       - VERSION
@@ -96,14 +97,14 @@ jobs:
           fi
           cmake -S . -B out/sdk-build -G Ninja \
             -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-            -DHOLDER_CORE_SDK=ON "${platform_options[@]}"
+            -DHOLDER_CORE_SDK=ON -DHOLDER_CORE_BUILD_SHARED=OFF "${platform_options[@]}"
 
       - name: Configure Windows SDK
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           cmake -S . -B out/sdk-build -G Ninja `
-            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DHOLDER_CORE_SDK=ON `
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DHOLDER_CORE_SDK=ON -DHOLDER_CORE_BUILD_SHARED=OFF `
             "-DCMAKE_TOOLCHAIN_FILE=$env:GITHUB_WORKSPACE/.vcpkg/scripts/buildsystems/vcpkg.cmake" `
             "-DVCPKG_INSTALLED_DIR=$env:GITHUB_WORKSPACE/vcpkg_installed" `
             -DVCPKG_TARGET_TRIPLET=x64-windows
