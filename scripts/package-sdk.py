@@ -49,9 +49,16 @@ def main():
         staged = root / "libholder-sdk"
         shutil.copytree(args.install, staged)
         if platform == "windows":
-            if not args.vcpkg_installed:
-                parser.error("Windows SDKs require --vcpkg-installed")
+            if not args.vcpkg_installed or not args.vcpkg_root:
+                parser.error("Windows SDKs require --vcpkg-installed and --vcpkg-root")
             triplet = args.vcpkg_installed / "x64-windows"
+            # Consumers need the import libraries, headers, CMake packages and
+            # find-package wrappers used to link this static SDK. Ship these
+            # prebuilt files so consumers never bootstrap or build vcpkg.
+            bundled = staged / "vcpkg"
+            shutil.copytree(triplet, bundled / "installed" / "x64-windows")
+            shutil.copytree(args.vcpkg_root / "scripts", bundled / "scripts")
+            (bundled / ".vcpkg-root").touch()
             dlls = list((triplet / "bin").glob("*.dll"))
             if not dlls:
                 parser.error(f"no vcpkg runtime DLLs found in {triplet / 'bin'}")
@@ -105,10 +112,8 @@ def main():
                      "-DCMAKE_FIND_USE_PACKAGE_REGISTRY=OFF",
                      "-DCMAKE_FIND_USE_SYSTEM_PACKAGE_REGISTRY=OFF"]
         if platform == "windows":
-            if not args.vcpkg_root:
-                parser.error("Windows smoke test requires --vcpkg-root")
-            configure += [f"-DCMAKE_TOOLCHAIN_FILE={args.vcpkg_root / 'scripts' / 'buildsystems' / 'vcpkg.cmake'}",
-                          f"-DVCPKG_INSTALLED_DIR={args.vcpkg_installed}",
+            configure += [f"-DCMAKE_TOOLCHAIN_FILE={sdk / 'vcpkg' / 'scripts' / 'buildsystems' / 'vcpkg.cmake'}",
+                          f"-DVCPKG_INSTALLED_DIR={sdk / 'vcpkg' / 'installed'}",
                           "-DVCPKG_TARGET_TRIPLET=x64-windows", "-DVCPKG_MANIFEST_MODE=OFF"]
         run(*configure)
         run("cmake", "--build", str(build), "--parallel")

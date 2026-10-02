@@ -231,6 +231,13 @@ welcome resource under `share/holder/`, and a
 `libholder-manifest.json` recording the exact commit, build type, platform,
 architecture, and compiler. Windows archives also carry the vcpkg runtime
 DLLs and license notices in `bin/` and `share/vcpkg-licenses/`.
+Windows archives also include prebuilt dependency headers, import libraries,
+CMake packages, and vcpkg's CMake scripts under `vcpkg/`. Configure consumers
+with `-DCMAKE_TOOLCHAIN_FILE=<sdk>/vcpkg/scripts/buildsystems/vcpkg.cmake`,
+`-DVCPKG_INSTALLED_DIR=<sdk>/vcpkg/installed`,
+`-DVCPKG_TARGET_TRIPLET=x64-windows`, and `-DVCPKG_MANIFEST_MODE=OFF`.
+No vcpkg executable or dependency build is required. The archive smoke test
+uses these bundled files rather than the producer's dependency installation.
 
 On Linux and macOS, the SDK uses distribution or Homebrew libraries; consumers
 must install the same dependency packages listed above and provide compatible
