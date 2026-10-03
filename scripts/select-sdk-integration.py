@@ -61,7 +61,7 @@ def main():
     index = select_snapshot(publisher.GitHub(args.repository),
                             json.loads(args.index.read_text()) if args.index else None,
                             args.sdk_run_id)
-    print(f"Verified {index['snapshot_tag']} for Python integration")
+    print(f"Verified {index['snapshot_tag']} for downstream integration")
     if os.environ.get("GITHUB_OUTPUT"):
         with open(os.environ["GITHUB_OUTPUT"], "a") as output:
             output.write(f"commit={index['commit']}\n")
