@@ -63,7 +63,7 @@ jobs:
 
   python:
     needs: select-sdk
-    uses: HolderTeam/holder-python/.github/workflows/ci.yml@main
+    uses: HolderTeam/holder-kit/.github/workflows/ci.yml@main
     with:
       core_ref: ${{ needs.select-sdk.outputs.commit }}
       python_ref: main

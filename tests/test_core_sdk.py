@@ -137,13 +137,13 @@ class SDKTests(unittest.TestCase):
         selection = self.root / "selection.json"
         selection.write_text(json.dumps(self.selection))
         environment = self.root / "github-env"
-        windows_sdk = PureWindowsPath("D:/a/holder-python/.core-sdk/libholder-sdk")
+        windows_sdk = PureWindowsPath("D:/a/holder-kit/.core-sdk/libholder-sdk")
         with patch("sys.argv", ["core-sdk.py", "fetch", "--selection", str(selection), "--github-env"]):
             with patch.object(sdk, "fetch", return_value=windows_sdk), patch.object(sdk, "host", return_value=("windows", "x86_64")):
                 with patch.object(sdk.platform, "system", return_value="Windows"), patch.dict(os.environ, {"GITHUB_ENV": str(environment)}):
                     sdk.main()
         lines = environment.read_text().splitlines()
-        self.assertEqual(lines[0], "HOLDER_CORE_SDK=D:/a/holder-python/.core-sdk/libholder-sdk")
+        self.assertEqual(lines[0], "HOLDER_CORE_SDK=D:/a/holder-kit/.core-sdk/libholder-sdk")
         self.assertNotIn("\\", lines[1])
         self.assertIn("-DVCPKG_APPLOCAL_DEPS=OFF", lines[1])
 
