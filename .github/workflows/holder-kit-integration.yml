@@ -1,4 +1,4 @@
-name: Python SDK integration
+name: Holder Kit SDK integration
 
 on:
   workflow_run:
@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
-      - .github/workflows/python-integration.yml
+      - .github/workflows/holder-kit-integration.yml
       - scripts/select-sdk-integration.py
       - scripts/publish-sdk-snapshot.py
       - tests/test_select_sdk_integration.py
@@ -59,13 +59,13 @@ jobs:
         env:
           CORE_COMMIT: ${{ steps.select.outputs.commit }}
         run: |
-          echo "Python integration tests core SDK [\`$CORE_COMMIT\`](https://github.com/$GITHUB_REPOSITORY/releases/tag/sdk-$CORE_COMMIT)." >> "$GITHUB_STEP_SUMMARY"
+          echo "Holder Kit integration tests core SDK [\`$CORE_COMMIT\`](https://github.com/$GITHUB_REPOSITORY/releases/tag/sdk-$CORE_COMMIT)." >> "$GITHUB_STEP_SUMMARY"
 
-  python:
+  kit:
     needs: select-sdk
-    uses: HolderTeam/holder-python/.github/workflows/ci.yml@main
+    uses: HolderTeam/holder-kit/.github/workflows/ci.yml@main
     with:
       core_ref: ${{ needs.select-sdk.outputs.commit }}
-      python_ref: main
+      kit_ref: main
     permissions:
       contents: read
