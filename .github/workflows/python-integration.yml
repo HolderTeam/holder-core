@@ -66,6 +66,6 @@ jobs:
     uses: HolderTeam/holder-kit/.github/workflows/ci.yml@main
     with:
       core_ref: ${{ needs.select-sdk.outputs.commit }}
-      python_ref: main
+      kit_ref: main
     permissions:
       contents: read
