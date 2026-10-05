@@ -63,7 +63,7 @@ jobs:
 
   daemon:
     needs: select-sdk
-    uses: HolderTeam/holder-daemon/.github/workflows/ci.yml@main
+    uses: HolderTeam/holder-framework/.github/workflows/daemon-ci.yml@main
     with:
       core_ref: ${{ needs.select-sdk.outputs.commit }}
       daemon_ref: main
