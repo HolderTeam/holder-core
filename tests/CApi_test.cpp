@@ -9619,7 +9619,7 @@ TEST_CASE("C API imports an independent project into an empty context", "[capi][
     REQUIRE(import_rc == HOLDER_OK);
     const auto imported = nlohmann::json::parse(json);
     REQUIRE(imported.at("project_id") == project_id);
-    REQUIRE(imported.at("root_path") == root.string());
+    REQUIRE(imported.at("root_path") == std::filesystem::canonical(root).string());
     holder_string_free(json);
     REQUIRE(holder_card_get_content(target, card_id.c_str(), &json, &error) == HOLDER_OK);
     REQUIRE(std::string(json) == "Body #science");

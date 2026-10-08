@@ -101,9 +101,11 @@ jobs:
       - name: Install dependencies
         run: |
           brew update
-          # Older runner images can link OpenSSL 1.1 over OpenSSL 3's binaries.
-          if brew list --formula openssl@1.1 >/dev/null 2>&1; then
-            brew unlink openssl@1.1
+          # The runner can have a manually linked OpenSSL 1.1 binary that brew unlink misses.
+          brew_prefix="$(brew --prefix)"
+          openssl_bin="$brew_prefix/bin/openssl"
+          if [[ -L "$openssl_bin" && "$(readlink "$openssl_bin")" == "$brew_prefix/opt/openssl@1.1/bin/openssl" ]]; then
+            unlink "$openssl_bin"
           fi
           brew install \
             cmake \
