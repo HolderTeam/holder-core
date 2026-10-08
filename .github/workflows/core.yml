@@ -101,6 +101,10 @@ jobs:
       - name: Install dependencies
         run: |
           brew update
+          # Older runner images can link OpenSSL 1.1 over OpenSSL 3's binaries.
+          if brew list --formula openssl@1.1 >/dev/null 2>&1; then
+            brew unlink openssl@1.1
+          fi
           brew install \
             cmake \
             catch2 \
