@@ -23,6 +23,7 @@
 #include "privacy/ProjectPrivacy.h"
 #include "project/DefaultProject.h"
 #include "project/ProjectManifest.h"
+#include "project/ProjectImport.h"
 #include "project/ProjectPaths.h"
 #include "project/ProjectRepo.h"
 #include "project/ProjectStore.h"
@@ -1209,6 +1210,36 @@ int holder_database_rebuild(
   } catch (...) {
     return set_unknown_exception(out_error); // LCOV_EXCL_LINE
   } // LCOV_EXCL_LINE - excluded fallback handler-end counter.
+}
+
+int holder_project_import(
+    holder_context* context,
+    const char* project_root,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (out_json == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  }
+  *out_json = nullptr;
+  if (context == nullptr || project_root == nullptr || project_root[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context and project_root are required");
+  }
+  try {
+    const auto project = holder::project::import_project_into_empty_database(
+        context->db, context->fts, context->data_dir, project_root
+    );
+    return return_json(project_to_json(project), out_json, out_error);
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed");
+  } catch (const std::invalid_argument& e) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, e.what());
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error);
+  }
 }
 
 int holder_resource_list(

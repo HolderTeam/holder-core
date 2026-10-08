@@ -33,6 +33,9 @@ class Rebuilder {
   };
 
   RebuildStats rebuild_project(const holder::model::Project& project);
+  // Reuse a caller-owned transaction when registration and reconstruction must
+  // succeed together. Requires an active transaction; does not commit it.
+  RebuildStats rebuild_project_in_transaction(const holder::model::Project& project);
 
  private:
   holder::platform::Db& db_;

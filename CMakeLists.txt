@@ -177,6 +177,7 @@ set(HOLDER_CORE_SOURCES
   src/project/DefaultProject.cpp
   src/project/ProjectPaths.cpp
   src/project/ProjectManifest.cpp
+  src/project/ProjectImport.cpp
   src/project/ProjectRepo.cpp
   src/project/ProjectStore.cpp
   src/project/ProjectSyncRepo.cpp

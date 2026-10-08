@@ -12,6 +12,7 @@ extern "C" {
 #define HOLDER_ERROR_ALLOCATION 3
 
 #define HOLDER_CARD_LIST_COMPLETE_MAX_LIMIT 1000
+#define HOLDER_HAS_PROJECT_IMPORT 1
 
 typedef struct holder_context holder_context;
 typedef struct holder_error holder_error;
@@ -43,6 +44,21 @@ int holder_database_rebuild(
 );
 
 int holder_project_list(holder_context* context, char** out_json, holder_error** out_error);
+
+// Imports one durable plain project into an empty context's database, preserving
+// its project/card identities and rebuilding indexes with existing core policy.
+// project_root must be an immediate child of data_dir/projects, already populated
+// with independent ordinary files (no symlinks or hard links). Does not clone,
+// copy files, read a source database, or modify the durable files. Requires no
+// concurrent operations on this context. Validation/reconstruction failures roll
+// back database rows; result allocation failure can follow a successful import.
+// Sets *out_json to the imported project. Encrypted import is not supported yet.
+int holder_project_import(
+    holder_context* context,
+    const char* project_root,
+    char** out_json,
+    holder_error** out_error
+);
 
 // Resource, Asset and Storage Location JSON APIs. Resources are returned as
 // {resource: {...}, assets: [{..., placements: [...]}]}; Locations are returned

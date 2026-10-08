@@ -9588,3 +9588,118 @@ TEST_CASE("C API link_kind_list reports a null out_json", "[capi]") {
   REQUIRE(error != nullptr);
   holder_error_destroy(error);
 }
+
+
+TEST_CASE("C API imports an independent project into an empty context", "[capi][project-import]") {
+  const auto source_dir = holder::test::make_temp_dir();
+  const auto target_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* source = nullptr;
+  holder_context* target = nullptr;
+  holder_error* error = nullptr;
+  char* json = nullptr;
+  REQUIRE(holder_context_open(source_dir.string().c_str(), schema.c_str(), &source, &error) == HOLDER_OK);
+  REQUIRE(holder_project_create(source, "Import fixture", nullptr, nullptr, &json, &error) == HOLDER_OK);
+  const auto project = nlohmann::json::parse(json);
+  const auto source_root = std::filesystem::path(project.at("root_path").get<std::string>());
+  const auto project_id = project.at("project_id").get<std::string>();
+  holder_string_free(json);
+  REQUIRE(holder_card_create(source, project_id.c_str(), "Durable", "Body #science", nullptr, &json, &error) == HOLDER_OK);
+  const auto card_id = nlohmann::json::parse(json).at("card_id").get<std::string>();
+  holder_string_free(json);
+  holder_context_destroy(source);
+  REQUIRE(holder_context_open(target_dir.string().c_str(), schema.c_str(), &target, &error) == HOLDER_OK);
+  const auto root = target_dir / "projects" / "copy";
+  std::filesystem::create_directories(root.parent_path());
+  std::filesystem::copy(source_root, root, std::filesystem::copy_options::recursive);
+
+  SECTION("identity, roots, body and tags survive import and database recovery") {
+    const int import_rc = holder_project_import(target, root.string().c_str(), &json, &error);
+    INFO(holder_error_message(error));
+    REQUIRE(import_rc == HOLDER_OK);
+    const auto imported = nlohmann::json::parse(json);
+    REQUIRE(imported.at("project_id") == project_id);
+    REQUIRE(imported.at("root_path") == root.string());
+    holder_string_free(json);
+    REQUIRE(holder_card_get_content(target, card_id.c_str(), &json, &error) == HOLDER_OK);
+    REQUIRE(std::string(json) == "Body #science");
+    holder_string_free(json);
+    REQUIRE(holder_card_list_tags(target, card_id.c_str(), &json, &error) == HOLDER_OK);
+    REQUIRE(nlohmann::json::parse(json) == nlohmann::json::array({"science"}));
+    holder_string_free(json);
+    REQUIRE(holder_project_import(target, root.string().c_str(), &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+    REQUIRE(json == nullptr);
+    holder_error_destroy(error);
+    error = nullptr;
+    holder_context_destroy(target);
+    target = nullptr;
+    std::filesystem::remove(target_dir / "server" / "holder.db");
+    REQUIRE(holder_context_open(target_dir.string().c_str(), schema.c_str(), &target, &error) == HOLDER_OK);
+    REQUIRE(holder_card_get_content(target, card_id.c_str(), &json, &error) == HOLDER_OK);
+    REQUIRE(std::string(json) == "Body #science");
+    holder_string_free(json);
+  }
+
+  SECTION("invalid durable files roll back the import and permit retry") {
+    const auto invalid = root / "cards" / "invalid.md";
+    std::ofstream(invalid) << "Broken card";
+    REQUIRE(holder_project_import(target, root.string().c_str(), &json, &error) == HOLDER_ERROR_RUNTIME);
+    REQUIRE(json == nullptr);
+    holder_error_destroy(error);
+    error = nullptr;
+    REQUIRE(holder_project_list(target, &json, &error) == HOLDER_OK);
+    REQUIRE(nlohmann::json::parse(json).empty());
+    holder_string_free(json);
+    std::filesystem::remove(invalid);
+    REQUIRE(holder_project_import(target, root.string().c_str(), &json, &error) == HOLDER_OK);
+    holder_string_free(json);
+  }
+
+  SECTION("unmanaged roots are rejected without adopting the source") {
+    REQUIRE(holder_project_import(target, source_root.string().c_str(), &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+    holder_error_destroy(error);
+    error = nullptr;
+    REQUIRE(holder_project_list(target, &json, &error) == HOLDER_OK);
+    REQUIRE(nlohmann::json::parse(json).empty());
+    holder_string_free(json);
+  }
+
+  SECTION("symlinks and hard links cannot import external storage") {
+    const auto escape = root / "escape";
+    std::error_code ec;
+    std::filesystem::create_symlink(source_root / ".holder/project.json", escape, ec);
+    if (!ec) {
+      REQUIRE(holder_project_import(target, root.string().c_str(), &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+      holder_error_destroy(error);
+      error = nullptr;
+      std::filesystem::remove(escape);
+    }
+    std::filesystem::create_hard_link(source_root / ".holder/project.json", escape, ec);
+    if (!ec) {
+      REQUIRE(holder_project_import(target, root.string().c_str(), &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+      holder_error_destroy(error);
+      error = nullptr;
+      std::filesystem::remove(escape);
+    }
+  }
+
+  SECTION("encrypted import fails before requesting key material") {
+    std::ofstream(root / ".holder/privacy.json") << R"({"version":1,"project_id":"encrypted","mode":"encrypted_git"})";
+    REQUIRE(holder_project_import(target, root.string().c_str(), &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+    REQUIRE(std::string(holder_error_message(error)).find("plain projects") != std::string::npos);
+    holder_error_destroy(error);
+    error = nullptr;
+  }
+  holder_context_destroy(target);
+}
+
+TEST_CASE("C API validates explicit project import arguments", "[capi][project-import]") {
+  holder_error* error = nullptr;
+  char* json = nullptr;
+  REQUIRE(holder_project_import(nullptr, "project", &json, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  REQUIRE(json == nullptr);
+  holder_error_destroy(error);
+  error = nullptr;
+  REQUIRE(holder_project_import(nullptr, nullptr, nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  holder_error_destroy(error);
+}
