@@ -101,6 +101,12 @@ jobs:
       - name: Install dependencies
         run: |
           brew update
+          # The runner can have a manually linked OpenSSL 1.1 binary that brew unlink misses.
+          brew_prefix="$(brew --prefix)"
+          openssl_bin="$brew_prefix/bin/openssl"
+          if [[ -L "$openssl_bin" && "$(readlink "$openssl_bin")" == "$brew_prefix/opt/openssl@1.1/bin/openssl" ]]; then
+            unlink "$openssl_bin"
+          fi
           brew install \
             cmake \
             catch2 \

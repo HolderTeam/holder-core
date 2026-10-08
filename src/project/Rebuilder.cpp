@@ -161,14 +161,22 @@ Rebuilder::Rebuilder(
       require_ai_thread_manifests_(require_ai_thread_manifests) {}
 
 Rebuilder::RebuildStats Rebuilder::rebuild_project(const holder::model::Project& project) {
+  holder::platform::Tx tx(db_);
+  auto stats = rebuild_project_in_transaction(project);
+  tx.commit();
+  return stats;
+}
+
+Rebuilder::RebuildStats Rebuilder::rebuild_project_in_transaction(const holder::model::Project& project) {
+  if (sqlite3_get_autocommit(db_.handle()) != 0) {
+    throw std::invalid_argument("project reconstruction requires an active transaction");
+  }
   RebuildStats stats;
   auto& fs = *fs_;
   const std::filesystem::path root = project.root_path;
   if (!fs.exists(root)) {
     throw std::runtime_error("project root not found");
   }
-
-  holder::platform::Tx tx(db_);
 
   exec_delete_project(
       db_.handle(),
@@ -663,7 +671,6 @@ Rebuilder::RebuildStats Rebuilder::rebuild_project(const holder::model::Project&
   }
 
   sqlite3_finalize(stmt);
-  tx.commit();
   return stats;
 }
 
