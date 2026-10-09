@@ -5,6 +5,7 @@
 
 #include <optional>
 #include <string>
+#include <variant>
 #include <vector>
 
 namespace holder::card {
@@ -16,10 +17,15 @@ struct CardPageCursor {
   std::optional<long long> updated_at;
 };
 
+struct CardPageAll {};
+struct CardPageRoots {};
+struct CardPageChildrenOf {
+  std::string card_id;
+};
+
 struct CardPageQuery {
   std::optional<std::string> tag;
-  // nullopt: all hierarchy levels; empty string: roots; otherwise immediate children.
-  std::optional<std::string> parent_card_id;
+  std::variant<CardPageAll, CardPageRoots, CardPageChildrenOf> parent = CardPageAll{};
   CardPageOrder order = CardPageOrder::CardIdAsc;
   std::optional<CardPageCursor> cursor;
 };
@@ -82,10 +88,8 @@ class CardRepo {
   ) const;
   int count_all_not_deleted(const std::string& project_id) const;
   int count_roots_not_deleted(const std::string& project_id) const;
-  int count_children_not_deleted(
-      const std::string& project_id,
-      const std::string& parent_card_id
-  ) const;
+  int count_children_not_deleted(const std::string& project_id, const std::string& parent_card_id)
+      const;
   double next_sort_key(
       const std::string& project_id,
       const std::optional<std::string>& parent_card_id

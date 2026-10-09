@@ -353,6 +353,16 @@ std::vector<holder::model::Card> CardRepo::list_collection_page(
     int limit
 ) const {
   if (limit <= 0) throw std::invalid_argument("limit must be positive");
+  switch (query.order) {
+  case CardPageOrder::CardIdAsc:
+  case CardPageOrder::UpdatedDesc:
+    break;
+  default:
+    throw std::invalid_argument("unsupported card page order");
+  }
+  const auto* children = std::get_if<CardPageChildrenOf>(&query.parent);
+  if (children && children->card_id.empty())
+    throw std::invalid_argument("children parent card_id must not be empty");
   if (query.cursor.has_value() && query.cursor->card_id.empty())
     throw std::invalid_argument("cursor card_id must not be empty");
   if (query.cursor.has_value() && query.order == CardPageOrder::UpdatedDesc &&
@@ -367,10 +377,10 @@ std::vector<holder::model::Card> CardRepo::list_collection_page(
   if (query.tag.has_value())
     sql += " AND EXISTS (SELECT 1 FROM card_tags t WHERE t.project_id = c.project_id "
            "AND t.card_id = c.card_id AND t.tag = ?2)";
-  if (query.parent_card_id.has_value()) {
-    sql += query.parent_card_id->empty() ? " AND c.parent_card_id IS NULL"
-                                         : " AND c.parent_card_id = ?3";
-  }
+  if (std::holds_alternative<CardPageRoots>(query.parent))
+    sql += " AND c.parent_card_id IS NULL";
+  else if (children)
+    sql += " AND c.parent_card_id = ?3";
   if (query.cursor.has_value()) {
     sql += query.order == CardPageOrder::CardIdAsc
                ? " AND c.card_id > ?4"
@@ -385,8 +395,7 @@ std::vector<holder::model::Card> CardRepo::list_collection_page(
   const std::unique_ptr<sqlite3_stmt, decltype(&sqlite3_finalize)> stmt(raw, sqlite3_finalize);
   bind_text(raw, 1, project_id);
   if (query.tag.has_value()) bind_text(raw, 2, holder::core::normalize_tag(*query.tag));
-  if (query.parent_card_id.has_value() && !query.parent_card_id->empty())
-    bind_text(raw, 3, *query.parent_card_id);
+  if (children) bind_text(raw, 3, children->card_id);
   if (query.cursor.has_value()) {
     bind_text(raw, 4, query.cursor->card_id);
     if (query.order == CardPageOrder::UpdatedDesc) bind_int64(raw, 5, *query.cursor->updated_at);

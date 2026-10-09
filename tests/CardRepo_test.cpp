@@ -147,7 +147,7 @@ TEST_CASE(
   CHECK(page[0].card_id == "c");
   query.cursor.reset();
   query.tag = "Work";
-  query.parent_card_id = "a";
+  query.parent = holder::card::CardPageChildrenOf{"a"};
   query.order = holder::card::CardPageOrder::UpdatedDesc;
   page = repo.list_collection_page("p", query, 1);
   REQUIRE(page.size() == 1);
@@ -158,12 +158,12 @@ TEST_CASE(
   REQUIRE(page.size() == 1);
   CHECK(page[0].card_id == "b");
   query.cursor.reset();
-  query.parent_card_id = "";
+  query.parent = holder::card::CardPageRoots{};
   page = repo.list_collection_page("p", query, 10);
   REQUIRE(page.size() == 1);
   CHECK(page[0].card_id == "a");
   // A retained tag-index entry must never make a soft-deleted card visible.
-  query.parent_card_id.reset();
+  query.parent = holder::card::CardPageAll{};
   page = repo.list_collection_page("p", query, 10);
   REQUIRE(page.size() == 3);
   for (const auto& card : page)
@@ -192,19 +192,18 @@ TEST_CASE("Collection roots match existing roots and totals", "[cardrepo][collec
   holder::card::CardRepo repo(db);
   create_card(repo, "root", "p", "root");
   create_card(repo, "imported", "p", "imported");
+  create_card(repo, "trashed-root", "p", "trashed-root", 2);
   // Reproduce an older/imported row with an empty-string parent.
   db.exec("PRAGMA foreign_keys = OFF;");
   db.exec("UPDATE cards SET parent_card_id = '' WHERE card_id = 'imported';");
   db.exec("PRAGMA foreign_keys = ON;");
   holder::card::CardPageQuery query;
-  query.parent_card_id = "";
+  query.parent = holder::card::CardPageRoots{};
   const auto roots = repo.list_collection_page("p", query, 10);
   REQUIRE(roots.size() == 1);
   CHECK(roots.front().card_id == "root");
-  REQUIRE(repo.list_roots("p").size() == roots.size());
-  CHECK(repo.list_roots("p").front().card_id == roots.front().card_id);
-  CHECK(repo.count_roots_not_deleted("p") == 1);
-  query.parent_card_id.reset();
+  CHECK(repo.count_roots_not_deleted("p") == static_cast<int>(roots.size()));
+  query.parent = holder::card::CardPageAll{};
   CHECK(repo.list_collection_page("p", query, 10).size() == 2);
 }
 
@@ -227,6 +226,15 @@ TEST_CASE(
   auto page = repo.list_collection_page("p", query, 10);
   REQUIRE(page.size() == 1);
   CHECK(page.front().card_id == "b");
+  query.order = static_cast<holder::card::CardPageOrder>(99);
+  CHECK_THROWS_AS(repo.list_collection_page("p", query, 10), std::invalid_argument);
+  query.cursor.reset();
+  CHECK_THROWS_AS(repo.list_collection_page("p", query, 10), std::invalid_argument);
+  query.order = holder::card::CardPageOrder::CardIdAsc;
+  query.parent = holder::card::CardPageChildrenOf{""};
+  CHECK_THROWS_AS(repo.list_collection_page("p", query, 10), std::invalid_argument);
+  query.parent = holder::card::CardPageAll{};
+  query.cursor = holder::card::CardPageCursor{"a", std::nullopt};
   query.order = holder::card::CardPageOrder::UpdatedDesc;
   CHECK_THROWS_AS(repo.list_collection_page("p", query, 10), std::invalid_argument);
   query.cursor = holder::card::CardPageCursor{"b", 0};
@@ -376,8 +384,7 @@ TEST_CASE("CardRepo finds literal leading card ID prefixes with a limit", "[card
   REQUIRE(
       repo.find_by_id_prefix("proj-1", "12345678", holder::model::CardScope::Either, 1).size() == 1
   );
-  REQUIRE(
-      repo.find_by_id_prefix("proj-1", "12345678", holder::model::CardScope::Either, 0).empty()
+  REQUIRE(repo.find_by_id_prefix("proj-1", "12345678", holder::model::CardScope::Either, 0).empty()
   );
 }
 
@@ -431,8 +438,7 @@ TEST_CASE("CardRepo finds exact titles within project and deletion scope", "[car
       repo.find_by_exact_title("proj-2", "Roadmap", holder::model::CardScope::Either, 10).size() ==
       1
   );
-  REQUIRE(
-      repo.find_by_exact_title("proj-1", "Roadmap", holder::model::CardScope::Either, 0).empty()
+  REQUIRE(repo.find_by_exact_title("proj-1", "Roadmap", holder::model::CardScope::Either, 0).empty()
   );
 }
 
@@ -852,14 +858,10 @@ TEST_CASE("CardRepo update/delete/move throw when sqlite step aborts", "[cardrep
   repo.create(card);
 
   // Force sqlite3_step failures for UPDATE and DELETE (prepare still succeeds).
-  db.exec(
-      "CREATE TRIGGER cards_fail_update BEFORE UPDATE ON cards "
-      "BEGIN SELECT RAISE(ABORT, 'blocked update'); END;"
-  );
-  db.exec(
-      "CREATE TRIGGER cards_fail_delete BEFORE DELETE ON cards "
-      "BEGIN SELECT RAISE(ABORT, 'blocked delete'); END;"
-  );
+  db.exec("CREATE TRIGGER cards_fail_update BEFORE UPDATE ON cards "
+          "BEGIN SELECT RAISE(ABORT, 'blocked update'); END;");
+  db.exec("CREATE TRIGGER cards_fail_delete BEFORE DELETE ON cards "
+          "BEGIN SELECT RAISE(ABORT, 'blocked delete'); END;");
 
   REQUIRE_THROWS_WITH(
       repo.update_title(card.card_id, "New", 2),
