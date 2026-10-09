@@ -1825,7 +1825,7 @@ TEST_CASE(
 
 TEST_CASE(
     "CardStore keeps card_tags in sync across create/update/trash/restore/hard_delete",
-    "[cardstore]"
+    "[cardstore][collection-pages]"
 ) {
   const auto dir = make_temp_dir();
   holder::platform::Db db;
@@ -1855,15 +1855,26 @@ TEST_CASE(
   REQUIRE(tags.list_tags_for_card("proj-1", card.card_id) == std::vector<std::string>{"urgent"});
   REQUIRE(tags.list_card_ids_with_tag("proj-1", "todo").empty());
 
+  holder::card::CardRepo cards(db);
+  holder::card::CardPageQuery query;
+  query.tag = "Urgent";
+  auto page = cards.list_collection_page("proj-1", query, 10);
+  REQUIRE(page.size() == 1);
+  CHECK(page.front().card_id == card.card_id);
+
   store.trash(card.card_id, 3);
   REQUIRE(tags.list_tags_for_card("proj-1", card.card_id).empty());
   REQUIRE(tags.list_card_ids_with_tag("proj-1", "urgent").empty());
+  CHECK(cards.list_collection_page("proj-1", query, 10).empty());
 
   store.restore(card.card_id, 4);
   REQUIRE(tags.list_tags_for_card("proj-1", card.card_id) == std::vector<std::string>{"urgent"});
   REQUIRE(
       tags.list_card_ids_with_tag("proj-1", "urgent") == std::vector<std::string>{card.card_id}
   );
+  page = cards.list_collection_page("proj-1", query, 10);
+  REQUIRE(page.size() == 1);
+  CHECK(page.front().card_id == card.card_id);
 
   store.trash(card.card_id, 5);
   store.hard_delete(card.card_id);

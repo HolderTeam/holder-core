@@ -5,9 +5,30 @@
 
 #include <optional>
 #include <string>
+#include <variant>
 #include <vector>
 
 namespace holder::card {
+
+enum class CardPageOrder { CardIdAsc, UpdatedDesc };
+
+struct CardPageCursor {
+  std::string card_id;
+  std::optional<long long> updated_at;
+};
+
+struct CardPageAll {};
+struct CardPageRoots {};
+struct CardPageChildrenOf {
+  std::string card_id;
+};
+
+struct CardPageQuery {
+  std::optional<std::string> tag;
+  std::variant<CardPageAll, CardPageRoots, CardPageChildrenOf> parent = CardPageAll{};
+  CardPageOrder order = CardPageOrder::CardIdAsc;
+  std::optional<CardPageCursor> cursor;
+};
 
 class CardRepo {
  public:
@@ -39,6 +60,12 @@ class CardRepo {
       const std::string& parent_card_id
   ) const;
   std::vector<holder::model::Card> list_all(const std::string& project_id) const;
+  // Live cards only. Filters apply before keyset pagination; each page reads current state.
+  std::vector<holder::model::Card> list_collection_page(
+      const std::string& project_id,
+      const CardPageQuery& query,
+      int limit
+  ) const;
   // Stable card_id-ordered page for bulk extraction. after_card_id is an exclusive cursor;
   // nullopt selects the first page. Never includes soft-deleted cards.
   std::vector<holder::model::Card> list_page_by_card_id(

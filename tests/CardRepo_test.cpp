@@ -6,6 +6,7 @@
 #endif
 
 #include "card/CardRepo.h"
+#include "card/TagRepo.h"
 #include "model/Card.h"
 #include "model/Project.h"
 #include "platform/Db.h"
@@ -114,6 +115,133 @@ int sqlite_interrupt_cb(void* data) {
 }
 
 } // namespace
+
+TEST_CASE(
+    "CardRepo collection pages combine filters and stable ordering",
+    "[cardrepo][collection-pages]"
+) {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  create_project(db, "p");
+  create_project(db, "other");
+  holder::card::CardRepo repo(db);
+  holder::card::TagRepo tags(db);
+  for (const auto& id : {"a", "b", "c", "d"}) {
+    create_card(repo, id, "p", id);
+    tags.set_tags_for_card("p", id, {"work"}, 1);
+  }
+  create_card(repo, "foreign", "other", "foreign");
+  repo.move("b", "a", 0, 20);
+  repo.move("c", "a", 0, 20);
+  repo.soft_delete("d", 30, 30);
+  holder::card::CardPageQuery query;
+  auto page = repo.list_collection_page("p", query, 2);
+  REQUIRE(page.size() == 2);
+  CHECK(page[0].card_id == "a");
+  CHECK(page[1].card_id == "b");
+  query.cursor = holder::card::CardPageCursor{"b", 1};
+  page = repo.list_collection_page("p", query, 2);
+  REQUIRE(page.size() == 1);
+  CHECK(page[0].card_id == "c");
+  query.cursor.reset();
+  query.tag = "Work";
+  query.parent = holder::card::CardPageChildrenOf{"a"};
+  query.order = holder::card::CardPageOrder::UpdatedDesc;
+  page = repo.list_collection_page("p", query, 1);
+  REQUIRE(page.size() == 1);
+  CHECK(page[0].card_id == "c");
+  query.cursor = holder::card::CardPageCursor{"c", 20};
+  query.tag = "WORK";
+  page = repo.list_collection_page("p", query, 2);
+  REQUIRE(page.size() == 1);
+  CHECK(page[0].card_id == "b");
+  query.cursor.reset();
+  query.parent = holder::card::CardPageRoots{};
+  page = repo.list_collection_page("p", query, 10);
+  REQUIRE(page.size() == 1);
+  CHECK(page[0].card_id == "a");
+  // A retained tag-index entry must never make a soft-deleted card visible.
+  query.parent = holder::card::CardPageAll{};
+  page = repo.list_collection_page("p", query, 10);
+  REQUIRE(page.size() == 3);
+  for (const auto& card : page)
+    CHECK_FALSE(card.deleted_at.has_value());
+  query.tag = "missing";
+  CHECK(repo.list_collection_page("p", query, 10).empty());
+  for (const auto& invalid : {"", "#work", "work space", "deadbeef"}) {
+    query.tag = invalid;
+    CHECK_THROWS_AS(repo.list_collection_page("p", query, 10), std::invalid_argument);
+  }
+  query.tag = "work";
+  CHECK_THROWS_AS(repo.list_collection_page("p", query, 0), std::invalid_argument);
+  query.cursor = holder::card::CardPageCursor{"", 0};
+  CHECK_THROWS_AS(repo.list_collection_page("p", query, 10), std::invalid_argument);
+  db.close();
+  query.cursor.reset();
+  CHECK_THROWS(repo.list_collection_page("p", query, 10));
+}
+
+TEST_CASE("Collection roots match existing roots and totals", "[cardrepo][collection-pages]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  create_project(db, "p");
+  holder::card::CardRepo repo(db);
+  create_card(repo, "root", "p", "root");
+  create_card(repo, "imported", "p", "imported");
+  create_card(repo, "trashed-root", "p", "trashed-root", 2);
+  // Reproduce an older/imported row with an empty-string parent.
+  db.exec("PRAGMA foreign_keys = OFF;");
+  db.exec("UPDATE cards SET parent_card_id = '' WHERE card_id = 'imported';");
+  db.exec("PRAGMA foreign_keys = ON;");
+  holder::card::CardPageQuery query;
+  query.parent = holder::card::CardPageRoots{};
+  const auto roots = repo.list_collection_page("p", query, 10);
+  REQUIRE(roots.size() == 1);
+  CHECK(roots.front().card_id == "root");
+  CHECK(repo.count_roots_not_deleted("p") == static_cast<int>(roots.size()));
+  query.parent = holder::card::CardPageAll{};
+  CHECK(repo.list_collection_page("p", query, 10).size() == 2);
+}
+
+TEST_CASE(
+    "Collection cursors require the fields used by their order",
+    "[cardrepo][collection-pages]"
+) {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  create_project(db, "p");
+  holder::card::CardRepo repo(db);
+  create_card(repo, "a", "p", "a");
+  create_card(repo, "b", "p", "b");
+  repo.touch_updated("a", 0);
+  repo.touch_updated("b", 0);
+  holder::card::CardPageQuery query;
+  query.cursor = holder::card::CardPageCursor{"a", std::nullopt};
+  auto page = repo.list_collection_page("p", query, 10);
+  REQUIRE(page.size() == 1);
+  CHECK(page.front().card_id == "b");
+  query.order = static_cast<holder::card::CardPageOrder>(99);
+  CHECK_THROWS_AS(repo.list_collection_page("p", query, 10), std::invalid_argument);
+  query.cursor.reset();
+  CHECK_THROWS_AS(repo.list_collection_page("p", query, 10), std::invalid_argument);
+  query.order = holder::card::CardPageOrder::CardIdAsc;
+  query.parent = holder::card::CardPageChildrenOf{""};
+  CHECK_THROWS_AS(repo.list_collection_page("p", query, 10), std::invalid_argument);
+  query.parent = holder::card::CardPageAll{};
+  query.cursor = holder::card::CardPageCursor{"a", std::nullopt};
+  query.order = holder::card::CardPageOrder::UpdatedDesc;
+  CHECK_THROWS_AS(repo.list_collection_page("p", query, 10), std::invalid_argument);
+  query.cursor = holder::card::CardPageCursor{"b", 0};
+  page = repo.list_collection_page("p", query, 10);
+  REQUIRE(page.size() == 1);
+  CHECK(page.front().card_id == "a");
+}
 
 TEST_CASE("CardRepo CRUD", "[cardrepo]") {
   const auto dir = make_temp_dir();
