@@ -13,7 +13,7 @@ enum class CardPageOrder { CardIdAsc, UpdatedDesc };
 
 struct CardPageCursor {
   std::string card_id;
-  long long updated_at = 0;
+  std::optional<long long> updated_at;
 };
 
 struct CardPageQuery {
@@ -82,8 +82,10 @@ class CardRepo {
   ) const;
   int count_all_not_deleted(const std::string& project_id) const;
   int count_roots_not_deleted(const std::string& project_id) const;
-  int count_children_not_deleted(const std::string& project_id, const std::string& parent_card_id)
-      const;
+  int count_children_not_deleted(
+      const std::string& project_id,
+      const std::string& parent_card_id
+  ) const;
   double next_sort_key(
       const std::string& project_id,
       const std::optional<std::string>& parent_card_id
