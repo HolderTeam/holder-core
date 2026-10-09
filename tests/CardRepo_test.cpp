@@ -158,13 +158,15 @@ TEST_CASE(
   CHECK(page[0].card_id == "b");
   query.cursor.reset();
   query.parent_card_id = "";
-  query.include_deleted = true;
   page = repo.list_collection_page("p", query, 10);
-  REQUIRE(page.size() == 2);
-  CHECK(page[0].card_id == "d");
-  CHECK(page[1].card_id == "a");
-  query.include_deleted = false;
-  CHECK(repo.list_collection_page("p", query, 10).size() == 1);
+  REQUIRE(page.size() == 1);
+  CHECK(page[0].card_id == "a");
+  // A retained tag-index entry must never make a soft-deleted card visible.
+  query.parent_card_id.reset();
+  page = repo.list_collection_page("p", query, 10);
+  REQUIRE(page.size() == 3);
+  for (const auto& card : page)
+    CHECK_FALSE(card.deleted_at.has_value());
   query.tag = "missing";
   CHECK(repo.list_collection_page("p", query, 10).empty());
   CHECK_THROWS_AS(repo.list_collection_page("p", query, 0), std::invalid_argument);

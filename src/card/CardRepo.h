@@ -20,7 +20,6 @@ struct CardPageQuery {
   std::optional<std::string> tag;
   // nullopt: all hierarchy levels; empty string: roots; otherwise immediate children.
   std::optional<std::string> parent_card_id;
-  bool include_deleted = false;
   CardPageOrder order = CardPageOrder::CardIdAsc;
   std::optional<CardPageCursor> cursor;
 };
@@ -55,7 +54,7 @@ class CardRepo {
       const std::string& parent_card_id
   ) const;
   std::vector<holder::model::Card> list_all(const std::string& project_id) const;
-  // Filters combine and are applied before keyset pagination. Each page reads current state.
+  // Live cards only. Filters apply before keyset pagination; each page reads current state.
   std::vector<holder::model::Card> list_collection_page(
       const std::string& project_id,
       const CardPageQuery& query,

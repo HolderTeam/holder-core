@@ -356,8 +356,8 @@ std::vector<holder::model::Card> CardRepo::list_collection_page(
     throw std::invalid_argument("cursor card_id must not be empty");
   std::string sql =
       "SELECT c.card_id, c.project_id, c.title, c.rel_path, c.parent_card_id, c.sort_key, "
-      "c.created_at, c.updated_at, c.deleted_at FROM cards c WHERE c.project_id = ?1";
-  if (!query.include_deleted) sql += " AND c.deleted_at IS NULL";
+      "c.created_at, c.updated_at, c.deleted_at FROM cards c "
+      "WHERE c.project_id = ?1 AND c.deleted_at IS NULL";
   if (query.tag.has_value())
     sql += " AND EXISTS (SELECT 1 FROM card_tags t WHERE t.project_id = c.project_id "
            "AND t.card_id = c.card_id AND t.tag = ?2)";
