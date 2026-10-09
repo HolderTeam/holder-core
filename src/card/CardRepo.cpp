@@ -2,6 +2,7 @@
 
 #include <sqlite3.h>
 
+#include <memory>
 #include <stdexcept>
 #include <utility>
 
@@ -344,6 +345,60 @@ std::vector<holder::model::Card> CardRepo::list_all(const std::string& project_i
   sqlite3_finalize(stmt); // LCOV_EXCL_LINE
   return out;
 } // LCOV_EXCL_LINE
+
+std::vector<holder::model::Card> CardRepo::list_collection_page(
+    const std::string& project_id,
+    const CardPageQuery& query,
+    int limit
+) const {
+  if (limit <= 0) throw std::invalid_argument("limit must be positive");
+  if (query.cursor.has_value() && query.cursor->card_id.empty())
+    throw std::invalid_argument("cursor card_id must not be empty");
+  std::string sql =
+      "SELECT c.card_id, c.project_id, c.title, c.rel_path, c.parent_card_id, c.sort_key, "
+      "c.created_at, c.updated_at, c.deleted_at FROM cards c WHERE c.project_id = ?1";
+  if (!query.include_deleted) sql += " AND c.deleted_at IS NULL";
+  if (query.tag.has_value())
+    sql += " AND EXISTS (SELECT 1 FROM card_tags t WHERE t.project_id = c.project_id "
+           "AND t.card_id = c.card_id AND t.tag = ?2)";
+  if (query.parent_card_id.has_value()) {
+    sql += query.parent_card_id->empty()
+               ? " AND (c.parent_card_id IS NULL OR c.parent_card_id = '')"
+               : " AND c.parent_card_id = ?3";
+  }
+  if (query.cursor.has_value()) {
+    sql += query.order == CardPageOrder::CardIdAsc
+               ? " AND c.card_id > ?4"
+               : " AND (c.updated_at < ?5 OR (c.updated_at = ?5 AND c.card_id < ?4))";
+  }
+  sql += query.order == CardPageOrder::CardIdAsc
+             ? " ORDER BY c.card_id ASC LIMIT ?6;"
+             : " ORDER BY c.updated_at DESC, c.card_id DESC LIMIT ?6;";
+  sqlite3_stmt* raw = nullptr;
+  if (sqlite3_prepare_v2(db_.handle(), sql.c_str(), -1, &raw, nullptr) != SQLITE_OK)
+    throw_sqlite(db_.handle(), "prepare card collection page failed");
+  const std::unique_ptr<sqlite3_stmt, decltype(&sqlite3_finalize)> stmt(raw, sqlite3_finalize);
+  bind_text(raw, 1, project_id);
+  if (query.tag.has_value()) bind_text(raw, 2, *query.tag);
+  if (query.parent_card_id.has_value() && !query.parent_card_id->empty())
+    bind_text(raw, 3, *query.parent_card_id);
+  if (query.cursor.has_value()) {
+    bind_text(raw, 4, query.cursor->card_id);
+    if (query.order == CardPageOrder::UpdatedDesc) bind_int64(raw, 5, query.cursor->updated_at);
+  }
+  bind_int64(raw, 6, limit);
+  std::vector<holder::model::Card> out;
+  while (true) {
+    const int rc = sqlite3_step(raw);
+    if (rc == SQLITE_ROW)
+      out.push_back(read_card(raw));
+    else if (rc == SQLITE_DONE)
+      break;
+    else
+      throw_sqlite(db_.handle(), "card collection page failed");
+  }
+  return out;
+}
 
 std::vector<holder::model::Card> CardRepo::list_page_by_card_id(
     const std::string& project_id,

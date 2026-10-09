@@ -6,6 +6,7 @@
 #endif
 
 #include "card/CardRepo.h"
+#include "card/TagRepo.h"
 #include "model/Card.h"
 #include "model/Project.h"
 #include "platform/Db.h"
@@ -114,6 +115,65 @@ int sqlite_interrupt_cb(void* data) {
 }
 
 } // namespace
+
+TEST_CASE(
+    "CardRepo collection pages combine filters and stable ordering",
+    "[cardrepo][collection-pages]"
+) {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  create_project(db, "p");
+  create_project(db, "other");
+  holder::card::CardRepo repo(db);
+  holder::card::TagRepo tags(db);
+  for (const auto& id : {"a", "b", "c", "d"}) {
+    create_card(repo, id, "p", id);
+    tags.set_tags_for_card("p", id, {"work"}, 1);
+  }
+  create_card(repo, "foreign", "other", "foreign");
+  repo.move("b", "a", 0, 20);
+  repo.move("c", "a", 0, 20);
+  repo.soft_delete("d", 30, 30);
+  holder::card::CardPageQuery query;
+  auto page = repo.list_collection_page("p", query, 2);
+  REQUIRE(page.size() == 2);
+  CHECK(page[0].card_id == "a");
+  CHECK(page[1].card_id == "b");
+  query.cursor = holder::card::CardPageCursor{"b", 1};
+  page = repo.list_collection_page("p", query, 2);
+  REQUIRE(page.size() == 1);
+  CHECK(page[0].card_id == "c");
+  query.cursor.reset();
+  query.tag = "work";
+  query.parent_card_id = "a";
+  query.order = holder::card::CardPageOrder::UpdatedDesc;
+  page = repo.list_collection_page("p", query, 1);
+  REQUIRE(page.size() == 1);
+  CHECK(page[0].card_id == "c");
+  query.cursor = holder::card::CardPageCursor{"c", 20};
+  page = repo.list_collection_page("p", query, 2);
+  REQUIRE(page.size() == 1);
+  CHECK(page[0].card_id == "b");
+  query.cursor.reset();
+  query.parent_card_id = "";
+  query.include_deleted = true;
+  page = repo.list_collection_page("p", query, 10);
+  REQUIRE(page.size() == 2);
+  CHECK(page[0].card_id == "d");
+  CHECK(page[1].card_id == "a");
+  query.include_deleted = false;
+  CHECK(repo.list_collection_page("p", query, 10).size() == 1);
+  query.tag = "missing";
+  CHECK(repo.list_collection_page("p", query, 10).empty());
+  CHECK_THROWS_AS(repo.list_collection_page("p", query, 0), std::invalid_argument);
+  query.cursor = holder::card::CardPageCursor{"", 0};
+  CHECK_THROWS_AS(repo.list_collection_page("p", query, 10), std::invalid_argument);
+  db.close();
+  query.cursor.reset();
+  CHECK_THROWS(repo.list_collection_page("p", query, 10));
+}
 
 TEST_CASE("CardRepo CRUD", "[cardrepo]") {
   const auto dir = make_temp_dir();

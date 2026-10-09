@@ -9,6 +9,22 @@
 
 namespace holder::card {
 
+enum class CardPageOrder { CardIdAsc, UpdatedDesc };
+
+struct CardPageCursor {
+  std::string card_id;
+  long long updated_at = 0;
+};
+
+struct CardPageQuery {
+  std::optional<std::string> tag;
+  // nullopt: all hierarchy levels; empty string: roots; otherwise immediate children.
+  std::optional<std::string> parent_card_id;
+  bool include_deleted = false;
+  CardPageOrder order = CardPageOrder::CardIdAsc;
+  std::optional<CardPageCursor> cursor;
+};
+
 class CardRepo {
  public:
   explicit CardRepo(holder::platform::Db& db);
@@ -39,6 +55,12 @@ class CardRepo {
       const std::string& parent_card_id
   ) const;
   std::vector<holder::model::Card> list_all(const std::string& project_id) const;
+  // Filters combine and are applied before keyset pagination. Each page reads current state.
+  std::vector<holder::model::Card> list_collection_page(
+      const std::string& project_id,
+      const CardPageQuery& query,
+      int limit
+  ) const;
   // Stable card_id-ordered page for bulk extraction. after_card_id is an exclusive cursor;
   // nullopt selects the first page. Never includes soft-deleted cards.
   std::vector<holder::model::Card> list_page_by_card_id(
