@@ -52,6 +52,16 @@ struct Repository {
   }
 };
 
+// HEAD's branch name, which libgit2 can report even before the first commit.
+std::string head_reference_name(git_repository* repo) {
+  git_reference* raw = nullptr;
+  check(git_reference_lookup(&raw, repo, "HEAD"));
+  GitPtr<git_reference, git_reference_free> head(raw, git_reference_free);
+  const char* target = git_reference_symbolic_target(head.get());
+  if (!target) throw std::runtime_error("card lifecycle changes require HEAD to name a branch");
+  return target;
+}
+
 Json snapshot(holder::core::Fs& fs, const std::filesystem::path& path) {
   if (!fs.exists(path)) return nullptr;
   const auto bytes = fs.read_file(path);
@@ -79,7 +89,29 @@ void restore_state(
     const Json& saved
 ) {
   if (saved.at("version") != 1) throw std::runtime_error("unsupported card mutation journal");
-  if (repository.repo && !saved.at("head").is_null()) {
+  if (repository.repo && saved.contains("reference") && saved.at("head").is_null()) {
+    // The branch was unborn. Undo at most the one root commit the mutation made.
+    git_reference* raw = nullptr;
+    const int result = git_repository_head(&raw, repository.repo.get());
+    if (result != GIT_EUNBORNBRANCH) {
+      check(result);
+      GitPtr<git_reference, git_reference_free> current(raw, git_reference_free);
+      if (saved.at("reference") != git_reference_name(current.get())) {
+        throw std::runtime_error("card mutation recovery requires the original Git branch");
+      }
+      git_commit* commit_raw = nullptr;
+      check(
+          git_commit_lookup(&commit_raw, repository.repo.get(), git_reference_target(current.get()))
+      );
+      GitPtr<git_commit, git_commit_free> commit(commit_raw, git_commit_free);
+      if (git_commit_parentcount(commit.get()) != 0) {
+        throw std::runtime_error("card mutation recovery requires unchanged Git history");
+      }
+      check(git_reference_delete(current.get()));
+    } else if (saved.at("reference") != head_reference_name(repository.repo.get())) {
+      throw std::runtime_error("card mutation recovery requires the original Git branch");
+    }
+  } else if (repository.repo && !saved.at("head").is_null()) {
     git_reference* raw = nullptr;
     check(git_repository_head(&raw, repository.repo.get()));
     GitPtr<git_reference, git_reference_free> current(raw, git_reference_free);
@@ -147,10 +179,16 @@ CardMutation::CardMutation(
   if (s.repository.repo) {
     s.saved["index"] = snapshot(fs, s.repository.index_path());
     git_reference* raw = nullptr;
-    check(git_repository_head(&raw, s.repository.repo.get()));
-    GitPtr<git_reference, git_reference_free> head(raw, git_reference_free);
-    s.saved["head"] = git_oid_tostr_s(git_reference_target(head.get()));
-    s.saved["reference"] = git_reference_name(head.get());
+    const int result = git_repository_head(&raw, s.repository.repo.get());
+    if (result == GIT_EUNBORNBRANCH) {
+      // A rebuilt or new project may have no commits yet; "head" stays null.
+      s.saved["reference"] = head_reference_name(s.repository.repo.get());
+    } else {
+      check(result);
+      GitPtr<git_reference, git_reference_free> head(raw, git_reference_free);
+      s.saved["head"] = git_oid_tostr_s(git_reference_target(head.get()));
+      s.saved["reference"] = git_reference_name(head.get());
+    }
     git_index* index_raw = nullptr;
     check(git_repository_index(&index_raw, s.repository.repo.get()));
     GitPtr<git_index, git_index_free> index(index_raw, git_index_free);
@@ -172,13 +210,18 @@ void CardMutation::begin() {
     throw std::runtime_error("incomplete card recovery journal");
   s.fs.rename(temporary, path);
   if (s.repository.repo) {
-    git_object* tree_raw = nullptr;
-    check(git_revparse_single(&tree_raw, s.repository.repo.get(), "HEAD^{tree}"));
-    GitPtr<git_object, git_object_free> tree(tree_raw, git_object_free);
     git_index* index_raw = nullptr;
     check(git_repository_index(&index_raw, s.repository.repo.get()));
     GitPtr<git_index, git_index_free> index(index_raw, git_index_free);
-    check(git_index_read_tree(index.get(), reinterpret_cast<git_tree*>(tree.get())));
+    if (s.saved.at("head").is_null()) {
+      // An unborn branch commits against the empty tree.
+      check(git_index_clear(index.get()));
+    } else {
+      git_object* tree_raw = nullptr;
+      check(git_revparse_single(&tree_raw, s.repository.repo.get(), "HEAD^{tree}"));
+      GitPtr<git_object, git_object_free> tree(tree_raw, git_object_free);
+      check(git_index_read_tree(index.get(), reinterpret_cast<git_tree*>(tree.get())));
+    }
     check(git_index_write(index.get()));
   }
 }

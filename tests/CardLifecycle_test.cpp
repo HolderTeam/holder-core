@@ -343,7 +343,8 @@ TEST_CASE(
         {live_path, trash_path, holder::core::card_rel_path(child_id)}
     );
     mutation.begin();
-    f.fs.create_directories((std::filesystem::path(f.project.root_path) / trash_path).parent_path()
+    f.fs.create_directories(
+        (std::filesystem::path(f.project.root_path) / trash_path).parent_path()
     );
     f.fs.rename(
         std::filesystem::path(f.project.root_path) / live_path,
@@ -531,4 +532,70 @@ TEST_CASE(
   REQUIRE(f.cards.get(child_id)->sort_key == 2);
   f.rebuild();
   REQUIRE(f.order() == std::vector<std::string>{before_id, parent_id, child_id, after_id});
+}
+
+TEST_CASE(
+    "Lifecycle operations work in a rebuilt project whose Git repository has no commits",
+    "[cardstore][lifecycle]"
+) {
+  Fixture f;
+  f.add(before_id, {}, 1);
+  f.add(parent_id, {}, 2);
+  f.add(after_id, {}, 3);
+  f.add(child_id, parent_id);
+  const std::filesystem::path root = f.project.root_path;
+  std::filesystem::remove_all(root / ".git");
+  holder::git::GitRepo fresh;
+  fresh.open_or_init(root);
+  REQUIRE_FALSE(fresh.head_oid());
+  f.rebuild();
+
+  SECTION("trash promotes children in the first commit") {
+    f.store.trash(parent_id, 10);
+    REQUIRE(f.order() == std::vector<std::string>{before_id, child_id, after_id});
+    REQUIRE_FALSE(holder::card::CardMutation::pending(f.project.root_path));
+    holder::git::GitRepo history;
+    history.open_existing(f.project.root_path);
+    REQUIRE(history.commit_parent_oids(f.head()).empty());
+    f.rebuild();
+    REQUIRE(f.order() == std::vector<std::string>{before_id, child_id, after_id});
+  }
+  SECTION("a failed first commit leaves the branch unborn") {
+    f.git.fail_commit = true;
+    REQUIRE_THROWS_WITH(f.store.trash(parent_id, 10), "injected commit failure");
+    REQUIRE_FALSE(holder::card::CardMutation::pending(f.project.root_path));
+    holder::git::GitRepo history;
+    history.open_existing(f.project.root_path);
+    REQUIRE_FALSE(history.head_oid());
+    REQUIRE_FALSE(f.cards.get(parent_id)->deleted_at);
+    REQUIRE(f.cards.get(child_id)->parent_card_id == parent_id);
+  }
+  SECTION("an interrupted first commit is rolled back to an unborn branch") {
+    f.git.fail_after_commit = true;
+    REQUIRE_THROWS_WITH(f.store.trash(parent_id, 10), "injected post-commit failure");
+    REQUIRE_FALSE(holder::card::CardMutation::pending(f.project.root_path));
+    holder::git::GitRepo history;
+    history.open_existing(f.project.root_path);
+    REQUIRE_FALSE(history.head_oid());
+    REQUIRE(f.cards.get(child_id)->parent_card_id == parent_id);
+  }
+  SECTION("a journal left after the first commit recovers to an unborn branch") {
+    const auto path = holder::core::card_rel_path(parent_id);
+    {
+      holder::card::CardMutation mutation(f.fs, f.project.root_path, {path});
+      mutation.begin();
+      f.git.real.open_or_init(root);
+      f.git.real.stage_path(path);
+      f.git.real.commit("Interrupted lifecycle operation");
+      // Deliberately leave the durable journal, as abrupt termination would.
+    }
+    REQUIRE(holder::card::CardMutation::pending(f.project.root_path));
+    REQUIRE(f.store.get(parent_id));
+    REQUIRE_FALSE(holder::card::CardMutation::pending(f.project.root_path));
+    holder::git::GitRepo history;
+    history.open_existing(f.project.root_path);
+    REQUIRE_FALSE(history.head_oid());
+    f.store.trash(parent_id, 10);
+    REQUIRE(f.order() == std::vector<std::string>{before_id, child_id, after_id});
+  }
 }
