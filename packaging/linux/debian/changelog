@@ -1,3 +1,9 @@
+holder-core (0.2.2-1~noble1) noble; urgency=medium
+
+  * Release collection pagination and parent-trash child promotion.
+
+ -- Holder Team <holdercardteam@gmail.com>  Fri, 09 Oct 2026 20:34:35 +0100
+
 holder-core (0.2.0-1~noble1) noble; urgency=medium
 
   * Initial libholder0 and libholder-dev packages.
