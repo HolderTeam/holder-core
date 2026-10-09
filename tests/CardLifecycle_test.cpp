@@ -11,6 +11,7 @@
 #include "card/CardPaths.h"
 #include "card/CardStore.h"
 #include "core_test_helpers.h"
+#include "platform/Tx.h"
 #include "privacy/ProjectPrivacy.h"
 #include "project/Rebuilder.h"
 
@@ -326,47 +327,114 @@ TEST_CASE(
 }
 
 TEST_CASE(
-    "Interrupted lifecycle journals roll back before rebuilding or accessing cards",
+    "Interrupted lifecycle journals settle by whether the operation's commit landed",
     "[cardstore][lifecycle]"
 ) {
   Fixture f;
   f.add(parent_id);
   f.add(child_id, parent_id);
+  const std::filesystem::path root = f.project.root_path;
   const auto original = f.bytes(parent_id);
   const auto head = f.head();
   const auto live_path = holder::core::card_rel_path(parent_id);
   const auto trash_path = holder::core::card_trash_rel_path(parent_id);
+  const auto commit_trash = [&] {
+    f.git.real.remove_path(live_path);
+    f.git.real.stage_path(trash_path);
+    f.git.real.commit("Interrupted lifecycle operation");
+  };
+  const auto commit_unrelated = [&] {
+    f.git.real.write_file("unrelated.txt", "later work");
+    f.git.real.stage_path("unrelated.txt");
+    f.git.real.commit("Later unrelated work");
+  };
+  bool landed = false;
   {
     holder::card::CardMutation mutation(
         f.fs,
         f.project.root_path,
-        {live_path, trash_path, holder::core::card_rel_path(child_id)}
+        {live_path, trash_path, holder::core::card_rel_path(child_id)},
+        {{live_path, std::nullopt}, {trash_path, original}}
     );
     mutation.begin();
-    f.fs.create_directories(
-        (std::filesystem::path(f.project.root_path) / trash_path).parent_path()
-    );
-    f.fs.rename(
-        std::filesystem::path(f.project.root_path) / live_path,
-        std::filesystem::path(f.project.root_path) / trash_path
-    );
+    f.fs.create_directories((root / trash_path).parent_path());
+    f.fs.rename(root / live_path, root / trash_path);
     f.cards.soft_delete(parent_id, 10, 10);
     SECTION("interrupted before Git commit") {}
-    SECTION("interrupted after Git commit and SQLite update") {
-      f.git.real.remove_path(live_path);
-      f.git.real.stage_path(trash_path);
-      f.git.real.commit("Interrupted lifecycle operation");
+    SECTION("interrupted before Git commit, then another commit is made") {
+      // The real operation never committed; only its own uncommitted bytes are undone.
+      f.git.real.open_or_init(root);
+      commit_unrelated();
+    }
+    SECTION("interrupted after Git commit") {
+      f.git.real.open_or_init(root);
+      commit_trash();
+      landed = true;
+    }
+    SECTION("interrupted after Git commit, then another commit is made") {
+      f.git.real.open_or_init(root);
+      commit_trash();
+      commit_unrelated();
+      landed = true;
     }
     // Deliberately leave the durable journal, as abrupt termination would.
   }
+  const auto head_after_interruption = f.head();
   REQUIRE(holder::card::CardMutation::pending(f.project.root_path));
-  REQUIRE_FALSE(f.store.get(parent_id)->deleted_at);
-  REQUIRE(f.bytes(parent_id) == original);
-  REQUIRE(f.head() == head);
-  REQUIRE(f.cards.get(child_id)->parent_card_id == parent_id);
+  // Metadata reads stay plain SQLite lookups and do not trigger recovery.
+  REQUIRE(f.store.get(parent_id)->deleted_at);
+  REQUIRE(holder::card::CardMutation::pending(f.project.root_path));
+  REQUIRE(f.store.get_content(*f.cards.get(child_id)) == "body " + child_id + "\n#keep\n");
   REQUIRE_FALSE(holder::card::CardMutation::pending(f.project.root_path));
+  // Recovery never moves the branch.
+  REQUIRE(f.head() == head_after_interruption);
+  if (landed) {
+    REQUIRE(f.cards.get(parent_id)->deleted_at);
+    REQUIRE(f.bytes(parent_id, true) == original);
+    REQUIRE_FALSE(f.fs.exists(root / live_path));
+  } else {
+    REQUIRE_FALSE(f.cards.get(parent_id)->deleted_at);
+    REQUIRE(f.bytes(parent_id) == original);
+    REQUIRE_FALSE(f.fs.exists(root / trash_path));
+  }
+  REQUIRE(f.cards.get(child_id)->parent_card_id == parent_id);
   f.rebuild();
+  REQUIRE(static_cast<bool>(f.cards.get(parent_id)->deleted_at) == landed);
+}
+
+TEST_CASE(
+    "Rebuilding inside an import transaction does not consume a recovery journal",
+    "[cardstore][lifecycle]"
+) {
+  Fixture f;
+  f.add(parent_id);
+  const std::filesystem::path root = f.project.root_path;
+  const auto live_path = holder::core::card_rel_path(parent_id);
+  const auto trash_path = holder::core::card_trash_rel_path(parent_id);
+  const auto original = f.bytes(parent_id);
+  {
+    holder::card::CardMutation mutation(
+        f.fs,
+        f.project.root_path,
+        {live_path, trash_path},
+        {{live_path, std::nullopt}, {trash_path, original}}
+    );
+    mutation.begin();
+    f.fs.create_directories((root / trash_path).parent_path());
+    f.fs.rename(root / live_path, root / trash_path);
+  }
+  {
+    holder::platform::Tx tx(f.db);
+    holder::store::Rebuilder(f.db, &f.fts).rebuild_project_in_transaction(f.project);
+    tx.commit();
+  }
+  // The caller owns recovery: files are untouched and the journal remains for it.
+  REQUIRE(holder::card::CardMutation::pending(f.project.root_path));
+  REQUIRE(f.fs.exists(root / trash_path));
+  f.rebuild();
+  REQUIRE_FALSE(holder::card::CardMutation::pending(f.project.root_path));
   REQUIRE(f.bytes(parent_id) == original);
+  REQUIRE_FALSE(f.cards.get(parent_id)->deleted_at);
 }
 
 TEST_CASE(
@@ -579,23 +647,78 @@ TEST_CASE(
     REQUIRE_FALSE(history.head_oid());
     REQUIRE(f.cards.get(child_id)->parent_card_id == parent_id);
   }
-  SECTION("a journal left after the first commit recovers to an unborn branch") {
+  SECTION("a journal left before the first commit never discards another first commit") {
     const auto path = holder::core::card_rel_path(parent_id);
+    const auto original = f.bytes(parent_id);
     {
-      holder::card::CardMutation mutation(f.fs, f.project.root_path, {path});
+      holder::card::CardMutation mutation(f.fs, f.project.root_path, {path}, {{path, "partial"}});
+      mutation.begin();
+      f.fs.write_file(root / path, "partial");
+      // Deliberately leave the durable journal, as abrupt termination would.
+    }
+    f.git.real.open_or_init(root);
+    f.git.real.write_file("unrelated.txt", "first");
+    f.git.real.stage_path("unrelated.txt");
+    f.git.real.commit("Unrelated first commit");
+    const auto first = f.head();
+    f.rebuild();
+    REQUIRE_FALSE(holder::card::CardMutation::pending(f.project.root_path));
+    REQUIRE(f.head() == first);
+    REQUIRE(f.bytes(parent_id) == original);
+    f.store.trash(parent_id, 10);
+    REQUIRE(f.order() == std::vector<std::string>{before_id, child_id, after_id});
+  }
+  SECTION("a journal left after the first commit keeps that commit") {
+    const auto path = holder::core::card_rel_path(child_id);
+    const auto updated = f.bytes(child_id) + "\nupdated\n";
+    {
+      holder::card::CardMutation mutation(f.fs, f.project.root_path, {path}, {{path, updated}});
       mutation.begin();
       f.git.real.open_or_init(root);
+      f.git.real.write_file(path, updated);
       f.git.real.stage_path(path);
       f.git.real.commit("Interrupted lifecycle operation");
       // Deliberately leave the durable journal, as abrupt termination would.
     }
-    REQUIRE(holder::card::CardMutation::pending(f.project.root_path));
-    REQUIRE(f.store.get(parent_id));
+    const auto first = f.head();
+    f.rebuild();
     REQUIRE_FALSE(holder::card::CardMutation::pending(f.project.root_path));
-    holder::git::GitRepo history;
-    history.open_existing(f.project.root_path);
-    REQUIRE_FALSE(history.head_oid());
-    f.store.trash(parent_id, 10);
-    REQUIRE(f.order() == std::vector<std::string>{before_id, child_id, after_id});
+    REQUIRE(f.head() == first);
+    REQUIRE(f.bytes(child_id) == updated);
   }
+}
+
+TEST_CASE("Promotion re-spaces only the siblings around tied sort keys", "[cardstore][lifecycle]") {
+  Fixture f;
+  f.add(ancestor_id, {}, 1);
+  f.add(child1_id, {}, 2);
+  f.add(before_id, {}, 3, "a");
+  f.add(parent_id, {}, 3, "b");
+  f.add(after_id, {}, 3, "c");
+  f.add(child2_id, {}, 5);
+  f.add(grandchild_id, {}, 6);
+  f.add(child_id, parent_id);
+  f.store.trash(parent_id, 20);
+  REQUIRE(
+      f.order() == std::vector<std::string>{
+                       ancestor_id,
+                       child1_id,
+                       before_id,
+                       child_id,
+                       after_id,
+                       child2_id,
+                       grandchild_id
+                   }
+  );
+  for (const auto& [id, key] : std::vector<std::pair<std::string, double>>{
+           {ancestor_id, 1},
+           {child1_id, 2},
+           {child2_id, 5},
+           {grandchild_id, 6}
+       }) {
+    REQUIRE(f.cards.get(id)->sort_key == key);
+    REQUIRE(f.cards.get(id)->updated_at == 1);
+  }
+  f.rebuild();
+  REQUIRE(f.order()[3] == child_id);
 }

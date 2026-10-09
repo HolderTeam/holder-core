@@ -1,12 +1,14 @@
 #include "project/ProjectImport.h"
 
+#include "card/CardMutation.h"
+#include "platform/Fs.h"
 #include "platform/Tx.h"
 #include "project/ProjectManifest.h"
 #include "project/ProjectRepo.h"
 #include "project/Rebuilder.h"
 
-#include <nlohmann/json.hpp>
 #include <fstream>
+#include <nlohmann/json.hpp>
 #include <stdexcept>
 
 namespace holder::project {
@@ -45,6 +47,8 @@ holder::model::Project import_project_into_empty_database(
   auto project = read_project_manifest(root);
   // A fresh import is separate from loss/corruption recovery. Existing recovery
   // readiness and object-count checks must not be relaxed to onboard a new copy.
+  holder::core::RealFs fs;
+  holder::card::CardMutation::recover_files(fs, root);
   holder::platform::Tx tx(db);
   ProjectRepo projects(db);
   if (!projects.list().empty()) {
@@ -53,6 +57,7 @@ holder::model::Project import_project_into_empty_database(
   projects.create(project);
   holder::store::Rebuilder(db, &fts, nullptr, false, true).rebuild_project_in_transaction(project);
   tx.commit();
+  holder::card::CardMutation::finish_recovery(fs, root);
   return project;
 }
 

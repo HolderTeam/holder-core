@@ -614,8 +614,8 @@ void CardStore::apply_lifecycle(
 ) {
   const auto live_path = holder::core::card_rel_path(current.card_id);
   if (current.rel_path != live_path &&
-      !(current.deleted_at && current.rel_path == holder::core::card_trash_rel_path(current.card_id)
-      ))
+      !(current.deleted_at &&
+        current.rel_path == holder::core::card_trash_rel_path(current.card_id)))
     throw std::runtime_error("card rel_path does not match card_id");
   const auto trash_path = holder::core::card_trash_rel_path(current.card_id);
   const auto source_path = current.deleted_at ? trash_path : live_path;
@@ -662,7 +662,11 @@ void CardStore::apply_lifecycle(
                                                 : plain
     );
   }
-  CardMutation mutation(*fs_, project.root_path, paths);
+  std::map<std::string, std::optional<std::string>> changes;
+  if (source_path != target_path) changes[source_path] = std::nullopt;
+  for (const auto& [path, bytes] : writes)
+    changes[path] = bytes;
+  CardMutation mutation(*fs_, project.root_path, paths, changes);
   holder::platform::Tx tx(db_);
   for (const auto& record : records) {
     const auto& card = record.card;
@@ -864,10 +868,6 @@ void CardStore::hard_delete(const std::string& card_id) {
 }
 
 std::optional<holder::model::Card> CardStore::get(const std::string& card_id) const {
-  const auto card = card_repo_.get(card_id);
-  if (!card) return std::nullopt;
-  const auto project = require_project(card->project_id);
-  auto operation = git_->lock_operation(project.root_path);
   return card_repo_.get(card_id);
 }
 

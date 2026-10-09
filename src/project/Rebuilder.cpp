@@ -165,6 +165,8 @@ Rebuilder::Rebuilder(
 Rebuilder::RebuildStats Rebuilder::rebuild_project(const holder::model::Project& project) {
   const auto mutex = holder::git::repo_mutex_for(project.root_path);
   std::lock_guard<std::recursive_mutex> lock(*mutex);
+  // Settle an interrupted card change before indexing; the journal is removed only
+  // once the rebuilt index has committed, so a failed rebuild retries recovery.
   holder::card::CardMutation::recover_files(*fs_, project.root_path);
   holder::platform::Tx tx(db_);
   auto stats = rebuild_project_in_transaction(project);
@@ -182,9 +184,6 @@ Rebuilder::RebuildStats Rebuilder::rebuild_project_in_transaction(
   RebuildStats stats;
   auto& fs = *fs_;
   const std::filesystem::path root = project.root_path;
-  // Standalone rebuild owns recovery completion after its transaction commits.
-  // A caller-owned transaction may safely retry recovery on its next rebuild.
-  holder::card::CardMutation::recover_files(fs, root);
   if (!fs.exists(root)) {
     throw std::runtime_error("project root not found");
   }

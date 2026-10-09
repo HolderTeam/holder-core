@@ -3,6 +3,8 @@
 #include <git2.h>
 #include <nlohmann/json.hpp>
 
+#include <spdlog/spdlog.h>
+
 #include <stdexcept>
 
 namespace holder::card {
@@ -70,6 +72,11 @@ Json snapshot(holder::core::Fs& fs, const std::filesystem::path& path) {
   return std::vector<std::uint8_t>(bytes.begin(), bytes.end());
 }
 
+Json bytes_json(const std::optional<std::string>& bytes) {
+  if (!bytes) return nullptr;
+  return std::vector<std::uint8_t>(bytes->begin(), bytes->end());
+}
+
 void restore(holder::core::Fs& fs, const std::filesystem::path& path, const Json& data) {
   if (data.is_null()) {
     if (fs.exists(path)) fs.remove(path);
@@ -82,74 +89,202 @@ void restore(holder::core::Fs& fs, const std::filesystem::path& path, const Json
   }
 }
 
-void restore_state(
+std::filesystem::path journal_file_path(const std::string& key) {
+  const std::filesystem::path path(key);
+  if (path.is_absolute() || path.lexically_normal() != path ||
+      key.find("..") != std::string::npos ||
+      (key.rfind("cards/", 0) != 0 && key.rfind("trash/cards/", 0) != 0)) {
+    throw std::runtime_error("invalid card mutation recovery path");
+  }
+  return path;
+}
+
+std::optional<git_oid> saved_head(const Json& saved) {
+  if (saved.at("head").is_null()) return std::nullopt;
+  git_oid oid{};
+  check(git_oid_fromstr(&oid, saved.at("head").get<std::string>().c_str()));
+  return oid;
+}
+
+// The saved branch's current commit, or nothing while it is unborn.
+std::optional<git_oid> branch_tip(git_repository* repo, const Json& saved) {
+  git_oid oid{};
+  const int result =
+      git_reference_name_to_id(&oid, repo, saved.at("reference").get<std::string>().c_str());
+  if (result == GIT_ENOTFOUND) return std::nullopt;
+  check(result);
+  return oid;
+}
+
+bool same(const std::optional<git_oid>& a, const std::optional<git_oid>& b) {
+  return a.has_value() == b.has_value() && (!a || git_oid_equal(&*a, &*b));
+}
+
+// The operation's own commit has the saved HEAD as its only parent (none for an
+// unborn branch) and holds exactly the intended bytes at every changed path.
+bool is_operation_commit(git_repository* repo, const git_oid& oid, const Json& saved) {
+  git_commit* commit_raw = nullptr;
+  check(git_commit_lookup(&commit_raw, repo, &oid));
+  GitPtr<git_commit, git_commit_free> commit(commit_raw, git_commit_free);
+  const auto before = saved_head(saved);
+  if (git_commit_parentcount(commit.get()) != (before ? 1u : 0u)) return false;
+  if (before && !git_oid_equal(git_commit_parent_id(commit.get(), 0), &*before)) return false;
+  git_tree* tree_raw = nullptr;
+  check(git_commit_tree(&tree_raw, commit.get()));
+  GitPtr<git_tree, git_tree_free> tree(tree_raw, git_tree_free);
+  for (const auto& [key, file] : saved.at("files").items()) {
+    if (!file.contains("after")) continue;
+    git_tree_entry* entry_raw = nullptr;
+    const int result = git_tree_entry_bypath(&entry_raw, tree.get(), key.c_str());
+    GitPtr<git_tree_entry, git_tree_entry_free> entry(entry_raw, git_tree_entry_free);
+    if (file.at("after").is_null()) {
+      if (result != GIT_ENOTFOUND) return false;
+      continue;
+    }
+    if (result == GIT_ENOTFOUND) return false;
+    check(result);
+    const auto bytes = file.at("after").get<std::vector<std::uint8_t>>();
+    git_oid expected{};
+    check(git_odb_hash(&expected, bytes.data(), bytes.size(), GIT_OBJECT_BLOB));
+    if (!git_oid_equal(&expected, git_tree_entry_id(entry.get()))) return false;
+  }
+  return true;
+}
+
+// Search the saved branch back to the saved HEAD, so commits made on top after an
+// interruption do not hide the operation's commit.
+std::optional<git_oid> landed_commit(git_repository* repo, const Json& saved) {
+  const auto tip = branch_tip(repo, saved);
+  if (!tip) return std::nullopt;
+  git_revwalk* walk_raw = nullptr;
+  check(git_revwalk_new(&walk_raw, repo));
+  GitPtr<git_revwalk, git_revwalk_free> walk(walk_raw, git_revwalk_free);
+  check(git_revwalk_push(walk.get(), &*tip));
+  if (const auto before = saved_head(saved)) check(git_revwalk_hide(walk.get(), &*before));
+  git_oid oid{};
+  for (int remaining = 10000; remaining > 0 && git_revwalk_next(&oid, walk.get()) == 0;
+       --remaining) {
+    if (is_operation_commit(repo, oid, saved)) return oid;
+  }
+  return std::nullopt;
+}
+
+void restore_original_files(
+    holder::core::Fs& fs,
+    const std::filesystem::path& root,
+    const Json& saved
+) {
+  for (const auto& [key, file] : saved.at("files").items())
+    restore(fs, root / journal_file_path(key), file.at("before"));
+}
+
+// Restore the index as it was before the operation, then take the operation's
+// own paths from `commit`, keeping unrelated staged work.
+void restore_unrelated_index(
+    holder::core::Fs& fs,
+    Repository& repository,
+    const Json& saved,
+    const git_oid& commit_oid
+) {
+  git_commit* commit_raw = nullptr;
+  check(git_commit_lookup(&commit_raw, repository.repo.get(), &commit_oid));
+  GitPtr<git_commit, git_commit_free> commit(commit_raw, git_commit_free);
+  git_tree* tree_raw = nullptr;
+  check(git_commit_tree(&tree_raw, commit.get()));
+  GitPtr<git_tree, git_tree_free> tree(tree_raw, git_tree_free);
+  const auto path = repository.index_path();
+  restore(fs, path, saved.at("index"));
+  git_index* index_raw = nullptr;
+  check(git_index_open(&index_raw, path.string().c_str()));
+  GitPtr<git_index, git_index_free> index(index_raw, git_index_free);
+  for (const auto& [key, file] : saved.at("files").items()) {
+    git_tree_entry* entry_raw = nullptr;
+    const int result = git_tree_entry_bypath(&entry_raw, tree.get(), key.c_str());
+    GitPtr<git_tree_entry, git_tree_entry_free> entry(entry_raw, git_tree_entry_free);
+    if (result == GIT_ENOTFOUND) {
+      const int removed = git_index_remove_bypath(index.get(), key.c_str());
+      if (removed != GIT_ENOTFOUND) check(removed);
+      continue;
+    }
+    check(result);
+    git_index_entry updated{};
+    updated.mode = git_tree_entry_filemode(entry.get());
+    updated.id = *git_tree_entry_id(entry.get());
+    updated.path = key.c_str();
+    check(git_index_add(index.get(), &updated));
+  }
+  check(git_index_write(index.get()));
+}
+
+// Undo a mutation in the process that started it, while it still holds the project
+// lock. The branch is reset only when its tip is provably this operation's commit.
+void roll_back(
     holder::core::Fs& fs,
     const std::filesystem::path& root,
     Repository& repository,
     const Json& saved
 ) {
-  if (saved.at("version") != 1) throw std::runtime_error("unsupported card mutation journal");
-  if (repository.repo && saved.contains("reference") && saved.at("head").is_null()) {
-    // The branch was unborn. Undo at most the one root commit the mutation made.
-    git_reference* raw = nullptr;
-    const int result = git_repository_head(&raw, repository.repo.get());
-    if (result != GIT_EUNBORNBRANCH) {
-      check(result);
-      GitPtr<git_reference, git_reference_free> current(raw, git_reference_free);
-      if (saved.at("reference") != git_reference_name(current.get())) {
-        throw std::runtime_error("card mutation recovery requires the original Git branch");
-      }
-      git_commit* commit_raw = nullptr;
-      check(
-          git_commit_lookup(&commit_raw, repository.repo.get(), git_reference_target(current.get()))
-      );
-      GitPtr<git_commit, git_commit_free> commit(commit_raw, git_commit_free);
-      if (git_commit_parentcount(commit.get()) != 0) {
-        throw std::runtime_error("card mutation recovery requires unchanged Git history");
-      }
-      check(git_reference_delete(current.get()));
-    } else if (saved.at("reference") != head_reference_name(repository.repo.get())) {
-      throw std::runtime_error("card mutation recovery requires the original Git branch");
-    }
-  } else if (repository.repo && !saved.at("head").is_null()) {
-    git_reference* raw = nullptr;
-    check(git_repository_head(&raw, repository.repo.get()));
-    GitPtr<git_reference, git_reference_free> current(raw, git_reference_free);
-    if (saved.at("reference") != git_reference_name(current.get())) {
-      throw std::runtime_error("card mutation recovery requires the original Git branch");
-    }
-    git_oid before{};
-    check(git_oid_fromstr(&before, saved.at("head").get<std::string>().c_str()));
-    if (!git_oid_equal(&before, git_reference_target(current.get()))) {
-      git_commit* commit_raw = nullptr;
-      check(
-          git_commit_lookup(&commit_raw, repository.repo.get(), git_reference_target(current.get()))
-      );
-      GitPtr<git_commit, git_commit_free> commit(commit_raw, git_commit_free);
-      if (git_commit_parentcount(commit.get()) != 1 ||
-          !git_oid_equal(git_commit_parent_id(commit.get(), 0), &before)) {
-        throw std::runtime_error("card mutation recovery requires unchanged Git history");
-      }
-      git_reference* reset = nullptr;
-      check(git_reference_set_target(
-          &reset,
-          current.get(),
-          &before,
-          "Recover interrupted card mutation"
+  if (repository.repo) {
+    const auto tip = branch_tip(repository.repo.get(), saved);
+    const auto before = saved_head(saved);
+    if (tip && !same(tip, before) && is_operation_commit(repository.repo.get(), *tip, saved)) {
+      git_reference* raw = nullptr;
+      check(git_reference_lookup(
+          &raw,
+          repository.repo.get(),
+          saved.at("reference").get<std::string>().c_str()
       ));
-      git_reference_free(reset);
+      GitPtr<git_reference, git_reference_free> branch(raw, git_reference_free);
+      if (before) {
+        git_reference* reset = nullptr;
+        check(git_reference_set_target(&reset, branch.get(), &*before, "Roll back card mutation"));
+        git_reference_free(reset);
+      } else {
+        check(git_reference_delete(branch.get()));
+      }
     }
   }
-  for (const auto& entry : saved.at("files").items()) {
-    const std::filesystem::path path(entry.key());
-    if (path.is_absolute() || path.lexically_normal() != path ||
-        entry.key().find("..") != std::string::npos ||
-        (entry.key().rfind("cards/", 0) != 0 && entry.key().rfind("trash/cards/", 0) != 0)) {
-      throw std::runtime_error("invalid card mutation recovery path");
-    }
-    restore(fs, root / path, entry.value());
-  }
+  restore_original_files(fs, root, saved);
   if (repository.repo) restore(fs, repository.index_path(), saved.at("index"));
+}
+
+// Settle a journal left by an interrupted process. If the operation's commit
+// landed it is kept, since files and Git already agree; otherwise only files that
+// still hold this operation's uncommitted bytes are put back. Refs are never moved.
+void recover_journal(
+    holder::core::Fs& fs,
+    const std::filesystem::path& root,
+    Repository& repository,
+    const Json& saved
+) {
+  if (saved.at("version") != 2) throw std::runtime_error("unsupported card mutation journal");
+  if (!repository.repo) {
+    restore_original_files(fs, root, saved);
+    return;
+  }
+  auto* repo = repository.repo.get();
+  if (same(branch_tip(repo, saved), saved_head(saved))) {
+    // Nothing was committed and nothing else has committed since: restore exactly.
+    restore_original_files(fs, root, saved);
+    restore(fs, repository.index_path(), saved.at("index"));
+    return;
+  }
+  if (const auto landed = landed_commit(repo, saved)) {
+    git_oid head{};
+    if (git_reference_name_to_id(&head, repo, "HEAD") == 0 && git_oid_equal(&head, &*landed)) {
+      restore_unrelated_index(fs, repository, saved, *landed);
+    }
+    return;
+  }
+  for (const auto& [key, file] : saved.at("files").items()) {
+    if (!file.contains("after")) continue;
+    const auto path = root / journal_file_path(key);
+    if (snapshot(fs, path) == file.at("after")) {
+      restore(fs, path, file.at("before"));
+    } else if (snapshot(fs, path) != file.at("before")) {
+      spdlog::warn("Leaving {} after an interrupted card change: it was changed since", key);
+    }
+  }
 }
 } // namespace
 
@@ -167,15 +302,22 @@ struct CardMutation::State {
 CardMutation::CardMutation(
     holder::core::Fs& fs,
     const std::filesystem::path& root,
-    const std::vector<std::string>& paths
+    const std::vector<std::string>& paths,
+    const std::map<std::string, std::optional<std::string>>& changes
 )
     : state_(std::make_unique<State>(fs, root)) {
   auto& s = *state_;
   if (fs.exists(s.repository.journal(root)))
     throw std::runtime_error("card mutation recovery required");
-  s.saved = {{"version", 1}, {"files", Json::object()}, {"head", nullptr}, {"index", nullptr}};
-  for (const auto& path : paths)
-    s.saved["files"][path] = snapshot(fs, root / path);
+  s.saved = {{"version", 2}, {"files", Json::object()}, {"head", nullptr}, {"index", nullptr}};
+  for (const auto& path : paths) {
+    journal_file_path(path);
+    s.saved["files"][path] = {{"before", snapshot(fs, root / path)}};
+  }
+  for (const auto& [path, bytes] : changes) {
+    if (!s.saved["files"].contains(path)) throw std::invalid_argument("unjournaled card change");
+    s.saved["files"][path]["after"] = bytes_json(bytes);
+  }
   if (s.repository.repo) {
     s.saved["index"] = snapshot(fs, s.repository.index_path());
     git_reference* raw = nullptr;
@@ -252,7 +394,7 @@ void CardMutation::preserve_unrelated_index() {
 
 void CardMutation::rollback() {
   auto& s = *state_;
-  restore_state(s.fs, s.root, s.repository, s.saved);
+  roll_back(s.fs, s.root, s.repository, s.saved);
   finish();
 }
 
@@ -263,6 +405,10 @@ void CardMutation::finish() {
 }
 
 bool CardMutation::pending(const std::filesystem::path& root) {
+  // Checked before every card write, so avoid opening the repository in the usual layout.
+  std::error_code error;
+  if (std::filesystem::is_directory(root / ".git", error))
+    return std::filesystem::exists(root / ".git" / "holder-card-mutation", error);
   Repository repository(root, false);
   return std::filesystem::exists(repository.journal(root));
 }
@@ -273,7 +419,7 @@ void CardMutation::recover_files(holder::core::Fs& fs, const std::filesystem::pa
   if (!fs.exists(path)) return;
   const auto raw = fs.read_file(path);
   const auto saved = Json::from_msgpack(raw.begin(), raw.end());
-  restore_state(fs, root, repository, saved);
+  recover_journal(fs, root, repository, saved);
 }
 
 void CardMutation::finish_recovery(holder::core::Fs& fs, const std::filesystem::path& root) {

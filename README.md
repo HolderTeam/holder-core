@@ -22,14 +22,18 @@ same rules. Create and move reject unreachable parents and cycles.
 
 Each lifecycle operation updates card files and SQLite under the project lock
 and creates one Git commit. Unrelated staged and working-tree changes are
-preserved. A local `holder-card-mutation` journal in the Git directory retains
-the original affected files, index, and HEAD until SQLite commits. Card bytes in
-the journal retain the project's encryption. Caught failures roll back the
-operation. After an interrupted process, a standalone project rebuild or the
-next `CardStore` project access rolls back the journal and rebuilds projections
-before proceeding. Recovery needs the project's encryption key and original Git
-branch/history; leave the journal intact if recovery fails. This recovery covers
-process interruption, not a guarantee of filesystem durability across power loss.
+preserved. A local `holder-card-mutation` journal in the Git directory records
+each affected file's original and intended bytes, the index and HEAD until
+SQLite commits. Card bytes in the journal retain the project's encryption.
+Caught failures roll the operation back. After an interrupted process, the next
+standalone project rebuild or card write settles the journal: if the operation's
+commit landed, it is kept and the index is rebuilt from the files; otherwise only
+files still holding its uncommitted bytes are put back. Recovery never moves Git
+refs, so later commits are kept. Metadata reads do not wait for recovery. A
+failed rebuild, for example on a locked encrypted project, leaves the journal to
+retry. This recovery covers process interruption, not a guarantee of filesystem
+durability across power loss. Promoting children re-spaces sort keys only around
+the insertion point when neighbouring keys leave no room.
 It does not scan for or repair children hidden by older trash operations.
 
 ## Build

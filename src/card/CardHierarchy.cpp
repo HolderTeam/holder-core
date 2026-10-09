@@ -27,8 +27,32 @@ std::vector<Card> siblings(CardRepo& repo, const Card& card) {
   return result;
 }
 
-// Prefer fresh keys only for the inserted block. If floating-point precision or
-// tied keys make that impossible, renumber the destination in its captured order.
+// Evenly spaced keys for `count` cards strictly between two neighbours. An open end
+// steps by 1.0 from the other bound; with both ends open, keys are 1..count.
+std::optional<std::vector<double>> spaced_keys(
+    std::optional<double> left,
+    std::optional<double> right,
+    std::size_t count
+) {
+  const auto n = static_cast<double>(count);
+  if (!left && !right) left = 0.0;
+  const double low = left ? *left : *right - n - 1.0;
+  const double high = right ? *right : *left + n + 1.0;
+  std::vector<double> keys;
+  double previous = low;
+  for (std::size_t i = 0; i < count; ++i) {
+    const double fraction = static_cast<double>(i + 1) / (n + 1.0);
+    const double key = low * (1.0 - fraction) + high * fraction;
+    if (!std::isfinite(key) || key <= previous || key >= high) return std::nullopt;
+    keys.push_back(key);
+    previous = key;
+  }
+  return keys;
+}
+
+// Give the inserted block fresh keys between its neighbours. If floating-point
+// precision or tied keys leave no room, re-space the smallest surrounding window of
+// siblings, widening it until it fits; keys need not be contiguous, only ordered.
 std::vector<Card> insert_block(
     std::vector<Card> destination,
     std::size_t at,
@@ -37,38 +61,37 @@ std::vector<Card> insert_block(
     long long updated_at
 ) {
   if (block.empty()) return {};
-  const double left = at ? destination[at - 1].sort_key
-                         : (at < destination.size()
-                                ? destination[at].sort_key - static_cast<double>(block.size()) - 1.0
-                                : 0.0);
-  const double right = at < destination.size() ? destination[at].sort_key
-                                               : left + static_cast<double>(block.size()) + 1.0;
-  double previous = left;
-  bool fits = std::isfinite(left) && std::isfinite(right) && left < right;
-  for (std::size_t i = 0; i < block.size(); ++i) {
-    const double fraction = static_cast<double>(i + 1) / static_cast<double>(block.size() + 1);
-    const double key = left * (1.0 - fraction) + right * fraction;
-    fits = fits && std::isfinite(key) && key > previous && key < right;
-    block[i].parent_card_id = parent;
-    block[i].sort_key = key;
-    block[i].updated_at = updated_at;
-    previous = key;
-  }
-  if (fits) return block;
-
+  for (auto& card : block)
+    card.parent_card_id = parent;
   destination
       .insert(destination.begin() + static_cast<std::ptrdiff_t>(at), block.begin(), block.end());
-  std::vector<Card> changed;
-  for (std::size_t i = 0; i < destination.size(); ++i) {
-    auto& card = destination[i];
-    const double key = static_cast<double>(i + 1);
-    if ((i >= at && i < at + block.size()) || card.sort_key != key) {
-      card.sort_key = key;
-      card.updated_at = updated_at;
-      changed.push_back(card);
+  const std::size_t block_end = at + block.size();
+  // Re-space destination[low, high), which always contains the block.
+  for (std::size_t radius = 0;; radius = radius ? radius * 2 : 1) {
+    const std::size_t low = at > radius ? at - radius : 0;
+    const std::size_t high = std::min(destination.size(), block_end + radius);
+    const auto left = low ? std::optional<double>(destination[low - 1].sort_key) : std::nullopt;
+    const auto right = high < destination.size() ? std::optional<double>(destination[high].sort_key)
+                                                 : std::nullopt;
+    const auto keys = spaced_keys(left, right, high - low);
+    if (!keys) {
+      if (low == 0 && high == destination.size()) {
+        throw std::runtime_error("no sort keys available for card placement");
+      }
+      continue;
     }
+    std::vector<Card> changed;
+    for (std::size_t i = low; i < high; ++i) {
+      auto& card = destination[i];
+      const double key = (*keys)[i - low];
+      if ((i >= at && i < block_end) || card.sort_key != key) {
+        card.sort_key = key;
+        card.updated_at = updated_at;
+        changed.push_back(card);
+      }
+    }
+    return changed;
   }
-  return changed;
 }
 } // namespace
 
