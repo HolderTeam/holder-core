@@ -243,7 +243,7 @@ The first supported consumer is `holder-daemon`, which can use `third_party/hold
 
 Set `-DHOLDER_CORE_BUILD_SHARED=ON` in a standalone CMake build to build and
 install both `libholder.a` (`Holder::Core`) and the shared library
-(`Holder::Shared`). On Linux the shared files are `libholder.so.0.2.0`,
+(`Holder::Shared`). On Linux the shared files are `libholder.so.0.2.2`,
 `libholder.so.0`, and `libholder.so`; ABI generation `0` is independent of the
 application version. An incompatible public ABI change requires a new SONAME
 and runtime package name. The default remains static-only for existing source
