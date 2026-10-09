@@ -7,6 +7,7 @@
 #include "card/LinkKindCatalog.h"
 #include "card/LinkRepo.h"
 #include "card/MilestoneRepo.h"
+#include "card/TagExtractor.h"
 #include "card/TagRepo.h"
 #include "git/EcdsaDerSigningCredentialProvider.h"
 #include "git/GitOps.h"
@@ -42,6 +43,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <climits>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
@@ -1788,6 +1790,105 @@ int holder_card_list_complete_page(
   } catch (...) {
     return set_unknown_exception(out_error); // LCOV_EXCL_LINE
   } // LCOV_EXCL_LINE
+}
+
+int holder_card_collection_page_json(
+    holder_context* context,
+    const char* project_id,
+    const char* request_json,
+    char** out_json,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (!out_json)
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "out_json must not be null");
+  *out_json = nullptr;
+  if (!context || !project_id || !project_id[0] || !request_json || !request_json[0])
+    return set_error(
+        out_error,
+        HOLDER_ERROR_INVALID_ARGUMENT,
+        "context, project_id and request_json are required"
+    );
+  holder::card::CardPageQuery query;
+  int limit = 256;
+  bool include_content = false;
+  try {
+    const auto request = nlohmann::json::parse(request_json);
+    if (!request.is_object()) throw std::invalid_argument("request must be an object");
+    for (const auto& item : request.items()) {
+      const auto& key = item.key();
+      if (key != "view" && key != "parent_card_id" && key != "tag" && key != "order" &&
+          key != "limit" && key != "include_content" && key != "cursor")
+        throw std::invalid_argument("unsupported collection field: " + key);
+    }
+    const auto view = request.value("view", std::string("all"));
+    if (view == "roots")
+      query.parent = holder::card::CardPageRoots{};
+    else if (view == "children") {
+      const auto parent = request.at("parent_card_id").get<std::string>();
+      if (parent.empty()) throw std::invalid_argument("parent_card_id must not be empty");
+      query.parent = holder::card::CardPageChildrenOf{parent};
+    } else if (view != "all")
+      throw std::invalid_argument("unsupported collection view");
+    if (view != "children" && request.contains("parent_card_id"))
+      throw std::invalid_argument("parent_card_id requires children view");
+    if (request.contains("tag")) {
+      query.tag = request.at("tag").get<std::string>();
+      if (!holder::core::is_valid_tag(*query.tag)) throw std::invalid_argument("invalid tag");
+    }
+    const auto order = request.value("order", std::string("card_id"));
+    if (order == "updated")
+      query.order = holder::card::CardPageOrder::UpdatedDesc;
+    else if (order != "card_id")
+      throw std::invalid_argument("unsupported collection order");
+    if (request.contains("limit")) {
+      const auto& value = request.at("limit");
+      if (!value.is_number_integer() || value < 1 || value > HOLDER_CARD_LIST_COMPLETE_MAX_LIMIT)
+        throw std::invalid_argument("limit must be between 1 and 1000");
+      limit = value.get<int>();
+    }
+    if (request.contains("include_content")) {
+      if (!request.at("include_content").is_boolean())
+        throw std::invalid_argument("include_content must be boolean");
+      include_content = request.at("include_content").get<bool>();
+    }
+    if (request.contains("cursor") && !request.at("cursor").is_null()) {
+      const auto& cursor = request.at("cursor");
+      if (!cursor.is_object() || cursor.size() != 2 || !cursor.contains("card_id") ||
+          !cursor.contains("updated_at") || !cursor.at("card_id").is_string() ||
+          cursor.at("card_id").get<std::string>().empty() ||
+          !cursor.at("updated_at").is_number_integer() ||
+          (cursor.at("updated_at").is_number_unsigned() &&
+           cursor.at("updated_at").get<unsigned long long>() >
+               static_cast<unsigned long long>(LLONG_MAX)))
+        throw std::invalid_argument("invalid collection cursor");
+      query.cursor = holder::card::CardPageCursor{
+          cursor.at("card_id").get<std::string>(),
+          cursor.at("updated_at").get<long long>()
+      };
+    }
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed"); // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, e.what());
+  }
+  return with_json_output(context, out_json, out_error, [&]() {
+    holder::card::CardStore store(context->db, &context->fts);
+    const auto page = store.list_collection_page(project_id, query, limit, include_content);
+    auto cards = nlohmann::json::array();
+    for (const auto& record : page.cards) {
+      auto card = card_to_json(record.card);
+      if (include_content) card["content"] = record.content;
+      cards.push_back(std::move(card));
+    }
+    nlohmann::json cursor = nullptr;
+    if (page.next_cursor)
+      cursor = {
+          {"card_id", page.next_cursor->card_id},
+          {"updated_at", *page.next_cursor->updated_at}
+      };
+    return nlohmann::json{{"cards", std::move(cards)}, {"next_cursor", std::move(cursor)}};
+  });
 }
 
 // Flexible card-listing query bundling CardRepo::list_roots/list_children/list_all/

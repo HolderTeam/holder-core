@@ -77,6 +77,11 @@ struct CompleteCardPage {
   std::optional<std::string> next_cursor;
 };
 
+struct CollectionCardPage {
+  std::vector<CompleteCardRecord> cards;
+  std::optional<CardPageCursor> next_cursor;
+};
+
 class CardStore {
  public:
   CardStore(
@@ -154,6 +159,15 @@ class CardStore {
       const std::string& project_id,
       const std::optional<std::string>& after_card_id,
       int limit
+  );
+
+  // Filters before pagination. Metadata-only pages never read card files; complete pages
+  // hold one project operation lock across selection and authoritative content reads.
+  CollectionCardPage list_collection_page(
+      const std::string& project_id,
+      const CardPageQuery& query,
+      int limit,
+      bool include_content
   );
 
   // add_tag/remove_tag are Holder's semantic tag operations -- the ones a client (Android's

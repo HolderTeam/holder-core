@@ -13,6 +13,7 @@ extern "C" {
 
 #define HOLDER_CARD_LIST_COMPLETE_MAX_LIMIT 1000
 #define HOLDER_HAS_PROJECT_IMPORT 1
+#define HOLDER_HAS_CARD_COLLECTION_PAGE 1
 
 typedef struct holder_context holder_context;
 typedef struct holder_error holder_error;
@@ -156,6 +157,30 @@ int holder_card_list_complete_page(
     const char* project_id,
     const char* cursor,
     int limit,
+    char** out_json,
+    holder_error** out_error
+);
+
+// Bounded, composable live-card collection query. request_json is an object with:
+//   "view": "all" (default) | "roots" | "children"
+//   "parent_card_id": nonempty string, required for "children", rejected otherwise
+//   "tag": optional valid tag without #, matched case-insensitively
+//   "order": "card_id" (default, ascending) | "updated" (descending, then card_id descending)
+//   "limit": integer from 1 to HOLDER_CARD_LIST_COMPLETE_MAX_LIMIT (default 256)
+//   "include_content": boolean (default false)
+//   "cursor": null/omitted for the first page; otherwise pass next_cursor unchanged.
+// Response: {"cards": [...], "next_cursor": {"card_id": ..., "updated_at": ...} | null}.
+// Cards have holder_card_list's metadata shape, plus "content" only when requested.
+// Filters apply before pagination. Metadata-only reads never access card files. Complete
+// reads share one project operation lock across selection and authoritative body reads;
+// any missing/unreadable body fails the whole page. No snapshot across calls or coordination
+// with raw filesystem changes or other processes. Keep filters and order fixed across pages.
+// Unsupported fields, malformed JSON and invalid values return HOLDER_ERROR_INVALID_ARGUMENT.
+// Release the returned JSON with holder_string_free.
+int holder_card_collection_page_json(
+    holder_context* context,
+    const char* project_id,
+    const char* request_json,
     char** out_json,
     holder_error** out_error
 );

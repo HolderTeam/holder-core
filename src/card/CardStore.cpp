@@ -911,6 +911,41 @@ CompleteCardPage CardStore::list_complete_page(
   return page;
 }
 
+CollectionCardPage CardStore::list_collection_page(
+    const std::string& project_id,
+    const CardPageQuery& query,
+    int limit,
+    bool include_content
+) {
+  if (limit <= 0 || limit > 1000) throw std::invalid_argument("limit must be between 1 and 1000");
+  std::optional<holder::model::Project> project;
+  // Metadata selection needs neither repository access nor card bodies.
+  auto read = [&]() {
+    auto metadata = card_repo_.list_collection_page(project_id, query, limit + 1);
+    CollectionCardPage page;
+    if (metadata.size() > static_cast<std::size_t>(limit)) {
+      metadata.resize(static_cast<std::size_t>(limit));
+      const auto& last = metadata.back();
+      page.next_cursor = CardPageCursor{last.card_id, last.updated_at};
+    }
+    for (auto& card : metadata) {
+      std::string content;
+      if (include_content) {
+        auto body = read_card_content_locked(*fs_, *git_, *project, card);
+        if (!body) throw std::runtime_error("card content missing: " + card.card_id);
+        content = std::move(*body);
+      }
+      page.cards.push_back({std::move(card), std::move(content)});
+    }
+    return page;
+  };
+  if (!include_content) return read();
+  project = require_project(project_id);
+  auto operation = git_->lock_operation(project->root_path);
+  git_->open_or_init(project->root_path);
+  return read();
+}
+
 AddTagResult CardStore::add_tag(
     const std::string& card_id,
     const std::string& tag,

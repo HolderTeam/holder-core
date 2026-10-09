@@ -9755,3 +9755,194 @@ TEST_CASE(
     REQUIRE(card["parent_card_id"].is_null());
   holder_context_destroy(context);
 }
+
+TEST_CASE(
+    "C API collection pages filter before pagination and read selected bodies",
+    "[capi][collection-pages]"
+) {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  char* json = nullptr;
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
+  REQUIRE(
+      holder_project_create(context, "Collection", nullptr, nullptr, &json, &error) == HOLDER_OK
+  );
+  const auto project = nlohmann::json::parse(json);
+  const auto id = project.at("project_id").get<std::string>();
+  const auto root = project.at("root_path").get<std::string>();
+  holder_string_free(json);
+  auto create = [&](const char* title, const char* body, const char* parent) {
+    REQUIRE(
+        holder_card_create(context, id.c_str(), title, body, parent, &json, &error) == HOLDER_OK
+    );
+    const auto card = nlohmann::json::parse(json);
+    holder_string_free(json);
+    return card;
+  };
+  const auto parent = create("Parent", "#work", nullptr);
+  const auto parent_id = parent.at("card_id").get<std::string>();
+  const auto excluded = create("Excluded", "#other", parent_id.c_str());
+  std::vector<std::string> expected;
+  for (int i = 0; i < 3; ++i)
+    expected.push_back(
+        create("Child", "Body #work", parent_id.c_str()).at("card_id").get<std::string>()
+    );
+  const auto trashed =
+      create("Trashed", "#work", parent_id.c_str()).at("card_id").get<std::string>();
+  REQUIRE(holder_card_delete(context, trashed.c_str(), &error) == HOLDER_OK);
+  std::filesystem::remove(std::filesystem::path(root) / excluded.at("rel_path").get<std::string>());
+  // Tie timestamps to exercise the ID tie-breaker deterministically.
+  {
+    holder::platform::Db db;
+    db.open(data_dir / "server" / "holder.db");
+    db.exec("UPDATE cards SET updated_at = 1;");
+  }
+  for (const auto& order : {"card_id", "updated"}) {
+    for (bool content : {false, true}) {
+      nlohmann::json request = {
+          {"view", "children"},
+          {"parent_card_id", parent_id},
+          {"tag", "WORK"},
+          {"limit", 1},
+          {"order", order},
+          {"include_content", content}
+      };
+      std::vector<std::string> ids;
+      while (true) {
+        REQUIRE(
+            holder_card_collection_page_json(
+                context,
+                id.c_str(),
+                request.dump().c_str(),
+                &json,
+                &error
+            ) == HOLDER_OK
+        );
+        const auto page = nlohmann::json::parse(json);
+        holder_string_free(json);
+        REQUIRE(page.at("cards").size() == 1);
+        const auto& card = page.at("cards").at(0);
+        ids.push_back(card.at("card_id").get<std::string>());
+        REQUIRE(card.contains("content") == content);
+        if (content) REQUIRE(card.at("content") == "Body #work");
+        if (page.at("next_cursor").is_null()) break;
+        request["cursor"] = page.at("next_cursor");
+      }
+      auto sorted = expected;
+      std::sort(sorted.begin(), sorted.end());
+      if (std::string(order) == "updated") std::reverse(sorted.begin(), sorted.end());
+      REQUIRE(ids == sorted);
+    }
+  }
+  REQUIRE(
+      holder_card_collection_page_json(
+          context,
+          id.c_str(),
+          R"({"view":"roots","tag":"work"})",
+          &json,
+          &error
+      ) == HOLDER_OK
+  );
+  auto page = nlohmann::json::parse(json);
+  holder_string_free(json);
+  REQUIRE(page.at("cards").size() == 1);
+  REQUIRE(page.at("cards").at(0).at("card_id") == parent_id);
+  REQUIRE(
+      holder_card_collection_page_json(
+          context,
+          id.c_str(),
+          R"({"tag":"missing"})",
+          &json,
+          &error
+      ) == HOLDER_OK
+  );
+  page = nlohmann::json::parse(json);
+  holder_string_free(json);
+  REQUIRE(page.at("cards").empty());
+  REQUIRE(page.at("next_cursor").is_null());
+  // Missing files do not affect metadata, but complete pages fail as a whole.
+  REQUIRE(holder_card_collection_page_json(context, id.c_str(), "{}", &json, &error) == HOLDER_OK);
+  holder_string_free(json);
+  json = nullptr;
+  REQUIRE(
+      holder_card_collection_page_json(
+          context,
+          id.c_str(),
+          R"({"include_content":true})",
+          &json,
+          &error
+      ) == HOLDER_ERROR_RUNTIME
+  );
+  REQUIRE(json == nullptr);
+  holder_error_destroy(error);
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API collection pages reject invalid requests", "[capi][collection-pages]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  const auto schema = read_schema_sql();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
+  for (const auto* request :
+       {"",
+        "{",
+        "[]",
+        "null",
+        R"({"view":"recent"})",
+        R"({"view":false})",
+        R"({"view":"children"})",
+        R"({"view":"children","parent_card_id":""})",
+        R"({"parent_card_id":"parent"})",
+        R"({"tag":"#work"})",
+        R"({"tag":null})",
+        R"({"limit":0})",
+        R"({"limit":1001})",
+        R"({"limit":true})",
+        R"({"limit":1.5})",
+        R"({"limit":18446744073709551615})",
+        R"({"order":"title"})",
+        R"({"include_content":1})",
+        R"({"cursor":{}})",
+        R"({"cursor":{"card_id":"a","updated_at":18446744073709551615}})",
+        R"({"cursor":{"card_id":"","updated_at":0}})",
+        R"({"cursor":{"card_id":"a","updated_at":null}})",
+        R"({"extra":1})"}) {
+    char* json = nullptr;
+    REQUIRE(
+        holder_card_collection_page_json(context, "p", request, &json, &error) ==
+        HOLDER_ERROR_INVALID_ARGUMENT
+    );
+    REQUIRE(json == nullptr);
+    holder_error_destroy(error);
+    error = nullptr;
+  }
+  char* json = nullptr;
+  REQUIRE(
+      holder_card_collection_page_json(nullptr, "p", "{}", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  holder_error_destroy(error);
+  REQUIRE(
+      holder_card_collection_page_json(context, nullptr, "{}", &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  holder_error_destroy(error);
+  REQUIRE(
+      holder_card_collection_page_json(context, "p", nullptr, &json, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  holder_error_destroy(error);
+  REQUIRE(
+      holder_card_collection_page_json(context, "p", "{}", nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  holder_error_destroy(error);
+  holder_context_destroy(context);
+}
