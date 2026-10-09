@@ -342,7 +342,10 @@ int holder_card_update_content(
     holder_error** out_error
 );
 
-// Soft-deletes (trashes) a card; it stops appearing in holder_card_list.
+// Soft-deletes (trashes) a card; it stops appearing in holder_card_list. Immediate
+// live children replace its position among its siblings (or project roots), in
+// their existing order. Their descendants stay attached. Already-trashed children
+// remain in Trash. The lifecycle change and promotion share one Git commit.
 int holder_card_delete(holder_context* context, const char* card_id, holder_error** out_error);
 
 // Lists project_id's trashed (soft-deleted) cards, same JSON card-array shape as
@@ -355,7 +358,9 @@ int holder_card_list_trashed(
 );
 
 // Restores a trashed card; it reappears in holder_card_list. Sets *out_json to
-// the restored card. Fails if card_id isn't currently trashed.
+// the restored card. Fails if card_id isn't currently trashed. Restores only this
+// card, to its saved parent if reachable, otherwise a reachable ancestor or roots.
+// Previously promoted children stay where they are.
 int holder_card_restore(
     holder_context* context,
     const char* card_id,

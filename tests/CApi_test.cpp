@@ -9703,3 +9703,55 @@ TEST_CASE("C API validates explicit project import arguments", "[capi][project-i
   REQUIRE(holder_project_import(nullptr, nullptr, nullptr, &error) == HOLDER_ERROR_INVALID_ARGUMENT);
   holder_error_destroy(error);
 }
+
+TEST_CASE(
+    "C API trash promotes children and restore leaves their new placement intact",
+    "[capi][lifecycle]"
+) {
+  const auto dir = holder::test::make_temp_dir();
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(holder_context_open(dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK);
+  char* json = nullptr;
+  REQUIRE(
+      holder_project_create(context, "Lifecycle", nullptr, nullptr, &json, &error) == HOLDER_OK
+  );
+  const auto project = nlohmann::json::parse(json)["project_id"].get<std::string>();
+  holder_string_free(json);
+  REQUIRE(
+      holder_card_create(context, project.c_str(), "Parent", "parent", nullptr, &json, &error) ==
+      HOLDER_OK
+  );
+  const auto parent = nlohmann::json::parse(json)["card_id"].get<std::string>();
+  holder_string_free(json);
+  REQUIRE(
+      holder_card_create(
+          context,
+          project.c_str(),
+          "Child",
+          "child",
+          parent.c_str(),
+          &json,
+          &error
+      ) == HOLDER_OK
+  );
+  const auto child = nlohmann::json::parse(json)["card_id"].get<std::string>();
+  holder_string_free(json);
+  REQUIRE(holder_card_delete(context, parent.c_str(), &error) == HOLDER_OK);
+  REQUIRE(holder_card_list(context, project.c_str(), &json, &error) == HOLDER_OK);
+  auto cards = nlohmann::json::parse(json);
+  holder_string_free(json);
+  REQUIRE(cards.size() == 1);
+  REQUIRE(cards[0]["card_id"] == child);
+  REQUIRE(cards[0]["parent_card_id"].is_null());
+  REQUIRE(holder_card_restore(context, parent.c_str(), &json, &error) == HOLDER_OK);
+  holder_string_free(json);
+  REQUIRE(holder_card_list(context, project.c_str(), &json, &error) == HOLDER_OK);
+  cards = nlohmann::json::parse(json);
+  holder_string_free(json);
+  REQUIRE(cards.size() == 2);
+  for (const auto& card : cards)
+    REQUIRE(card["parent_card_id"].is_null());
+  holder_context_destroy(context);
+}

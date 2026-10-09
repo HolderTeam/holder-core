@@ -140,6 +140,8 @@ set(HOLDER_CORE_SOURCES
   src/ai/AiThreadRepo.cpp
   src/ai/AiThreadManifest.cpp
   src/card/CardFrontMatter.cpp
+  src/card/CardHierarchy.cpp
+  src/card/CardMutation.cpp
   src/card/CardPaths.cpp
   src/card/CardPlacementResolver.cpp
   src/card/CardReferenceResolver.cpp

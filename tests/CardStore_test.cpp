@@ -1299,6 +1299,13 @@ TEST_CASE("CardStore move exercises error and no-op branches", "[cardstore]") {
   store.move(noop.card_id, false, std::nullopt, std::nullopt, 2);
   REQUIRE(count_commits(project_root) == before_noop);
 
+  // Placement validation now requires actual live destination parents.
+  holder::model::Card parent = noop;
+  parent.card_id = "parentx";
+  store.create(parent, "parent body");
+  parent.card_id = "parent-target";
+  store.create(parent, "parent body");
+
   holder::model::Card missing_body;
   missing_body.card_id = "movmis01";
   missing_body.project_id = "proj-1";

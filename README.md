@@ -11,6 +11,31 @@ This first cut contains the parts that should be shared by `holderd` and future 
 
 The daemon still owns process supervision, HTTP routes, local model runners, platform startup paths, and service behavior.
 
+## Card lifecycle
+
+`CardStore::trash` and `holder_card_delete` promote immediate live children into
+their parent's former sibling position, preserving their order and descendants.
+Trashed children stay in Trash. Restoring a card restores that card alone, using
+a reachable ancestor or project roots when its saved parent is unavailable;
+previously promoted children stay put. Historical lifecycle restores follow the
+same rules. Create and move reject unreachable parents and cycles.
+
+Each lifecycle operation updates card files and SQLite under the project lock
+and creates one Git commit. Unrelated staged and working-tree changes are
+preserved. A local `holder-card-mutation` journal in the Git directory records
+each affected file's original and intended bytes, the index and HEAD until
+SQLite commits. Card bytes in the journal retain the project's encryption.
+Caught failures roll the operation back. After an interrupted process, the next
+standalone project rebuild or card write settles the journal: if the operation's
+commit landed, it is kept and the index is rebuilt from the files; otherwise only
+files still holding its uncommitted bytes are put back. Recovery never moves Git
+refs, so later commits are kept. Metadata reads do not wait for recovery. A
+failed rebuild, for example on a locked encrypted project, leaves the journal to
+retry. This recovery covers process interruption, not a guarantee of filesystem
+durability across power loss. Promoting children re-spaces sort keys only around
+the insertion point when neighbouring keys leave no room.
+It does not scan for or repair children hidden by older trash operations.
+
 ## Build
 
 ```sh
