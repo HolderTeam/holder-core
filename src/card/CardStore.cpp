@@ -1,6 +1,8 @@
 #include "card/CardStore.h"
 
 #include "card/CardFrontMatter.h"
+#include "card/CardHierarchy.h"
+#include "card/CardMutation.h"
 #include "card/CardPaths.h"
 #include "card/LinkRepo.h"
 #include "card/TagExtractor.h"
@@ -11,6 +13,7 @@
 #include "platform/Fs.h"
 #include "platform/Tx.h"
 #include "privacy/ProjectPrivacy.h"
+#include "project/Rebuilder.h"
 
 #include <yaml-cpp/yaml.h>
 
@@ -113,10 +116,14 @@ CardStore::CardStore(
       project_repo_(db),
       fts_(fts) {}
 
-holder::model::Project CardStore::require_project(const std::string& project_id) {
+holder::model::Project CardStore::require_project(const std::string& project_id) const {
   const auto project_opt = project_repo_.get(project_id);
   if (!project_opt.has_value()) {
     throw std::runtime_error("project not found: " + project_id);
+  }
+  auto operation = git_->lock_operation(project_opt->root_path);
+  if (CardMutation::pending(project_opt->root_path)) {
+    holder::store::Rebuilder(db_, fts_, fs_).rebuild_project(*project_opt);
   }
   return project_opt.value();
 }
@@ -130,6 +137,7 @@ void CardStore::create(
   auto operation = git_->lock_operation(project.root_path);
   git_->open_or_init(project.root_path);
   if (project.git_remote_url.has_value()) git_->set_remote("origin", *project.git_remote_url);
+  validate_card_parent(card_repo_, card);
   if (explicit_sort_key.has_value()) {
     card.sort_key = explicit_sort_key.value();
   } else {
@@ -362,14 +370,17 @@ void CardStore::move(
     const std::optional<double>& sort_key,
     long long updated_at
 ) {
-  const auto card_opt = card_repo_.get(card_id);
+  auto card_opt = card_repo_.get(card_id);
   if (!card_opt.has_value()) {
     throw std::runtime_error("card not found: " + card_id);
   }
 
-  auto card = card_opt.value();
-  const auto project = require_project(card.project_id);
+  const auto project = require_project(card_opt->project_id);
   auto operation = git_->lock_operation(project.root_path);
+  card_opt = card_repo_.get(card_id);
+  if (!card_opt) throw std::runtime_error("card not found: " + card_id);
+  auto card = *card_opt;
+  if (card.deleted_at) throw std::runtime_error("card already deleted");
   git_->open_or_init(project.root_path);
   if (project.git_remote_url.has_value()) git_->set_remote("origin", *project.git_remote_url);
   const std::string expected = holder::core::card_rel_path(card.card_id);
@@ -379,6 +390,9 @@ void CardStore::move(
 
   const std::optional<std::string> next_parent = has_parent_card_id ? parent_card_id
                                                                     : card.parent_card_id;
+  auto destination = card;
+  destination.parent_card_id = next_parent;
+  validate_card_parent(card_repo_, destination);
   double next_sort = card.sort_key;
   if (sort_key.has_value()) {
     next_sort = sort_key.value();
@@ -591,114 +605,161 @@ std::optional<holder::model::Milestone> CardStore::update_milestone(
   return updated;
 }
 
-void CardStore::trash(const std::string& card_id, long long deleted_at) {
-  const auto card_opt = card_repo_.get(card_id);
-  if (!card_opt.has_value()) {
-    throw std::runtime_error("card not found: " + card_id);
-  }
-  const auto& card = card_opt.value();
-  if (card.deleted_at.has_value()) {
-    throw std::runtime_error("card already deleted");
+void CardStore::apply_lifecycle(
+    const holder::model::Project& project,
+    const holder::model::Card& current,
+    holder::core::ParsedCardFile target,
+    const std::vector<holder::model::Card>& placements,
+    const std::string& message
+) {
+  const auto live_path = holder::core::card_rel_path(current.card_id);
+  if (current.rel_path != live_path &&
+      !(current.deleted_at && current.rel_path == holder::core::card_trash_rel_path(current.card_id)
+      ))
+    throw std::runtime_error("card rel_path does not match card_id");
+  const auto trash_path = holder::core::card_trash_rel_path(current.card_id);
+  const auto source_path = current.deleted_at ? trash_path : live_path;
+  const auto target_path = target.card.deleted_at ? trash_path : live_path;
+  if (!fs_->exists(git_->repo_dir() / source_path))
+    throw std::runtime_error("card content missing");
+  if (source_path != target_path && fs_->exists(git_->repo_dir() / target_path)) {
+    throw std::runtime_error("conflict: destination card file already exists");
   }
 
-  const auto project = require_project(card.project_id);
+  std::vector<holder::core::ParsedCardFile> records;
+  target.card.rel_path = live_path;
+  records.push_back(std::move(target));
+  std::vector<std::string> paths{live_path, trash_path};
+  for (const auto& card : placements) {
+    if (card.rel_path != holder::core::card_rel_path(card.card_id)) {
+      throw std::runtime_error("card rel_path does not match card_id");
+    }
+    const auto path = git_->repo_dir() / card.rel_path;
+    if (!fs_->exists(path)) throw std::runtime_error("card content missing");
+    auto parsed = holder::core::parse_card_file(decode_card_blob(project, fs_->read_file(path)));
+    parsed.card = card;
+    parsed.links = link_repo_.list_outgoing(card.project_id, card.card_id);
+    records.push_back(std::move(parsed));
+    paths.push_back(card.rel_path);
+  }
+
+  // Decode and encrypt every affected card before the first file or database write.
+  std::vector<std::pair<std::string, std::string>> writes;
+  for (const auto& record : records) {
+    auto durable_card = record.card;
+    if (durable_card.deleted_at)
+      durable_card.rel_path = holder::core::card_trash_rel_path(durable_card.card_id);
+    const auto plain =
+        holder::core::render_card_front_matter(durable_card, record.links, record.milestones) +
+        record.body;
+    writes.emplace_back(
+        durable_card.rel_path,
+        project.privacy_mode == "encrypted_git" ? holder::privacy::encrypt_project_blob(
+                                                      project.project_id,
+                                                      require_project_key_id(project),
+                                                      plain
+                                                  )
+                                                : plain
+    );
+  }
+  CardMutation mutation(*fs_, project.root_path, paths);
+  holder::platform::Tx tx(db_);
+  for (const auto& record : records) {
+    const auto& card = record.card;
+    card_repo_.restore_snapshot(card);
+    link_repo_.delete_links_from(card.project_id, card.card_id);
+    if (!record.links.empty()) link_repo_.upsert_links(card.project_id, card.card_id, record.links);
+    if (card.deleted_at) {
+      if (fts_) fts_->delete_card(card.card_id);
+      tag_repo_.delete_tags_for_card(card.project_id, card.card_id);
+      milestone_repo_.delete_for_card(card.project_id, card.card_id);
+    } else {
+      if (fts_) fts_->upsert_card(card.card_id, card.project_id, card.title, record.body);
+      tag_repo_.set_tags_for_card(
+          card.project_id,
+          card.card_id,
+          holder::core::extract_tags(record.body),
+          card.updated_at
+      );
+      milestone_repo_.replace_for_card(card.project_id, card.card_id, record.milestones);
+    }
+  }
+  try {
+    mutation.begin();
+    if (source_path != target_path) {
+      fs_->create_directories((git_->repo_dir() / target_path).parent_path());
+      fs_->rename(git_->repo_dir() / source_path, git_->repo_dir() / target_path);
+      git_->remove_path(source_path);
+    }
+    std::vector<std::string> staged;
+    for (const auto& [path, bytes] : writes) {
+      git_->write_file(path, bytes);
+      if (fs_->read_file(git_->repo_dir() / path) != bytes) {
+        throw std::runtime_error("incomplete card lifecycle write");
+      }
+      git_->stage_path(path);
+      staged.push_back(path);
+    }
+    assert_project_staged_blobs_safe(project, staged);
+    git_->commit(message);
+    mutation.preserve_unrelated_index();
+    // The journal helper uses a separate Git handle; discard this adapter's cached index.
+    git_->open_or_init(project.root_path);
+    tx.commit();
+  } catch (...) {
+    // If compensation itself fails the durable journal remains for recovery.
+    mutation.rollback();
+    git_->open_or_init(project.root_path);
+    throw;
+  }
+  mutation.finish();
+}
+
+void CardStore::trash(const std::string& card_id, long long deleted_at) {
+  auto card = card_repo_.get(card_id);
+  if (!card) throw std::runtime_error("card not found: " + card_id);
+  const auto project = require_project(card->project_id);
   auto operation = git_->lock_operation(project.root_path);
+  card = card_repo_.get(card_id);
+  if (!card) throw std::runtime_error("card not found: " + card_id);
+  if (card->deleted_at) throw std::runtime_error("card already deleted");
   git_->open_or_init(project.root_path);
   if (project.git_remote_url.has_value()) git_->set_remote("origin", *project.git_remote_url);
-  const std::string expected = holder::core::card_rel_path(card.card_id);
-  if (card.rel_path != expected) {
+  if (card->rel_path != holder::core::card_rel_path(card_id))
     throw std::runtime_error("card rel_path does not match card_id");
-  }
-
-  const auto src_path = git_->repo_dir() / card.rel_path;
-  if (!fs_->exists(src_path)) {
-    throw std::runtime_error("card content missing");
-  }
-
-  const std::string trash_rel = holder::core::card_trash_rel_path(card.card_id);
-  const auto dst_path = git_->repo_dir() / trash_rel;
-  fs_->create_directories(dst_path.parent_path());
-  fs_->rename(src_path, dst_path);
-
-  // Stamp the true deletion time into the durable file's own front matter before it's
-  // committed, not just into SQLite -- otherwise a later rebuild-from-source has nothing but
-  // the trash file's filesystem mtime to reconstruct deleted_at from, and mtime isn't preserved
-  // across git clone/checkout/backup-restore, so it silently drifts from the real trash time.
-  const auto raw = fs_->read_file(dst_path);
-  const auto plain = decode_card_blob(project, raw);
-  const auto parsed = holder::core::parse_card_file(plain);
-  auto trashed_card = card;
-  trashed_card.rel_path = trash_rel;
-  trashed_card.deleted_at = deleted_at;
-  trashed_card.updated_at = deleted_at;
-  const auto links = link_repo_.list_outgoing(card.project_id, card.card_id);
-  write_card_file(*git_, project, trashed_card, links, parsed.milestones, parsed.body);
-  assert_project_staged_blobs_safe(project, {trash_rel});
-
-  card_repo_.soft_delete(card_id, deleted_at, deleted_at);
-  if (fts_) {
-    fts_->delete_card(card_id);
-  }
-  tag_repo_.delete_tags_for_card(card.project_id, card_id);
-  milestone_repo_.delete_for_card(card.project_id, card_id);
-  git_->remove_path(card.rel_path);
-  git_->stage_path(trash_rel);
-  git_->commit("Delete card " + card.title);
+  const auto source = git_->repo_dir() / card->rel_path;
+  if (!fs_->exists(source)) throw std::runtime_error("card content missing");
+  auto parsed = holder::core::parse_card_file(decode_card_blob(project, fs_->read_file(source)));
+  parsed.card = *card;
+  parsed.card.deleted_at = deleted_at;
+  parsed.card.updated_at = deleted_at;
+  parsed.links = link_repo_.list_outgoing(card->project_id, card_id);
+  const auto placements = promoted_card_children(card_repo_, *card, deleted_at);
+  apply_lifecycle(project, *card, std::move(parsed), placements, "Delete card " + card->title);
 }
 
 void CardStore::restore(const std::string& card_id, long long updated_at) {
-  const auto card_opt = card_repo_.get(card_id);
-  if (!card_opt.has_value()) {
-    throw std::runtime_error("card not found: " + card_id);
-  }
-  const auto& card = card_opt.value();
-  if (!card.deleted_at.has_value()) {
-    throw std::runtime_error("card is not deleted");
-  }
-
-  const auto project = require_project(card.project_id);
+  auto card = card_repo_.get(card_id);
+  if (!card) throw std::runtime_error("card not found: " + card_id);
+  const auto project = require_project(card->project_id);
   auto operation = git_->lock_operation(project.root_path);
+  card = card_repo_.get(card_id);
+  if (!card) throw std::runtime_error("card not found: " + card_id);
+  if (!card->deleted_at) throw std::runtime_error("card is not deleted");
   git_->open_or_init(project.root_path);
   if (project.git_remote_url.has_value()) git_->set_remote("origin", *project.git_remote_url);
-  const std::string expected = holder::core::card_rel_path(card.card_id);
-  if (card.rel_path != expected) {
+  if (card->rel_path != holder::core::card_rel_path(card_id) &&
+      card->rel_path != holder::core::card_trash_rel_path(card_id))
     throw std::runtime_error("card rel_path does not match card_id");
-  }
-
-  const std::string trash_rel = holder::core::card_trash_rel_path(card.card_id);
-  const auto src_path = git_->repo_dir() / trash_rel;
-  if (!fs_->exists(src_path)) {
-    throw std::runtime_error("card content missing");
-  }
-
-  const auto dst_path = git_->repo_dir() / card.rel_path;
-  fs_->create_directories(dst_path.parent_path());
-  fs_->rename(src_path, dst_path);
-
-  const auto raw = fs_->read_file(dst_path);
-  const auto parsed = holder::core::parse_card_file(decode_card_blob(project, raw));
-  auto restored_card = card;
-  restored_card.deleted_at.reset();
-  restored_card.updated_at = updated_at;
-  const auto links = link_repo_.list_outgoing(card.project_id, card.card_id);
-  write_card_file(*git_, project, restored_card, links, parsed.milestones, parsed.body);
-
-  git_->stage_path(card.rel_path);
-  assert_project_staged_blobs_safe(project, {card.rel_path});
-
-  card_repo_.restore(card_id, updated_at);
-  if (fts_) {
-    fts_->upsert_card(card.card_id, card.project_id, card.title, parsed.body);
-  }
-  tag_repo_.set_tags_for_card(
-      card.project_id,
-      card_id,
-      holder::core::extract_tags(parsed.body),
-      updated_at
-  );
-  milestone_repo_.replace_for_card(card.project_id, card_id, parsed.milestones);
-  git_->remove_path(trash_rel);
-  git_->commit("Restore card " + card.title);
+  const auto source = git_->repo_dir() / holder::core::card_trash_rel_path(card_id);
+  if (!fs_->exists(source)) throw std::runtime_error("card content missing");
+  auto parsed = holder::core::parse_card_file(decode_card_blob(project, fs_->read_file(source)));
+  parsed.card = *card;
+  parsed.card.deleted_at.reset();
+  parsed.card.updated_at = updated_at;
+  parsed.links = link_repo_.list_outgoing(card->project_id, card_id);
+  const auto placements = restored_card_placement(card_repo_, parsed.card, updated_at);
+  apply_lifecycle(project, *card, std::move(parsed), placements, "Restore card " + card->title);
 }
 
 void CardStore::restore_version(
@@ -707,17 +768,20 @@ void CardStore::restore_version(
     long long updated_at
 ) {
   if (historical_oid.empty()) throw std::invalid_argument("historical_oid is required");
-  const auto current_opt = card_repo_.get(card_id);
+  auto current_opt = card_repo_.get(card_id);
   if (!current_opt.has_value()) {
     throw std::runtime_error("card not found: " + card_id);
   }
-  const auto& current = current_opt.value();
-  const auto project = require_project(current.project_id);
+  const auto project = require_project(current_opt->project_id);
   auto operation = git_->lock_operation(project.root_path);
+  current_opt = card_repo_.get(card_id);
+  if (!current_opt) throw std::runtime_error("card not found: " + card_id);
+  const auto& current = *current_opt;
   git_->open_or_init(project.root_path);
   if (project.git_remote_url.has_value()) git_->set_remote("origin", *project.git_remote_url);
   const std::string expected = holder::core::card_rel_path(card_id);
-  if (current.rel_path != expected) {
+  if (current.rel_path != expected &&
+      !(current.deleted_at && current.rel_path == holder::core::card_trash_rel_path(card_id))) {
     throw std::runtime_error("card rel_path does not match card_id");
   }
 
@@ -758,56 +822,16 @@ void CardStore::restore_version(
     milestone.updated_at = updated_at;
   }
 
-  const auto target_rel = restored.deleted_at.has_value()
-                              ? holder::core::card_trash_rel_path(card_id)
-                              : expected;
-  const auto other_rel = restored.deleted_at.has_value()
-                             ? expected
-                             : holder::core::card_trash_rel_path(card_id);
-  const auto restored_plain =
-      holder::core::render_card_front_matter(restored, parsed.links, parsed.milestones) +
-      parsed.body;
-  const auto restored_raw = project.privacy_mode == "encrypted_git"
-                                ? holder::privacy::encrypt_project_blob(
-                                      project.project_id,
-                                      require_project_key_id(project),
-                                      restored_plain
-                                  )
-                                : restored_plain;
-
-  // Make every database write fail before the working tree or index changes. If any
-  // repository update rejects the historical metadata, the transaction rolls back
-  // and the card remains at its current version.
-  holder::platform::Tx tx(db_);
-  card_repo_.restore_snapshot(restored);
-  link_repo_.delete_links_from(restored.project_id, restored.card_id);
-  if (!parsed.links.empty()) {
-    link_repo_.upsert_links(restored.project_id, restored.card_id, parsed.links);
-  }
-  milestone_repo_.replace_for_card(restored.project_id, restored.card_id, parsed.milestones);
-  tag_repo_.set_tags_for_card(
-      restored.project_id,
-      restored.card_id,
-      holder::core::extract_tags(parsed.body),
-      updated_at
+  auto placements = restored.deleted_at ? promoted_card_children(card_repo_, current, updated_at)
+                                        : restored_card_placement(card_repo_, restored, updated_at);
+  parsed.card = restored;
+  apply_lifecycle(
+      project,
+      current,
+      std::move(parsed),
+      placements,
+      "Restore card " + restored.title
   );
-  if (fts_) {
-    if (restored.deleted_at.has_value()) {
-      fts_->delete_card(restored.card_id);
-    } else {
-      fts_->upsert_card(restored.card_id, restored.project_id, restored.title, parsed.body);
-    }
-  }
-
-  git_->write_file(target_rel, restored_raw);
-  git_->stage_path(target_rel);
-  if (fs_->exists(git_->repo_dir() / other_rel)) {
-    fs_->remove(git_->repo_dir() / other_rel);
-    git_->remove_path(other_rel);
-  }
-  assert_project_staged_blobs_safe(project, {target_rel});
-  tx.commit();
-  git_->commit("Restore card " + restored.title);
 }
 
 void CardStore::hard_delete(const std::string& card_id) {
@@ -840,18 +864,18 @@ void CardStore::hard_delete(const std::string& card_id) {
 }
 
 std::optional<holder::model::Card> CardStore::get(const std::string& card_id) const {
+  const auto card = card_repo_.get(card_id);
+  if (!card) return std::nullopt;
+  const auto project = require_project(card->project_id);
+  auto operation = git_->lock_operation(project.root_path);
   return card_repo_.get(card_id);
 }
 
 std::optional<std::string> CardStore::get_content(const holder::model::Card& card) {
-  const auto project_opt = project_repo_.get(card.project_id);
-  if (!project_opt.has_value()) {
-    throw std::runtime_error("project not found: " + card.project_id);
-  }
-  auto operation = git_->lock_operation(project_opt->root_path);
-  git_->open_or_init(project_opt->root_path);
-
-  return read_card_content_locked(*fs_, *git_, project_opt.value(), card);
+  const auto project = require_project(card.project_id);
+  auto operation = git_->lock_operation(project.root_path);
+  git_->open_or_init(project.root_path);
+  return read_card_content_locked(*fs_, *git_, project, card);
 }
 
 CompleteCardPage CardStore::list_complete_page(

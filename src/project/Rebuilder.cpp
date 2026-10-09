@@ -5,12 +5,14 @@
 #include "ai/AiThreadManifest.h"
 #include "ai/AiThreadRepo.h"
 #include "card/CardFrontMatter.h"
+#include "card/CardMutation.h"
 #include "card/CardPaths.h"
 #include "card/CardRepo.h"
 #include "card/LinkRepo.h"
 #include "card/MilestoneRepo.h"
 #include "card/TagExtractor.h"
 #include "card/TagRepo.h"
+#include "git/RepoLocks.h"
 #include "identity/Uuid.h"
 #include "platform/Fs.h"
 #include "platform/Tx.h"
@@ -161,19 +163,28 @@ Rebuilder::Rebuilder(
       require_ai_thread_manifests_(require_ai_thread_manifests) {}
 
 Rebuilder::RebuildStats Rebuilder::rebuild_project(const holder::model::Project& project) {
+  const auto mutex = holder::git::repo_mutex_for(project.root_path);
+  std::lock_guard<std::recursive_mutex> lock(*mutex);
+  holder::card::CardMutation::recover_files(*fs_, project.root_path);
   holder::platform::Tx tx(db_);
   auto stats = rebuild_project_in_transaction(project);
   tx.commit();
+  holder::card::CardMutation::finish_recovery(*fs_, project.root_path);
   return stats;
 }
 
-Rebuilder::RebuildStats Rebuilder::rebuild_project_in_transaction(const holder::model::Project& project) {
+Rebuilder::RebuildStats Rebuilder::rebuild_project_in_transaction(
+    const holder::model::Project& project
+) {
   if (sqlite3_get_autocommit(db_.handle()) != 0) {
     throw std::invalid_argument("project reconstruction requires an active transaction");
   }
   RebuildStats stats;
   auto& fs = *fs_;
   const std::filesystem::path root = project.root_path;
+  // Standalone rebuild owns recovery completion after its transaction commits.
+  // A caller-owned transaction may safely retry recovery on its next rebuild.
+  holder::card::CardMutation::recover_files(fs, root);
   if (!fs.exists(root)) {
     throw std::runtime_error("project root not found");
   }
@@ -359,7 +370,9 @@ Rebuilder::RebuildStats Rebuilder::rebuild_project_in_transaction(const holder::
     }
 
     card.project_id = project.project_id;
-    card.rel_path = expected_rel;
+    // CardStore keeps the canonical live path in SQLite for both lifecycle states;
+    // deleted_at determines whether the durable file is read from trash/cards.
+    card.rel_path = holder::core::card_rel_path(card.card_id);
 
     if (card.title.empty()) {
       card.title = derive_title(parsed.body, card.card_id);

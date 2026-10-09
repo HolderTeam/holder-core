@@ -1,5 +1,6 @@
 #pragma once
 
+#include "card/CardFrontMatter.h"
 #include "card/CardRepo.h"
 #include "card/LinkRepo.h"
 #include "card/MilestoneRepo.h"
@@ -132,7 +133,10 @@ class CardStore {
       const MilestoneUpdate& update,
       long long updated_at
   );
+  // Promote immediate live children into this card's sibling position, preserving
+  // their descendants. One durable operation and Git commit for every changed card.
   void trash(const std::string& card_id, long long deleted_at);
+  // Restore only this card, with a reachable parent; promoted children stay put.
   void restore(const std::string& card_id, long long updated_at);
   // Restores the card snapshot at historical_oid through the ordinary CardStore write path.
   // It never checks out or rewrites Git history; the result is a new Restore card commit.
@@ -187,7 +191,14 @@ class CardStore {
   std::vector<std::string> list_editable_tags(const std::string& card_id);
 
  private:
-  holder::model::Project require_project(const std::string& project_id);
+  holder::model::Project require_project(const std::string& project_id) const;
+  void apply_lifecycle(
+      const holder::model::Project& project,
+      const holder::model::Card& current,
+      holder::core::ParsedCardFile target,
+      const std::vector<holder::model::Card>& placements,
+      const std::string& message
+  );
 
   holder::platform::Db& db_;
   holder::core::Fs* fs_ = nullptr;

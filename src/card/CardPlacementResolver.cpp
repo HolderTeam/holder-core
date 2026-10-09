@@ -1,4 +1,5 @@
 #include "card/CardPlacementResolver.h"
+#include "card/CardHierarchy.h"
 
 #include <algorithm>
 #include <optional>
@@ -76,14 +77,6 @@ double sort_key_around_target(
   return (left + right) / 2.0;
 }
 
-bool sibling_less(const holder::model::Card& a, const holder::model::Card& b) {
-  if (a.sort_key < b.sort_key) return true;
-  if (a.sort_key > b.sort_key) return false;
-  if (a.updated_at > b.updated_at) return true;
-  if (a.updated_at < b.updated_at) return false;
-  return a.title < b.title;
-}
-
 } // namespace
 
 CardPlacementResult CardPlacementResolver::resolve(
@@ -121,7 +114,7 @@ CardPlacementResult CardPlacementResolver::resolve(
         siblings.push_back(c);
       }
     }
-    std::sort(siblings.begin(), siblings.end(), sibling_less);
+    std::sort(siblings.begin(), siblings.end(), card_tree_less);
     return siblings;
   }; // LCOV_EXCL_LINE - gcov artefact: lambda closer is executed but never counted.
 
@@ -198,7 +191,7 @@ CardPlacementResult CardPlacementResolver::resolve(
       next_sort_key = siblings_without_source.back().sort_key + 1.0;
     } else {
       auto siblings_with_source = siblings_for_parent(next_parent, "");
-      std::sort(siblings_with_source.begin(), siblings_with_source.end(), sibling_less);
+      std::sort(siblings_with_source.begin(), siblings_with_source.end(), card_tree_less);
       int source_index = -1;
       for (int i = 0; i < static_cast<int>(siblings_with_source.size()); ++i) {
         if (siblings_with_source[static_cast<size_t>(i)].card_id == source.card_id) {
