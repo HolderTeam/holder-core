@@ -288,8 +288,9 @@ int holder_card_reference_resolve(
 // Resolves a placement intent for card_id within project_id (see CardPlacementResolver for the
 // full algorithm and error vocabulary), then applies it via the existing CardStore::move.
 // request_json: {"intent": "into"|"before"|"after"|"to_start"|"to_end"|"left"|"right"|"up_level",
-// "target_card_id": "..." (required for into/before/after), "parent_card_id": "..." (optional,
-// to_start/to_end/left/right only, defaults to card_id's current parent)}.
+// "target_card_id": "..." (required for into/before/after), "parent_card_id": "..."|null
+// (to_start/to_end/left/right only; omitted keeps card_id's current parent, null is the
+// project's top level)}.
 // Sets *out_json to {"card_id": ..., "parent_card_id": ...|null, "sort_key": ..., "revision": ...,
 // "moved_into_title": ...|null} on success -- the same shape holder-daemon's /move route already
 // returns, for consistency. Runtime errors use the exact message vocabulary documented on

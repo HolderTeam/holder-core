@@ -7890,8 +7890,7 @@ TEST_CASE("C API card_move_json applies an explicit parent_card_id", "[capi]") {
     return card_id;
   };
   const auto parent = create_card("Parent", nullptr);
-  // A ToEnd move into a parent with no other children is a documented no-op, so give it one.
-  create_card("Existing child", parent.c_str());
+  // The parent has no other children: moving into an empty parent is still a move.
   const auto child = create_card("Child", nullptr);
 
   char* json = nullptr;
@@ -7904,6 +7903,80 @@ TEST_CASE("C API card_move_json applies an explicit parent_card_id", "[capi]") {
   holder_string_free(json);
   REQUIRE(moved["card_id"] == child);
   REQUIRE(moved["parent_card_id"] == parent);
+
+  holder_context_destroy(context);
+}
+
+TEST_CASE("C API card_move_json tells an omitted parent_card_id from an explicit null", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
+
+  const auto create_card = [&](const char* title, const char* content, const char* parent_card_id) {
+    char* json = nullptr;
+    REQUIRE(
+        holder_card_create(context, "project-1", title, content, parent_card_id, &json, &error) ==
+        HOLDER_OK
+    );
+    auto card_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
+    holder_string_free(json);
+    return card_id;
+  };
+  const auto move = [&](const std::string& card_id, const nlohmann::json& request) {
+    char* json = nullptr;
+    REQUIRE(
+        holder_card_move_json(
+            context,
+            "project-1",
+            card_id.c_str(),
+            request.dump().c_str(),
+            &json,
+            &error
+        ) == HOLDER_OK
+    );
+    auto moved = nlohmann::json::parse(json);
+    holder_string_free(json);
+    return moved;
+  };
+
+  const auto top = create_card("Top", "body", nullptr);
+  const auto middle = create_card("Middle", "body", top.c_str());
+  const auto nested = create_card("Nested", "Nested body\n\n#keep", middle.c_str());
+  create_card("Nested sibling", "body", middle.c_str());
+  const auto grandchild = create_card("Grandchild", "body", nested.c_str());
+
+  // Omitted: stays under its current parent, reordered to the end.
+  const auto kept = move(nested, {{"intent", "to_end"}});
+  REQUIRE(kept["parent_card_id"] == middle);
+
+  // Explicit null: detaches the deeply nested card to the project's top level, after Top.
+  const auto detached = move(nested, {{"intent", "to_end"}, {"parent_card_id", nullptr}});
+  REQUIRE(detached["parent_card_id"].is_null());
+
+  char* json = nullptr;
+  REQUIRE(holder_card_list(context, "project-1", &json, &error) == HOLDER_OK);
+  const auto cards = nlohmann::json::parse(json);
+  holder_string_free(json);
+  double top_sort_key = 0.0;
+  for (const auto& card : cards) {
+    if (card["card_id"] == top) top_sort_key = card["sort_key"].get<double>();
+    // The moved card keeps its own subtree.
+    if (card["card_id"] == grandchild) REQUIRE(card["parent_card_id"] == nested);
+  }
+  REQUIRE(detached["sort_key"].get<double>() > top_sort_key);
+
+  char* content = nullptr;
+  REQUIRE(holder_card_get_content(context, nested.c_str(), &content, &error) == HOLDER_OK);
+  REQUIRE(std::string(content).find("Nested body") != std::string::npos);
+  holder_string_free(content);
+  REQUIRE(holder_card_list_tags(context, nested.c_str(), &json, &error) == HOLDER_OK);
+  REQUIRE(nlohmann::json::parse(json) == nlohmann::json::array({"keep"}));
+  holder_string_free(json);
 
   holder_context_destroy(context);
 }
