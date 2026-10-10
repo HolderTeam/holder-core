@@ -82,6 +82,13 @@ CardPlacementRequest simple_request(
   return request;
 }
 
+CardPlacementRequest root_request(CardPlacementIntent intent) {
+  CardPlacementRequest request;
+  request.intent = intent;
+  request.has_parent_card_id = true;
+  return request;
+}
+
 } // namespace
 
 TEST_CASE("CardPlacementResolver Into targets a card with no children", "[card][placement]") {
@@ -670,4 +677,103 @@ TEST_CASE("CardPlacementResolver rejects an out-of-range intent", "[card][placem
       resolver.resolve("proj-1", "aaaaaaaa-1111-4000-8000-000000000001", request),
       "invalid_move_intent"
   );
+}
+
+TEST_CASE(
+    "CardPlacementResolver tells an omitted parent from an explicit project root",
+    "[card][placement]"
+) {
+  const auto dir = holder::test::make_temp_dir();
+  auto db = holder::test::open_db_with_schema(dir / "holder.db");
+  create_project(db, "proj-1");
+  holder::card::CardRepo cards(db);
+  CardPlacementResolver resolver(cards);
+  const std::string first_root = "12121212-0000-4000-8000-000000000001";
+  const std::string last_root = "12121212-0000-4000-8000-000000000002";
+  const std::string child = "12121212-0000-4000-8000-000000000003";
+  const std::string grandchild = "12121212-0000-4000-8000-000000000004";
+  const std::string nested = "12121212-0000-4000-8000-000000000005";
+  const std::string nested_sibling = "12121212-0000-4000-8000-000000000006";
+  create_card(cards, first_root, "proj-1", "First root", 10.0);
+  create_card(cards, last_root, "proj-1", "Last root", 20.0);
+  create_card(cards, child, "proj-1", "Child", 1.0, first_root);
+  create_card(cards, grandchild, "proj-1", "Grandchild", 1.0, child);
+  create_card(cards, nested, "proj-1", "Nested", 3.0, grandchild);
+  create_card(cards, nested_sibling, "proj-1", "Nested sibling", 5.0, grandchild);
+
+  // Omitted: the card's own parent scope.
+  const auto kept = resolver.resolve("proj-1", nested, simple_request(CardPlacementIntent::ToEnd));
+  REQUIRE(kept.parent_card_id == grandchild);
+  REQUIRE(kept.sort_key == 6.0);
+
+  // Explicit root: a deeply nested card leaves its whole ancestry in one move.
+  const auto to_end = resolver.resolve("proj-1", nested, root_request(CardPlacementIntent::ToEnd));
+  REQUIRE_FALSE(to_end.parent_card_id.has_value());
+  REQUIRE(to_end.sort_key == 21.0);
+
+  const auto to_start =
+      resolver.resolve("proj-1", nested, root_request(CardPlacementIntent::ToStart));
+  REQUIRE_FALSE(to_start.parent_card_id.has_value());
+  REQUIRE(to_start.sort_key == 9.0);
+
+  // Left/Right have no neighbour to move past in a scope the card is not yet in.
+  for (const auto intent : {CardPlacementIntent::Left, CardPlacementIntent::Right}) {
+    const auto result = resolver.resolve("proj-1", nested, root_request(intent));
+    REQUIRE(result.parent_card_id == grandchild);
+    REQUIRE(result.sort_key == 3.0);
+  }
+}
+
+TEST_CASE(
+    "CardPlacementResolver orders an existing root card within the project root",
+    "[card][placement]"
+) {
+  const auto dir = holder::test::make_temp_dir();
+  auto db = holder::test::open_db_with_schema(dir / "holder.db");
+  create_project(db, "proj-1");
+  holder::card::CardRepo cards(db);
+  CardPlacementResolver resolver(cards);
+  const std::string first = "34343434-0000-4000-8000-000000000001";
+  const std::string last = "34343434-0000-4000-8000-000000000002";
+  create_card(cards, first, "proj-1", "First", 10.0);
+  create_card(cards, last, "proj-1", "Last", 20.0);
+
+  // An explicit root on a card already there is an ordinary reorder within the root.
+  const auto to_end = resolver.resolve("proj-1", first, root_request(CardPlacementIntent::ToEnd));
+  REQUIRE_FALSE(to_end.parent_card_id.has_value());
+  REQUIRE(to_end.sort_key == 21.0);
+
+  const auto to_start =
+      resolver.resolve("proj-1", last, root_request(CardPlacementIntent::ToStart));
+  REQUIRE_FALSE(to_start.parent_card_id.has_value());
+  REQUIRE(to_start.sort_key == 9.0);
+}
+
+TEST_CASE(
+    "CardPlacementResolver ToStart/ToEnd into an empty destination still move the card",
+    "[card][placement]"
+) {
+  const auto dir = holder::test::make_temp_dir();
+  auto db = holder::test::open_db_with_schema(dir / "holder.db");
+  create_project(db, "proj-1");
+  holder::card::CardRepo cards(db);
+  CardPlacementResolver resolver(cards);
+  const std::string empty_parent = "56565656-0000-4000-8000-000000000001";
+  const std::string own_parent = "56565656-0000-4000-8000-000000000002";
+  const std::string source = "56565656-0000-4000-8000-000000000003";
+  create_card(cards, empty_parent, "proj-1", "Empty parent", 1.0);
+  create_card(cards, own_parent, "proj-1", "Own parent", 2.0);
+  create_card(cards, source, "proj-1", "Source", 7.0, own_parent);
+
+  for (const auto intent : {CardPlacementIntent::ToStart, CardPlacementIntent::ToEnd}) {
+    const auto result = resolver.resolve("proj-1", source, simple_request(intent, empty_parent));
+    REQUIRE(result.parent_card_id == empty_parent);
+    REQUIRE(result.sort_key == 0.0);
+  }
+
+  // Naming the card's own parent while it is that parent's only child is still a no-op.
+  const auto same =
+      resolver.resolve("proj-1", source, simple_request(CardPlacementIntent::ToEnd, own_parent));
+  REQUIRE(same.parent_card_id == own_parent);
+  REQUIRE(same.sort_key == 7.0);
 }

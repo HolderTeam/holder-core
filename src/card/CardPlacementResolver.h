@@ -21,15 +21,17 @@ enum class CardPlacementIntent {
 
 // intent determines which of target_card_id/parent_card_id apply:
 // - Into/Before/After: target_card_id is required; parent_card_id is ignored.
-// - ToStart/ToEnd/Left/Right: target_card_id is ignored. parent_card_id is an optional
-//   override -- when absent, the card's own current parent is used. Unlike the daemon route
-//   this was ported from, there is no way to distinguish "not provided" from "explicitly
-//   null" once the request reaches this struct, so both fold to "use the current parent";
-//   only a caller-supplied, non-empty parent_card_id actually overrides it.
+// - ToStart/ToEnd/Left/Right: target_card_id is ignored. The destination parent follows the
+//   has_parent_card_id convention CardStore::move already uses: when no parent was supplied,
+//   the card's own current parent is used; when one was, parent_card_id is the destination and
+//   std::nullopt (or a blank string) means the project's top level. A parent_card_id holding a
+//   value always counts as supplied, so callers that only ever set an override need not also set
+//   has_parent_card_id.
 // - UpLevel: both are ignored.
 struct CardPlacementRequest {
   CardPlacementIntent intent;
   std::optional<std::string> target_card_id;
+  bool has_parent_card_id = false;
   std::optional<std::string> parent_card_id;
 };
 

@@ -792,8 +792,13 @@ holder::card::CardPlacementRequest card_placement_request_from_json(const nlohma
   if (body.contains("target_card_id") && !body.at("target_card_id").is_null()) {
     request.target_card_id = body.at("target_card_id").get<std::string>();
   }
-  if (body.contains("parent_card_id") && !body.at("parent_card_id").is_null()) {
-    request.parent_card_id = body.at("parent_card_id").get<std::string>();
+  // An omitted parent_card_id keeps the card's current parent; an explicit null is the
+  // project's top level.
+  if (body.contains("parent_card_id")) {
+    request.has_parent_card_id = true;
+    if (!body.at("parent_card_id").is_null()) {
+      request.parent_card_id = body.at("parent_card_id").get<std::string>();
+    }
   }
   return request;
 }
