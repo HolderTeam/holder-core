@@ -118,10 +118,10 @@ CardPlacementResult CardPlacementResolver::resolve(
     return siblings;
   }; // LCOV_EXCL_LINE - gcov artefact: lambda closer is executed but never counted.
 
-  // The card's real, unmodified parent -- restored verbatim by the ToStart/ToEnd/Left/Right
-  // no-op escapes below, since those report "nothing moved" even when a parent_card_id
-  // override was supplied (matching the daemon route's original write_move_response(source)
-  // calls, which never touched next_parent at all).
+  // The card's real, unmodified parent -- restored verbatim by the Left/Right no-op escapes
+  // below, since those report "nothing moved" even when a parent_card_id override was supplied
+  // (matching the daemon route's original write_move_response(source) calls, which never
+  // touched next_parent at all).
   const std::optional<std::string> original_parent = normalize_parent_id(source.parent_card_id);
   std::optional<std::string> next_parent = original_parent;
   std::optional<double> next_sort_key;
@@ -162,10 +162,10 @@ CardPlacementResult CardPlacementResolver::resolve(
   case CardPlacementIntent::ToEnd:
   case CardPlacementIntent::Left:
   case CardPlacementIntent::Right: {
-    if (request.parent_card_id.has_value()) {
+    if (request.has_parent_card_id || request.parent_card_id.has_value()) {
       next_parent = normalize_parent_id(request.parent_card_id);
     } else {
-      next_parent = normalize_parent_id(source.parent_card_id);
+      next_parent = original_parent;
     }
     if (next_parent.has_value()) {
       const auto parent_it = cards_by_id.find(next_parent.value());
@@ -175,20 +175,21 @@ CardPlacementResult CardPlacementResolver::resolve(
     }
 
     const auto siblings_without_source = siblings_for_parent(next_parent, source.card_id);
-    if (request.intent == CardPlacementIntent::ToStart) {
+    if (request.intent == CardPlacementIntent::ToStart ||
+        request.intent == CardPlacementIntent::ToEnd) {
       if (siblings_without_source.empty()) {
-        next_parent = original_parent;
-        next_sort_key = source.sort_key;
+        // Alone in its own parent scope there is nothing to reorder past: report "nothing
+        // moved". An empty destination elsewhere is still a real move into that scope.
+        if (next_parent == original_parent) {
+          next_sort_key = source.sort_key;
+        } else {
+          next_sort_key = cards_.next_sort_key(project_id, next_parent);
+        }
         break;
       }
-      next_sort_key = siblings_without_source.front().sort_key - 1.0;
-    } else if (request.intent == CardPlacementIntent::ToEnd) {
-      if (siblings_without_source.empty()) {
-        next_parent = original_parent;
-        next_sort_key = source.sort_key;
-        break;
-      }
-      next_sort_key = siblings_without_source.back().sort_key + 1.0;
+      next_sort_key = request.intent == CardPlacementIntent::ToStart
+                          ? siblings_without_source.front().sort_key - 1.0
+                          : siblings_without_source.back().sort_key + 1.0;
     } else {
       auto siblings_with_source = siblings_for_parent(next_parent, "");
       std::sort(siblings_with_source.begin(), siblings_with_source.end(), card_tree_less);
