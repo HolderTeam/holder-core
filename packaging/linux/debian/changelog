@@ -1,3 +1,12 @@
+holder-core (0.2.4-1~noble1) noble; urgency=medium
+
+  * Release sibling re-spacing for card moves, collection page indexes,
+    subtree trash and repair of cards hidden by earlier trash.
+  * Apply pulled edits and deletions on fast-forward pulls, and repair
+    hidden cards after every pull.
+
+ -- Holder Team <holdercardteam@gmail.com>  Sun, 11 Oct 2026 03:19:13 +0100
+
 holder-core (0.2.3-1~noble1) noble; urgency=medium
 
   * Release filtered card collection pages and explicit top-level card moves.
