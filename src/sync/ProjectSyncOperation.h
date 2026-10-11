@@ -23,6 +23,9 @@ struct PullPhaseResult {
   bool attempted = false;
   PullPhaseStatus status = PullPhaseStatus::NotAttempted;
   int conflicts_resolved = 0;
+  // Live cards a pulled change left hidden (their parent missing or trashed), made reachable
+  // again by CardStore::repair_hierarchy after the index was rebuilt.
+  int hidden_cards_repaired = 0;
   std::optional<std::string> error_message;
 };
 

@@ -1,10 +1,13 @@
 #include "sync/ProjectSyncOperation.h"
 
+#include "card/CardStore.h"
 #include "git/RepoSyncMetrics.h"
 #include "privacy/ProjectPrivacy.h"
 #include "project/ProjectRepo.h"
 #include "project/ProjectSyncRepo.h"
 #include "sync/PullConflictResolution.h"
+
+#include <spdlog/spdlog.h>
 
 #include <stdexcept>
 
@@ -34,6 +37,24 @@ void refresh_activity_best_effort(
     );
   } catch (const std::exception&) {
     // Metrics are advisory. The phase result and its durable status remain authoritative.
+  }
+}
+
+// Anything can arrive in a pull: a parent card trashed by an older client, or its file removed by
+// hand. Make such hidden cards reachable again. Best effort: a pull that succeeded stays
+// successful, and a locked encrypted project is repaired on a later pull or an explicit repair.
+int repair_hierarchy_after_pull(
+    holder::platform::Db& db,
+    holder::index::FtsIndexer* fts,
+    const holder::model::Project& project,
+    long long now
+) {
+  try {
+    const auto plan = holder::card::CardStore(db, fts).repair_hierarchy(project.project_id, now);
+    return static_cast<int>(plan.moved_card_ids.size());
+  } catch (const std::exception& ex) {
+    spdlog::warn("hierarchy repair after pull failed for {}: {}", project.project_id, ex.what());
+    return 0;
   }
 }
 
@@ -127,6 +148,8 @@ ProjectSyncResult run_project_sync(
             resolve_pull_conflicts(db, fts, project, git, diverged, request.now);
       }
       reconcile_index_after_pull(db, fts, project);
+      result.pull.hidden_cards_repaired =
+          repair_hierarchy_after_pull(db, fts, project, request.now);
       result.pull.status = PullPhaseStatus::Succeeded;
       sync.record_pull_result(
           project_id,

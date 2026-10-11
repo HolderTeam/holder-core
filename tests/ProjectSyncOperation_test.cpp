@@ -7,6 +7,8 @@
 
 #include "sync/ProjectSyncOperation.h"
 
+#include "card/CardFrontMatter.h"
+#include "card/CardPaths.h"
 #include "card/CardRepo.h"
 #include "card/CardStore.h"
 #include "core_test_helpers.h"
@@ -23,6 +25,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -396,4 +399,157 @@ TEST_CASE("Project sync names every persisted pull phase", "[sync]") {
       std::string(holder::sync::pull_phase_status_name(holder::sync::PullPhaseStatus::NotAttempted)
       ) == "not_attempted"
   );
+}
+
+TEST_CASE(
+    "ProjectSyncOperation repairs cards a pull leaves hidden under a trashed parent",
+    "[sync][operation][repair]"
+) {
+  const auto dir = holder::test::make_temp_dir();
+  const auto remote_root = dir / "remote";
+  const auto local_root = dir / "local";
+  const std::string parent_id = "11111111-1111-4111-8111-111111111111";
+  const std::string child_id = "22222222-2222-4222-8222-222222222222";
+
+  auto remote_db = holder::test::open_db_with_schema(dir / "remote.db");
+  holder::index::FtsIndexer remote_fts(remote_db);
+  create_project(remote_db, "proj-1", remote_root, std::nullopt);
+  holder::git::RealGitOps remote_git;
+  holder::card::CardStore remote_store(remote_db, &remote_fts, nullptr, &remote_git);
+  holder::model::Card parent;
+  parent.card_id = parent_id;
+  parent.project_id = "proj-1";
+  parent.title = "Parent";
+  remote_store.create(parent, "parent");
+  holder::model::Card child;
+  child.card_id = child_id;
+  child.project_id = "proj-1";
+  child.title = "Child";
+  child.parent_card_id = parent_id;
+  remote_store.create(child, "child");
+
+  holder::git::GitRepo clone;
+  clone.open_or_init(local_root);
+  clone.set_remote("origin", remote_root.string());
+  clone.pull_remote_ff_only("origin");
+  auto local_db = holder::test::open_db_with_schema(dir / "local.db");
+  holder::index::FtsIndexer local_fts(local_db);
+  create_project(local_db, "proj-1", local_root, remote_root.string());
+  holder::store::Rebuilder(local_db, &local_fts)
+      .rebuild_project(holder::project::ProjectRepo(local_db).get("proj-1").value());
+
+  // Another client trashes the parent the way trash worked before children were promoted: only
+  // the parent's file moves to Trash, and the child still names it.
+  const auto live_rel = holder::core::card_rel_path(parent_id);
+  const auto trash_rel = holder::core::card_trash_rel_path(parent_id);
+  auto parsed = holder::core::parse_card_file([&] {
+    std::ifstream in(remote_root / live_rel);
+    return std::string(std::istreambuf_iterator<char>(in), {});
+  }());
+  parsed.card.deleted_at = 300;
+  parsed.card.rel_path = trash_rel;
+  std::filesystem::create_directories((remote_root / trash_rel).parent_path());
+  remote_git.write_file(
+      trash_rel,
+      holder::core::render_card_front_matter(parsed.card, parsed.links, parsed.milestones) +
+          parsed.body
+  );
+  remote_git.stage_path(trash_rel);
+  std::filesystem::remove(remote_root / live_rel);
+  remote_git.remove_path(live_rel);
+  remote_git.commit("Delete card Parent (older client)");
+
+  holder::git::RealGitOps local_git;
+  const auto result = holder::sync::run_project_sync(
+      local_db,
+      &local_fts,
+      local_git,
+      "proj-1",
+      {.pull = true,
+       .push = false,
+       .push_after_failed_pull = false,
+       .branch = "",
+       .set_upstream = true,
+       .now = 400}
+  );
+
+  INFO(
+      result.pull.error_message.value_or("") + " / push: " + result.push.error_message.value_or("")
+  );
+  REQUIRE(result.succeeded());
+  REQUIRE(result.pull.hidden_cards_repaired == 1);
+  holder::card::CardRepo cards(local_db);
+  REQUIRE(cards.get(parent_id)->deleted_at.has_value());
+  REQUIRE_FALSE(cards.get(child_id)->parent_card_id.has_value());
+  // The repair is in the child's file too, so it survives a rebuild and syncs onwards.
+  holder::store::Rebuilder(local_db, &local_fts)
+      .rebuild_project(holder::project::ProjectRepo(local_db).get("proj-1").value());
+  REQUIRE_FALSE(cards.get(child_id)->parent_card_id.has_value());
+}
+
+TEST_CASE(
+    "ProjectSyncOperation fast-forward pull applies edits and deletions to the working tree",
+    "[sync][operation]"
+) {
+  const auto dir = holder::test::make_temp_dir();
+  const auto remote_root = dir / "remote";
+  const auto local_root = dir / "local";
+  const std::string edited_id = "33333333-3333-4333-8333-333333333333";
+  const std::string trashed_id = "44444444-4444-4444-8444-444444444444";
+
+  auto remote_db = holder::test::open_db_with_schema(dir / "remote.db");
+  holder::index::FtsIndexer remote_fts(remote_db);
+  create_project(remote_db, "proj-1", remote_root, std::nullopt);
+  holder::git::RealGitOps remote_git;
+  holder::card::CardStore remote_store(remote_db, &remote_fts, nullptr, &remote_git);
+  for (const auto& [id, title] :
+       {std::pair{edited_id, "Edited"}, std::pair{trashed_id, "Trashed"}}) {
+    holder::model::Card card;
+    card.card_id = id;
+    card.project_id = "proj-1";
+    card.title = title;
+    remote_store.create(card, "original body");
+  }
+
+  holder::git::GitRepo clone;
+  clone.open_or_init(local_root);
+  clone.set_remote("origin", remote_root.string());
+  clone.pull_remote_ff_only("origin");
+  auto local_db = holder::test::open_db_with_schema(dir / "local.db");
+  holder::index::FtsIndexer local_fts(local_db);
+  create_project(local_db, "proj-1", local_root, remote_root.string());
+  holder::store::Rebuilder(local_db, &local_fts)
+      .rebuild_project(holder::project::ProjectRepo(local_db).get("proj-1").value());
+
+  remote_store.update_content(edited_id, "edited body", std::nullopt, 300);
+  remote_store.trash(trashed_id, 301);
+
+  holder::git::RealGitOps local_git;
+  const auto result = holder::sync::run_project_sync(
+      local_db,
+      &local_fts,
+      local_git,
+      "proj-1",
+      {.pull = true,
+       .push = false,
+       .push_after_failed_pull = false,
+       .branch = "",
+       .set_upstream = true,
+       .now = 400}
+  );
+
+  INFO(result.pull.error_message.value_or(""));
+  REQUIRE(result.succeeded());
+  const auto read = [](const std::filesystem::path& path) {
+    std::ifstream in(path);
+    return std::string(std::istreambuf_iterator<char>(in), {});
+  };
+  CHECK(
+      read(local_root / holder::core::card_rel_path(edited_id)).find("edited body") !=
+      std::string::npos
+  );
+  CHECK_FALSE(std::filesystem::exists(local_root / holder::core::card_rel_path(trashed_id)));
+  CHECK(std::filesystem::exists(local_root / holder::core::card_trash_rel_path(trashed_id)));
+  holder::card::CardRepo cards(local_db);
+  CHECK(cards.get(trashed_id)->deleted_at.has_value());
 }
