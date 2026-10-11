@@ -370,24 +370,29 @@ std::vector<holder::model::Card> CardRepo::list_collection_page(
     throw std::invalid_argument("updated-order cursor must include updated_at");
   if (query.tag.has_value() && !holder::core::is_valid_tag(*query.tag))
     throw std::invalid_argument("Invalid tag.");
+  // A tag filter starts from the tag's index entries, so a page costs the same whether the tag
+  // is on a few cards or most of them; card_id order then comes from that index directly. The
+  // card_id column named in card_id order must be the one from the table SQLite walks.
+  const bool tagged = query.tag.has_value();
+  const char* id = tagged ? "t.card_id" : "c.card_id";
   std::string sql =
       "SELECT c.card_id, c.project_id, c.title, c.rel_path, c.parent_card_id, c.sort_key, "
-      "c.created_at, c.updated_at, c.deleted_at FROM cards c "
-      "WHERE c.project_id = ?1 AND c.deleted_at IS NULL";
-  if (query.tag.has_value())
-    sql += " AND EXISTS (SELECT 1 FROM card_tags t WHERE t.project_id = c.project_id "
-           "AND t.card_id = c.card_id AND t.tag = ?2)";
+      "c.created_at, c.updated_at, c.deleted_at FROM ";
+  sql += tagged ? "card_tags t JOIN cards c ON c.card_id = t.card_id "
+                  "WHERE t.project_id = ?1 AND t.tag = ?2 AND c.project_id = ?1"
+                : "cards c WHERE c.project_id = ?1";
+  sql += " AND c.deleted_at IS NULL";
   if (std::holds_alternative<CardPageRoots>(query.parent))
     sql += " AND c.parent_card_id IS NULL";
   else if (children)
     sql += " AND c.parent_card_id = ?3";
   if (query.cursor.has_value()) {
     sql += query.order == CardPageOrder::CardIdAsc
-               ? " AND c.card_id > ?4"
+               ? std::string(" AND ") + id + " > ?4"
                : " AND (c.updated_at < ?5 OR (c.updated_at = ?5 AND c.card_id < ?4))";
   }
   sql += query.order == CardPageOrder::CardIdAsc
-             ? " ORDER BY c.card_id ASC LIMIT ?6;"
+             ? std::string(" ORDER BY ") + id + " ASC LIMIT ?6;"
              : " ORDER BY c.updated_at DESC, c.card_id DESC LIMIT ?6;";
   sqlite3_stmt* raw = nullptr;
   if (sqlite3_prepare_v2(db_.handle(), sql.c_str(), -1, &raw, nullptr) != SQLITE_OK)

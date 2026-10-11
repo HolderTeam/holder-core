@@ -243,6 +243,32 @@ UPDATE schema_version SET version = 6 WHERE version = 5;
   tx.commit();
 }
 
+// Collection-page indexes (issue 22): card_id tie-breakers for updated order, parent-led
+// indexes for roots and children, and card_id in the tag index for tag-filtered pages.
+void migrate_v6_to_v7(Db& db) {
+  static constexpr const char* SQL = R"sql(
+DROP INDEX IF EXISTS idx_cards_project_updated;
+CREATE INDEX idx_cards_project_updated
+  ON cards(project_id, updated_at, card_id);
+
+CREATE INDEX IF NOT EXISTS idx_cards_project_parent_card_id
+  ON cards(project_id, parent_card_id, card_id);
+
+CREATE INDEX IF NOT EXISTS idx_cards_project_parent_updated
+  ON cards(project_id, parent_card_id, updated_at, card_id);
+
+DROP INDEX IF EXISTS idx_card_tags_tag;
+CREATE INDEX idx_card_tags_tag
+  ON card_tags(project_id, tag, card_id);
+
+UPDATE schema_version SET version = 7 WHERE version = 6;
+)sql";
+
+  Tx tx(db);
+  db.exec(SQL);
+  tx.commit();
+}
+
 } // namespace
 
 std::string Migrations::read_file(const std::filesystem::path& p) {
@@ -329,6 +355,11 @@ bool Migrations::migrate_to_latest(Db& db) {
     case 5:
       migrate_v5_to_v6(db);
       version = 6;
+      migrated = true;
+      break;
+    case 6:
+      migrate_v6_to_v7(db);
+      version = 7;
       migrated = true;
       break;
     default:
