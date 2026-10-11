@@ -376,6 +376,31 @@ int holder_card_update_content(
 // remain in Trash. The lifecycle change and promotion share one Git commit.
 int holder_card_delete(holder_context* context, const char* card_id, holder_error** out_error);
 
+// Trashes a card together with every live descendant, in one Git commit. Descendants keep their
+// parents inside Trash, so restoring a parent before its children lets them reattach. Cards
+// already in Trash keep their own trash time; live cards beneath them are trashed too.
+// Restoring stays single-card (see holder_card_restore).
+int holder_card_delete_subtree(
+    holder_context* context,
+    const char* card_id,
+    holder_error** out_error
+);
+
+// Finds live cards that browsing from project_id's roots cannot reach because their parent is
+// missing or trashed (left by trash operations before children were promoted, or by sync from
+// an older version). With apply == 0 it only reports; otherwise it moves each hidden branch to
+// its nearest live, reachable ancestor (or the roots), descendants attached, in one Git commit.
+// Sets *out_json to {"applied": bool, "moved": [{"card_id": ..., "parent_card_id": ...|null}],
+// "changed_card_count": n, "cycle_card_ids": [...]}. Cards in parent cycles are reported, not
+// moved. Applying twice changes nothing the second time.
+int holder_project_repair_hierarchy_json(
+    holder_context* context,
+    const char* project_id,
+    int apply,
+    char** out_json,
+    holder_error** out_error
+);
+
 // Lists project_id's trashed (soft-deleted) cards, same JSON card-array shape as
 // holder_card_list.
 int holder_card_list_trashed(

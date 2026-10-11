@@ -2698,6 +2698,71 @@ int holder_card_delete(holder_context* context, const char* card_id, holder_erro
   } // LCOV_EXCL_LINE
 }
 
+int holder_card_delete_subtree(
+    holder_context* context,
+    const char* card_id,
+    holder_error** out_error
+) {
+  clear_error(out_error);
+  if (context == nullptr) {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "context must not be null");
+  }
+  if (card_id == nullptr || card_id[0] == '\0') {
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "card_id must not be empty");
+  }
+
+  try {
+    holder::card::CardStore store(context->db, &context->fts);
+    store.trash(card_id, now_epoch_seconds(), holder::card::TrashChildren::TrashSubtree);
+    return HOLDER_OK;
+  } catch (const std::bad_alloc&) {
+    return set_error(out_error, HOLDER_ERROR_ALLOCATION, "allocation failed"); // LCOV_EXCL_LINE
+  } catch (const std::exception& e) {
+    return set_exception(out_error, e);
+  } catch (...) {
+    return set_unknown_exception(out_error); // LCOV_EXCL_LINE
+  } // LCOV_EXCL_LINE
+}
+
+int holder_project_repair_hierarchy_json(
+    holder_context* context,
+    const char* project_id,
+    int apply,
+    char** out_json,
+    holder_error** out_error
+) {
+  if (project_id == nullptr || project_id[0] == '\0') {
+    clear_error(out_error);
+    if (out_json != nullptr) *out_json = nullptr;
+    return set_error(out_error, HOLDER_ERROR_INVALID_ARGUMENT, "project_id must not be empty");
+  }
+  return with_json_output(context, out_json, out_error, [&]() {
+    holder::card::CardStore store(context->db, &context->fts);
+    const auto plan = apply ? store.repair_hierarchy(project_id, now_epoch_seconds())
+                            : store.plan_hierarchy_repair(project_id);
+    nlohmann::json moved = nlohmann::json::array();
+    for (const auto& card_id : plan.moved_card_ids) {
+      const auto placed = std::find_if(
+          plan.placements.begin(),
+          plan.placements.end(),
+          [&](const holder::model::Card& c) {
+            return c.card_id == card_id;
+          }
+      );
+      nlohmann::json parent = nullptr;
+      if (placed != plan.placements.end() && placed->parent_card_id)
+        parent = *placed->parent_card_id;
+      moved.push_back({{"card_id", card_id}, {"parent_card_id", parent}});
+    }
+    return nlohmann::json{
+        {"applied", apply != 0 && !plan.placements.empty()},
+        {"moved", moved},
+        {"changed_card_count", plan.placements.size()},
+        {"cycle_card_ids", plan.cycle_card_ids},
+    };
+  });
+}
+
 int holder_card_list_trashed(
     holder_context* context,
     const char* project_id,

@@ -30,6 +30,22 @@ std::vector<holder::model::Card> placed_card_changes(
     const std::optional<std::string>& parent,
     long long updated_at
 );
+// Live cards that browsing from the roots cannot reach, and how to make them reachable.
+struct HierarchyRepairPlan {
+  // Every card whose placement changes: the moved cards and any re-spaced siblings.
+  std::vector<holder::model::Card> placements;
+  // Hidden branch heads: live cards whose parent is missing or trashed. Each moves to its nearest
+  // live, reachable ancestor (or the roots), in the place the hidden branch held there; its live
+  // descendants stay attached and become reachable with it.
+  std::vector<std::string> moved_card_ids;
+  // Live cards whose parent chain loops. Repair leaves them alone; they need a decision.
+  std::vector<std::string> cycle_card_ids;
+};
+HierarchyRepairPlan plan_hierarchy_repair(
+    CardRepo& repo,
+    const std::string& project_id,
+    long long updated_at
+);
 std::vector<holder::model::Card> restored_card_placement(
     CardRepo& repo,
     holder::model::Card& restored,

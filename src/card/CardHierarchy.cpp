@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <map>
 #include <set>
 #include <stdexcept>
 
@@ -53,8 +54,10 @@ std::optional<std::vector<double>> spaced_keys(
 // Give the inserted block fresh keys between its neighbours. If floating-point
 // precision or tied keys leave no room, re-space the smallest surrounding window of
 // siblings, widening it until it fits; keys need not be contiguous, only ordered.
-std::vector<Card> insert_block(
-    std::vector<Card> destination,
+// As insert_block, but leaves `destination` holding the block and every new key, so several
+// blocks can be inserted into one sibling list in turn.
+std::vector<Card> insert_block_into(
+    std::vector<Card>& destination,
     std::size_t at,
     std::vector<Card> block,
     const std::optional<std::string>& parent,
@@ -92,6 +95,16 @@ std::vector<Card> insert_block(
     }
     return changed;
   }
+}
+
+std::vector<Card> insert_block(
+    std::vector<Card> destination,
+    std::size_t at,
+    std::vector<Card> block,
+    const std::optional<std::string>& parent,
+    long long updated_at
+) {
+  return insert_block_into(destination, at, std::move(block), parent, updated_at);
 }
 } // namespace
 
@@ -172,6 +185,109 @@ std::vector<Card> placed_card_changes(
     long long updated_at
 ) {
   return insert_block(std::move(destination), at, {std::move(card)}, parent, updated_at);
+}
+
+HierarchyRepairPlan plan_hierarchy_repair(
+    CardRepo& repo,
+    const std::string& project_id,
+    long long updated_at
+) {
+  std::map<std::string, Card> by_id;
+  for (auto& card : repo.list_all(project_id))
+    by_id.emplace(card.card_id, std::move(card));
+  const auto find = [&](const std::optional<std::string>& id) -> const Card* {
+    if (!id) return nullptr;
+    const auto it = by_id.find(*id);
+    return it == by_id.end() ? nullptr : &it->second;
+  };
+
+  HierarchyRepairPlan plan;
+  struct Head {
+    Card card;
+    std::optional<std::string> destination;
+    std::optional<Card> anchor;
+  };
+  std::vector<Head> heads;
+  for (const auto& [id, card] : by_id) {
+    if (card.deleted_at || !card.parent_card_id) continue;
+    // Walk the ancestors as reachable_card_parent does, without a query per step.
+    std::set<std::string> visited{id};
+    std::optional<std::string> destination;
+    bool cycle = false;
+    for (auto next = card.parent_card_id; next;) {
+      if (!visited.insert(*next).second) {
+        cycle = true;
+        break;
+      }
+      const auto* ancestor = find(next);
+      if (!ancestor) {
+        destination.reset();
+        break;
+      }
+      if (ancestor->deleted_at) {
+        destination.reset();
+      } else if (!destination) {
+        destination = ancestor->card_id;
+      }
+      next = ancestor->parent_card_id;
+    }
+    if (cycle) {
+      plan.cycle_card_ids.push_back(id);
+      continue;
+    }
+    const auto* parent = find(card.parent_card_id);
+    // A card under a live parent moves, if at all, with that parent's branch.
+    if (parent && !parent->deleted_at) continue;
+    // Anchor on the hidden ancestor that sits among the destination's children, so the branch
+    // returns to the place it held there.
+    std::optional<Card> anchor;
+    for (const auto* a = parent; a; a = find(a->parent_card_id)) {
+      if (a->parent_card_id == destination) {
+        anchor = *a;
+        break;
+      }
+    }
+    heads.push_back({card, destination, anchor});
+  }
+
+  // Group heads by destination, then by anchor; insert anchored groups before unanchored ones.
+  std::map<std::optional<std::string>, std::vector<Head>> by_destination;
+  for (auto& head : heads)
+    by_destination[head.destination].push_back(std::move(head));
+  std::map<std::string, Card> changed;
+  for (auto& [destination, group] : by_destination) {
+    std::vector<Card> siblings;
+    for (const auto& [id, card] : by_id)
+      if (!card.deleted_at && card.parent_card_id == destination) siblings.push_back(card);
+    std::sort(siblings.begin(), siblings.end(), card_tree_less);
+    std::map<std::string, std::vector<Card>> anchored;
+    std::vector<Card> unanchored;
+    std::map<std::string, Card> anchors;
+    for (auto& head : group) {
+      plan.moved_card_ids.push_back(head.card.card_id);
+      if (head.anchor) {
+        anchors.emplace(head.anchor->card_id, *head.anchor);
+        anchored[head.anchor->card_id].push_back(std::move(head.card));
+      } else {
+        unanchored.push_back(std::move(head.card));
+      }
+    }
+    const auto place = [&](std::vector<Card> block, std::size_t at) {
+      std::sort(block.begin(), block.end(), card_tree_less);
+      for (auto& card : insert_block_into(siblings, at, std::move(block), destination, updated_at))
+        changed[card.card_id] = std::move(card);
+    };
+    for (auto& [anchor_id, block] : anchored) {
+      const auto pos =
+          std::lower_bound(siblings.begin(), siblings.end(), anchors.at(anchor_id), card_tree_less);
+      place(std::move(block), static_cast<std::size_t>(pos - siblings.begin()));
+    }
+    if (!unanchored.empty()) place(std::move(unanchored), siblings.size());
+  }
+  for (auto& [id, card] : changed)
+    plan.placements.push_back(std::move(card));
+  std::sort(plan.moved_card_ids.begin(), plan.moved_card_ids.end());
+  return plan;
 }
 
 std::vector<Card> restored_card_placement(CardRepo& repo, Card& restored, long long updated_at) {
