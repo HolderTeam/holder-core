@@ -1093,6 +1093,17 @@ void GitRepo::pull_remote_ff_only(const std::string& name) {
     throw NonFastForwardPullError(oid_to_hex(local_oid), oid_to_hex(remote_oid), name);
   }
 
+  // Check out before moving the branch: a safe checkout compares the working tree with HEAD, so
+  // HEAD must still be the old commit for files the remote changed or removed to be updated or
+  // deleted. Checked out after the move, they were left stale, and a card trashed on another
+  // device left its live file beside the trashed one. A checkout that fails leaves HEAD alone.
+  try {
+    checkout_commit_oid(repo, remote_oid);
+  } catch (...) {
+    git_reference_free(head_resolved);
+    throw;
+  }
+
   git_reference* updated = nullptr;
   rc = git_reference_set_target(&updated, head_resolved, &remote_oid, "pull: fast-forward");
   git_reference_free(head_resolved);
@@ -1103,7 +1114,6 @@ void GitRepo::pull_remote_ff_only(const std::string& name) {
   git_reference_free(updated);
   if (rc != 0) throw git_err("git_repository_set_head failed", rc);
 
-  checkout_commit_oid(repo, remote_oid);
   spdlog::info("Pulled {} (fast-forward)", name);
 }
 
