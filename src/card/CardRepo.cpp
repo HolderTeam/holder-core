@@ -424,48 +424,11 @@ std::vector<holder::model::Card> CardRepo::list_page_by_card_id(
     const std::optional<std::string>& after_card_id,
     int limit
 ) const {
-  static constexpr const char* SQL_FIRST =
-      "SELECT card_id, project_id, title, rel_path, parent_card_id, sort_key, "
-      "created_at, updated_at, deleted_at "
-      "FROM cards WHERE project_id = ? AND deleted_at IS NULL "
-      "ORDER BY card_id ASC LIMIT ?;";
-  static constexpr const char* SQL_PAGE =
-      "SELECT card_id, project_id, title, rel_path, parent_card_id, sort_key, "
-      "created_at, updated_at, deleted_at "
-      "FROM cards WHERE project_id = ? AND deleted_at IS NULL AND card_id > ? "
-      "ORDER BY card_id ASC LIMIT ?;";
-
-  sqlite3_stmt* stmt = nullptr;
-  if (sqlite3_prepare_v2(
-          db_.handle(),
-          after_card_id.has_value() ? SQL_PAGE : SQL_FIRST,
-          -1,
-          &stmt,
-          nullptr
-      ) != SQLITE_OK) {
-    throw_sqlite(db_.handle(), "prepare list card-id page failed");
-  }
-  bind_text(stmt, 1, project_id);
-  if (after_card_id.has_value()) {
-    bind_text(stmt, 2, *after_card_id);
-    sqlite3_bind_int(stmt, 3, limit);
-  } else {
-    sqlite3_bind_int(stmt, 2, limit);
-  }
-
-  std::vector<holder::model::Card> out;
-  while (true) {
-    const int rc = sqlite3_step(stmt);
-    if (rc == SQLITE_ROW) {
-      out.push_back(read_card(stmt));
-      continue;
-    }
-    if (rc == SQLITE_DONE) break;
-    sqlite3_finalize(stmt); // LCOV_EXCL_LINE
-    throw_sqlite(db_.handle(), "list card-id page failed"); // LCOV_EXCL_LINE
-  }
-  sqlite3_finalize(stmt);
-  return out;
+  CardPageQuery query;
+  // An empty cursor sorts before every card_id, so it selects the first page, as no cursor does.
+  if (after_card_id.has_value() && !after_card_id->empty())
+    query.cursor = CardPageCursor{*after_card_id, std::nullopt};
+  return list_collection_page(project_id, query, limit);
 }
 
 int CardRepo::count_all_not_deleted(const std::string& project_id) const {
@@ -727,47 +690,15 @@ std::vector<holder::model::Card> CardRepo::list_recent_page(
     const std::optional<std::string>& before_card_id,
     int limit
 ) const {
-  static constexpr const char* SQL_FIRST =
-      "SELECT card_id, project_id, title, rel_path, parent_card_id, sort_key, "
-      "created_at, updated_at, deleted_at "
-      "FROM cards WHERE project_id = ? AND deleted_at IS NULL "
-      "ORDER BY updated_at DESC, card_id DESC LIMIT ?;";
-  static constexpr const char* SQL_PAGE =
-      "SELECT card_id, project_id, title, rel_path, parent_card_id, sort_key, "
-      "created_at, updated_at, deleted_at "
-      "FROM cards WHERE project_id = ? AND deleted_at IS NULL "
-      "AND (updated_at < ? OR (updated_at = ? AND card_id < ?)) "
-      "ORDER BY updated_at DESC, card_id DESC LIMIT ?;";
-
-  const bool first_page = !before_updated_at.has_value();
-  sqlite3_stmt* stmt = nullptr;
-  if (sqlite3_prepare_v2(db_.handle(), first_page ? SQL_FIRST : SQL_PAGE, -1, &stmt, nullptr) !=
-      SQLITE_OK) {
-    throw_sqlite(db_.handle(), "prepare list recent cards failed");
+  CardPageQuery query;
+  query.order = CardPageOrder::UpdatedDesc;
+  // As before, a card_id without updated_at selects the first page.
+  if (before_updated_at.has_value()) {
+    if (!before_card_id.has_value() || before_card_id->empty())
+      throw std::invalid_argument("before_card_id is required with before_updated_at");
+    query.cursor = CardPageCursor{*before_card_id, before_updated_at};
   }
-  bind_text(stmt, 1, project_id);
-  if (first_page) {
-    sqlite3_bind_int(stmt, 2, limit);
-  } else {
-    sqlite3_bind_int64(stmt, 2, *before_updated_at);
-    sqlite3_bind_int64(stmt, 3, *before_updated_at);
-    bind_text(stmt, 4, *before_card_id);
-    sqlite3_bind_int(stmt, 5, limit);
-  }
-
-  std::vector<holder::model::Card> out;
-  while (true) {
-    const int rc2 = sqlite3_step(stmt);
-    if (rc2 == SQLITE_ROW) {
-      out.push_back(read_card(stmt));
-      continue;
-    }
-    if (rc2 == SQLITE_DONE) break;
-    sqlite3_finalize(stmt); // LCOV_EXCL_LINE
-    throw_sqlite(db_.handle(), "list recent cards failed"); // LCOV_EXCL_LINE
-  }
-  sqlite3_finalize(stmt); // LCOV_EXCL_LINE
-  return out;
-} // LCOV_EXCL_LINE
+  return list_collection_page(project_id, query, limit);
+}
 
 } // namespace holder::card
