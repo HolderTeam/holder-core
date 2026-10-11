@@ -442,6 +442,50 @@ void CardStore::move(
   git_->commit("Move card " + card.title);
 }
 
+CardMoveResult CardStore::move_to(
+    const std::string& project_id,
+    const std::string& card_id,
+    const CardPlacementRequest& request,
+    long long updated_at
+) {
+  auto card = card_repo_.get(card_id);
+  if (!card || card->deleted_at) throw std::runtime_error("card_not_found");
+  if (card->project_id != project_id) throw std::runtime_error("cross_project_move_forbidden");
+  const auto project = require_project(project_id);
+  auto operation = git_->lock_operation(project.root_path);
+  const auto placement =
+      CardPlacementResolver(card_repo_).resolve(project_id, card_id, request, updated_at);
+  card = card_repo_.get(card_id);
+  if (!card) throw std::runtime_error("card_not_found"); // LCOV_EXCL_LINE - resolve checked.
+  const bool moved = placement.parent_card_id != card->parent_card_id ||
+                     placement.sort_key != card->sort_key;
+  if (!moved && placement.sibling_changes.empty()) return {*card, placement.moved_into_title};
+
+  git_->open_or_init(project.root_path);
+  if (project.git_remote_url.has_value()) git_->set_remote("origin", *project.git_remote_url);
+  if (card->rel_path != holder::core::card_rel_path(card_id))
+    throw std::runtime_error("card rel_path does not match card_id");
+  auto destination = *card;
+  destination.parent_card_id = placement.parent_card_id;
+  validate_card_parent(card_repo_, destination);
+  const auto source = git_->repo_dir() / card->rel_path;
+  if (!fs_->exists(source)) throw std::runtime_error("card content missing");
+  auto parsed = holder::core::parse_card_file(decode_card_blob(project, fs_->read_file(source)));
+  parsed.card = *card;
+  parsed.card.parent_card_id = placement.parent_card_id;
+  parsed.card.sort_key = placement.sort_key;
+  parsed.card.updated_at = updated_at;
+  parsed.links = link_repo_.list_outgoing(card->project_id, card_id);
+  apply_card_changes(
+      project,
+      *card,
+      std::move(parsed),
+      placement.sibling_changes,
+      "Move card " + card->title
+  );
+  return {*card_repo_.get(card_id), placement.moved_into_title};
+}
+
 void CardStore::update_links(const std::string& card_id, long long updated_at) {
   const auto card_opt = card_repo_.get(card_id);
   if (!card_opt.has_value()) {
@@ -605,7 +649,7 @@ std::optional<holder::model::Milestone> CardStore::update_milestone(
   return updated;
 }
 
-void CardStore::apply_lifecycle(
+void CardStore::apply_card_changes(
     const holder::model::Project& project,
     const holder::model::Card& current,
     holder::core::ParsedCardFile target,
@@ -739,7 +783,7 @@ void CardStore::trash(const std::string& card_id, long long deleted_at) {
   parsed.card.updated_at = deleted_at;
   parsed.links = link_repo_.list_outgoing(card->project_id, card_id);
   const auto placements = promoted_card_children(card_repo_, *card, deleted_at);
-  apply_lifecycle(project, *card, std::move(parsed), placements, "Delete card " + card->title);
+  apply_card_changes(project, *card, std::move(parsed), placements, "Delete card " + card->title);
 }
 
 void CardStore::restore(const std::string& card_id, long long updated_at) {
@@ -763,7 +807,7 @@ void CardStore::restore(const std::string& card_id, long long updated_at) {
   parsed.card.updated_at = updated_at;
   parsed.links = link_repo_.list_outgoing(card->project_id, card_id);
   const auto placements = restored_card_placement(card_repo_, parsed.card, updated_at);
-  apply_lifecycle(project, *card, std::move(parsed), placements, "Restore card " + card->title);
+  apply_card_changes(project, *card, std::move(parsed), placements, "Restore card " + card->title);
 }
 
 void CardStore::restore_version(
@@ -829,7 +873,7 @@ void CardStore::restore_version(
   auto placements = restored.deleted_at ? promoted_card_children(card_repo_, current, updated_at)
                                         : restored_card_placement(card_repo_, restored, updated_at);
   parsed.card = restored;
-  apply_lifecycle(
+  apply_card_changes(
       project,
       current,
       std::move(parsed),

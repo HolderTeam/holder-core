@@ -19,6 +19,17 @@ std::vector<holder::model::Card> promoted_card_children(
     const holder::model::Card& parent,
     long long updated_at
 );
+// Places `card` at index `at` of `destination` -- its new live siblings in tree order, without
+// the card itself -- under `parent`. The card takes the midpoint between its neighbours when that
+// fits; otherwise the smallest surrounding window of siblings is re-spaced. Returns every card
+// whose placement changes, the placed card included, each with updated_at set.
+std::vector<holder::model::Card> placed_card_changes(
+    std::vector<holder::model::Card> destination,
+    std::size_t at,
+    holder::model::Card card,
+    const std::optional<std::string>& parent,
+    long long updated_at
+);
 std::vector<holder::model::Card> restored_card_placement(
     CardRepo& repo,
     holder::model::Card& restored,

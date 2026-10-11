@@ -1,6 +1,7 @@
 #pragma once
 
 #include "card/CardFrontMatter.h"
+#include "card/CardPlacementResolver.h"
 #include "card/CardRepo.h"
 #include "card/LinkRepo.h"
 #include "card/MilestoneRepo.h"
@@ -82,6 +83,11 @@ struct CollectionCardPage {
   std::optional<CardPageCursor> next_cursor;
 };
 
+struct CardMoveResult {
+  holder::model::Card card;
+  std::optional<std::string> moved_into_title;
+};
+
 class CardStore {
  public:
   CardStore(
@@ -123,6 +129,17 @@ class CardStore {
       bool has_parent_card_id,
       const std::optional<std::string>& parent_card_id,
       const std::optional<double>& sort_key,
+      long long updated_at
+  );
+  // Resolves `request` for card_id (see CardPlacementResolver for the intents and the error
+  // vocabulary) and applies it, under the project lock so the placement reflects the siblings
+  // it is written beside. When the card's neighbours leave no room, the re-spaced siblings are
+  // written in the same operation and Git commit as the card. A move that changes nothing
+  // writes nothing.
+  CardMoveResult move_to(
+      const std::string& project_id,
+      const std::string& card_id,
+      const CardPlacementRequest& request,
       long long updated_at
   );
   void update_links(const std::string& card_id, long long updated_at);
@@ -206,7 +223,10 @@ class CardStore {
 
  private:
   holder::model::Project require_project(const std::string& project_id) const;
-  void apply_lifecycle(
+  // Writes `target` (the card in `current`, possibly moving between the live and trash paths)
+  // and `placements` (other cards whose placement changes) in one journalled operation: one
+  // SQLite transaction and one Git commit, rolled back together on failure.
+  void apply_card_changes(
       const holder::model::Project& project,
       const holder::model::Card& current,
       holder::core::ParsedCardFile target,

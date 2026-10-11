@@ -20,6 +20,7 @@
 #include <fstream>
 #include <functional>
 #include <future>
+#include <map>
 #include <thread>
 
 namespace {
@@ -721,4 +722,184 @@ TEST_CASE("Promotion re-spaces only the siblings around tied sort keys", "[cards
   }
   f.rebuild();
   REQUIRE(f.order()[3] == child_id);
+}
+
+namespace {
+holder::card::CardPlacementRequest move_request(
+    holder::card::CardPlacementIntent intent,
+    const std::string& target_card_id
+) {
+  holder::card::CardPlacementRequest request;
+  request.intent = intent;
+  request.target_card_id = target_card_id;
+  return request;
+}
+} // namespace
+
+TEST_CASE(
+    "A move between tied siblings re-spaces only the tied run in one commit",
+    "[cardstore][move]"
+) {
+  Fixture f;
+  f.add(ancestor_id, {}, 1);
+  f.add(before_id, {}, 5, "a");
+  f.add(after_id, {}, 5, "z");
+  f.add(child2_id, {}, 9);
+  f.add(child_id, {}, 20);
+  const auto before_head = f.head();
+  const auto result = f.store.move_to(
+      f.project.project_id,
+      child_id,
+      move_request(holder::card::CardPlacementIntent::After, before_id),
+      30
+  );
+  REQUIRE(result.card.card_id == child_id);
+  REQUIRE(
+      f.order() == std::vector<std::string>{ancestor_id, before_id, child_id, after_id, child2_id}
+  );
+  // Only the tied run moves; the cards on either side keep their keys and updated_at, which
+  // takes part in tie-breaking.
+  REQUIRE(f.cards.get(ancestor_id)->sort_key == 1);
+  REQUIRE(f.cards.get(ancestor_id)->updated_at == 1);
+  REQUIRE(f.cards.get(child2_id)->sort_key == 9);
+  REQUIRE(f.cards.get(child2_id)->updated_at == 1);
+  REQUIRE(f.cards.get(before_id)->updated_at == 30);
+  REQUIRE(f.cards.get(after_id)->updated_at == 30);
+  holder::git::GitRepo history;
+  history.open_existing(f.project.root_path);
+  REQUIRE(history.commit_parent_oids(f.head()) == std::vector<std::string>{before_head});
+  for (const auto& id : {before_id, child_id, after_id}) {
+    const auto file = holder::core::parse_card_file(f.bytes(id));
+    REQUIRE(file.card.sort_key == f.cards.get(id)->sort_key);
+    REQUIRE(file.body == "body " + std::string(id) + "\n#keep\n");
+  }
+  f.rebuild();
+  REQUIRE(
+      f.order() == std::vector<std::string>{ancestor_id, before_id, child_id, after_id, child2_id}
+  );
+}
+
+TEST_CASE("Repeated moves into one gap keep the requested order", "[cardstore][move]") {
+  Fixture f;
+  f.add(before_id, {}, 1);
+  f.add(child1_id, {}, 2);
+  f.add(child2_id, {}, 3);
+  f.add(after_id, {}, 4);
+  // Alternately move two cards to just after the first, halving the gap each time until floating
+  // point can no longer split it and the siblings must be re-spaced.
+  for (int i = 0; i < 60; ++i) {
+    const auto& moving = i % 2 == 0 ? child1_id : child2_id;
+    const auto& other = i % 2 == 0 ? child2_id : child1_id;
+    f.store.move_to(
+        f.project.project_id,
+        moving,
+        move_request(holder::card::CardPlacementIntent::After, before_id),
+        100 + i
+    );
+    REQUIRE(f.order() == std::vector<std::string>{before_id, moving, other, after_id});
+  }
+  f.rebuild();
+  REQUIRE(f.order() == std::vector<std::string>{before_id, child2_id, child1_id, after_id});
+}
+
+TEST_CASE("A move that changes nothing writes nothing", "[cardstore][move]") {
+  Fixture f;
+  f.add(before_id, {}, 1);
+  f.add(after_id, {}, 2);
+  const auto head = f.head();
+  const auto bytes = f.bytes(before_id);
+  holder::card::CardPlacementRequest request;
+  request.intent = holder::card::CardPlacementIntent::Left;
+  const auto result = f.store.move_to(f.project.project_id, before_id, request, 10);
+  REQUIRE(result.card.sort_key == 1);
+  REQUIRE(result.card.updated_at == 1);
+  REQUIRE(f.head() == head);
+  REQUIRE(f.bytes(before_id) == bytes);
+}
+
+TEST_CASE("move_to reports missing and cross-project cards", "[cardstore][move]") {
+  Fixture f;
+  f.add(before_id);
+  holder::card::CardPlacementRequest request;
+  request.intent = holder::card::CardPlacementIntent::ToEnd;
+  REQUIRE_THROWS_WITH(
+      f.store.move_to(f.project.project_id, missing_id, request, 2),
+      "card_not_found"
+  );
+  REQUIRE_THROWS_WITH(
+      f.store.move_to("other-project", before_id, request, 2),
+      "cross_project_move_forbidden"
+  );
+  f.store.trash(before_id, 3);
+  REQUIRE_THROWS_WITH(
+      f.store.move_to(f.project.project_id, before_id, request, 4),
+      "card_not_found"
+  );
+}
+
+TEST_CASE("A failed re-spacing move rolls back every affected card", "[cardstore][move]") {
+  Fixture f;
+  f.add(before_id, {}, 5, "a");
+  f.add(after_id, {}, 5, "z");
+  f.add(child_id, {}, 20);
+  const auto head = f.head();
+  const auto index = f.fs.read_file(std::filesystem::path(f.project.root_path) / ".git/index");
+  std::map<std::string, std::string> files;
+  for (const auto& id : {before_id, after_id, child_id})
+    files[id] = f.bytes(id);
+  SECTION("a sibling write fails after the card's") { f.git.writes_until_failure = 2; }
+  SECTION("commit fails") { f.git.fail_commit = true; }
+  SECTION("failure after Git committed") { f.git.fail_after_commit = true; }
+  REQUIRE_THROWS(f.store.move_to(
+      f.project.project_id,
+      child_id,
+      move_request(holder::card::CardPlacementIntent::After, before_id),
+      30
+  ));
+  for (const auto& id : {before_id, after_id}) {
+    REQUIRE(f.cards.get(id)->sort_key == 5);
+    REQUIRE(f.cards.get(id)->updated_at == 1);
+  }
+  REQUIRE(f.cards.get(child_id)->sort_key == 20);
+  for (const auto& [id, bytes] : files)
+    REQUIRE(f.bytes(id) == bytes);
+  REQUIRE(f.head() == head);
+  REQUIRE(f.fs.read_file(std::filesystem::path(f.project.root_path) / ".git/index") == index);
+  REQUIRE_FALSE(holder::card::CardMutation::pending(f.project.root_path));
+}
+
+TEST_CASE("Encrypted re-spacing moves keep content encrypted", "[cardstore][move][privacy]") {
+  Fixture f;
+  holder::test::EnvGuard keystore("HOLDER_TEST_KEYSTORE_DIR", (f.dir / "keystore").string());
+  holder::project::ProjectRepo projects(f.db);
+  f.db.exec(
+      "UPDATE projects SET privacy_mode = 'encrypted_git' WHERE project_id = 'project-lifecycle'"
+  );
+  holder::privacy::ensure_encrypted_project_ready(
+      f.git.real,
+      projects,
+      f.project.project_id,
+      f.project.root_path,
+      {},
+      2,
+      [] {
+        return "move-key";
+      }
+  );
+  f.project = *projects.get(f.project.project_id);
+  f.add(before_id, {}, 5, "a");
+  f.add(after_id, {}, 5, "z");
+  f.add(child_id, {}, 20);
+  f.store.move_to(
+      f.project.project_id,
+      child_id,
+      move_request(holder::card::CardPlacementIntent::Before, after_id),
+      30
+  );
+  REQUIRE(f.order() == std::vector<std::string>{before_id, child_id, after_id});
+  for (const auto& id : {before_id, child_id, after_id})
+    REQUIRE(f.bytes(id).find("body ") == std::string::npos);
+  f.rebuild();
+  REQUIRE(f.order() == std::vector<std::string>{before_id, child_id, after_id});
+  REQUIRE(f.store.get_content(*f.cards.get(after_id)) == "body " + after_id + "\n#keep\n");
 }

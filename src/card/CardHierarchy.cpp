@@ -164,6 +164,16 @@ std::vector<Card> promoted_card_children(CardRepo& repo, const Card& parent, lon
   );
 }
 
+std::vector<Card> placed_card_changes(
+    std::vector<Card> destination,
+    std::size_t at,
+    Card card,
+    const std::optional<std::string>& parent,
+    long long updated_at
+) {
+  return insert_block(std::move(destination), at, {std::move(card)}, parent, updated_at);
+}
+
 std::vector<Card> restored_card_placement(CardRepo& repo, Card& restored, long long updated_at) {
   restored.parent_card_id = reachable_card_parent(repo, restored);
   auto destination = siblings(repo, restored);
