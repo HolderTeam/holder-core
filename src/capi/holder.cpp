@@ -2381,27 +2381,17 @@ int holder_card_move_json(
     const auto body = nlohmann::json::parse(request_json);
     const auto request = card_placement_request_from_json(body);
 
-    holder::card::CardRepo card_repo(context->db);
-    holder::card::CardPlacementResolver resolver(card_repo);
-    const auto result = resolver.resolve(project_id, card_id, request);
-
-    holder::card::CardStore(context->db, &context->fts)
-        .move(card_id, true, result.parent_card_id, result.sort_key, now_epoch_seconds());
-
-    const auto moved = card_repo.get(card_id);
-    if (!moved.has_value()) {
-      // LCOV_EXCL_START
-      throw std::runtime_error("card not found after move: " + std::string(card_id));
-      // LCOV_EXCL_STOP
-    }
+    const auto result = holder::card::CardStore(context->db, &context->fts)
+                            .move_to(project_id, card_id, request, now_epoch_seconds());
+    const auto& moved = result.card;
 
     nlohmann::json response;
-    response["card_id"] = moved->card_id;
-    response["parent_card_id"] = moved->parent_card_id.has_value()
-                                     ? nlohmann::json(moved->parent_card_id.value())
+    response["card_id"] = moved.card_id;
+    response["parent_card_id"] = moved.parent_card_id.has_value()
+                                     ? nlohmann::json(moved.parent_card_id.value())
                                      : nlohmann::json(nullptr);
-    response["sort_key"] = moved->sort_key;
-    response["revision"] = moved->updated_at;
+    response["sort_key"] = moved.sort_key;
+    response["revision"] = moved.updated_at;
     response["moved_into_title"] = result.moved_into_title.has_value()
                                        ? nlohmann::json(result.moved_into_title.value())
                                        : nlohmann::json(nullptr);

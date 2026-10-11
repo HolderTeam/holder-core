@@ -44,45 +44,13 @@ bool is_descendant_of(
   return false;
 }
 
-double sort_key_around_target(
-    const std::vector<holder::model::Card>& siblings,
-    const std::string& target_card_id,
-    bool after
-) {
-  size_t target_index = 0;
-  bool found = false;
-  for (size_t i = 0; i < siblings.size(); ++i) {
-    if (siblings[i].card_id == target_card_id) {
-      target_index = i;
-      found = true;
-      break;
-    }
-  }
-  if (!found) {
-    throw std::runtime_error("invalid_target");
-  }
-
-  double left = 0.0;
-  double right = 0.0;
-  if (after) {
-    left = siblings[target_index].sort_key;
-    right = (target_index + 1 < siblings.size()) ? siblings[target_index + 1].sort_key : left + 1.0;
-  } else {
-    right = siblings[target_index].sort_key;
-    left = (target_index > 0U) ? siblings[target_index - 1].sort_key : right - 1.0;
-  }
-  if (right - left < 0.0001) {
-    return after ? right + 1.0 : left - 1.0;
-  }
-  return (left + right) / 2.0;
-}
-
 } // namespace
 
 CardPlacementResult CardPlacementResolver::resolve(
     const std::string& project_id,
     const std::string& card_id,
-    const CardPlacementRequest& request
+    const CardPlacementRequest& request,
+    long long updated_at
 ) const {
   const auto source_opt = cards_.get(card_id);
   if (!source_opt.has_value() || source_opt->deleted_at.has_value()) {
@@ -118,14 +86,15 @@ CardPlacementResult CardPlacementResolver::resolve(
     return siblings;
   }; // LCOV_EXCL_LINE - gcov artefact: lambda closer is executed but never counted.
 
-  // The card's real, unmodified parent -- restored verbatim by the Left/Right no-op escapes
-  // below, since those report "nothing moved" even when a parent_card_id override was supplied
-  // (matching the daemon route's original write_move_response(source) calls, which never
-  // touched next_parent at all).
+  // The card's real, unmodified parent -- reported unchanged by the no-op escapes below, which
+  // report "nothing moved" even when a parent_card_id override was supplied.
   const std::optional<std::string> original_parent = normalize_parent_id(source.parent_card_id);
   std::optional<std::string> next_parent = original_parent;
-  std::optional<double> next_sort_key;
   std::optional<std::string> moved_into_title;
+  // The card's new live siblings, without itself, and where among them it goes. No insertion
+  // point means nothing moves.
+  std::vector<holder::model::Card> destination;
+  std::optional<std::size_t> at;
 
   switch (request.intent) {
   case CardPlacementIntent::Into:
@@ -145,16 +114,21 @@ CardPlacementResult CardPlacementResolver::resolve(
       if (is_descendant_of(cards_by_id, next_parent, source.card_id)) {
         throw std::runtime_error("move_would_create_cycle");
       }
-      next_sort_key = cards_.next_sort_key(project_id, next_parent);
+      destination = siblings_for_parent(next_parent, source.card_id);
+      at = destination.size();
       moved_into_title = target.title;
     } else {
       next_parent = normalize_parent_id(target.parent_card_id);
-      const auto siblings = siblings_for_parent(next_parent, source.card_id);
-      next_sort_key = sort_key_around_target(
-          siblings,
-          target.card_id,
-          request.intent == CardPlacementIntent::After
-      );
+      destination = siblings_for_parent(next_parent, source.card_id);
+      const auto target_it =
+          std::find_if(destination.begin(), destination.end(), [&](const holder::model::Card& c) {
+            return c.card_id == target.card_id;
+          });
+      if (target_it == destination.end()) {
+        throw std::runtime_error("invalid_target");
+      }
+      at = static_cast<std::size_t>(target_it - destination.begin()) +
+           (request.intent == CardPlacementIntent::After ? 1U : 0U);
     }
     break;
   }
@@ -174,58 +148,34 @@ CardPlacementResult CardPlacementResolver::resolve(
       }
     }
 
-    const auto siblings_without_source = siblings_for_parent(next_parent, source.card_id);
+    destination = siblings_for_parent(next_parent, source.card_id);
     if (request.intent == CardPlacementIntent::ToStart ||
         request.intent == CardPlacementIntent::ToEnd) {
-      if (siblings_without_source.empty()) {
-        // Alone in its own parent scope there is nothing to reorder past: report "nothing
-        // moved". An empty destination elsewhere is still a real move into that scope.
-        if (next_parent == original_parent) {
-          next_sort_key = source.sort_key;
-        } else {
-          next_sort_key = cards_.next_sort_key(project_id, next_parent);
-        }
+      // Alone in its own parent scope there is nothing to reorder past: report "nothing
+      // moved". An empty destination elsewhere is still a real move into that scope.
+      if (destination.empty() && next_parent == original_parent) {
         break;
       }
-      next_sort_key = request.intent == CardPlacementIntent::ToStart
-                          ? siblings_without_source.front().sort_key - 1.0
-                          : siblings_without_source.back().sort_key + 1.0;
-    } else {
-      auto siblings_with_source = siblings_for_parent(next_parent, "");
-      std::sort(siblings_with_source.begin(), siblings_with_source.end(), card_tree_less);
-      int source_index = -1;
-      for (int i = 0; i < static_cast<int>(siblings_with_source.size()); ++i) {
-        if (siblings_with_source[static_cast<size_t>(i)].card_id == source.card_id) {
-          source_index = i;
-          break;
-        }
-      }
-      // A parent_card_id override naming some other parent leaves the source out of that
-      // parent's sibling list, so there is nothing to move left or right of.
-      if (source_index < 0) {
-        next_parent = original_parent;
-        next_sort_key = source.sort_key;
-        break;
-      }
-      if (request.intent == CardPlacementIntent::Left) {
-        if (source_index == 0) {
-          next_parent = original_parent;
-          next_sort_key = source.sort_key;
-          break;
-        }
-        const auto& target = siblings_with_source[static_cast<size_t>(source_index - 1)];
-        const auto siblings = siblings_for_parent(next_parent, source.card_id);
-        next_sort_key = sort_key_around_target(siblings, target.card_id, false);
-      } else {
-        if (source_index >= static_cast<int>(siblings_with_source.size()) - 1) {
-          next_parent = original_parent;
-          next_sort_key = source.sort_key;
-          break;
-        }
-        const auto& target = siblings_with_source[static_cast<size_t>(source_index) + 1];
-        const auto siblings = siblings_for_parent(next_parent, source.card_id);
-        next_sort_key = sort_key_around_target(siblings, target.card_id, true);
-      }
+      at = request.intent == CardPlacementIntent::ToStart ? 0U : destination.size();
+      break;
+    }
+    const auto with_source = siblings_for_parent(next_parent, "");
+    const auto source_it =
+        std::find_if(with_source.begin(), with_source.end(), [&](const holder::model::Card& c) {
+          return c.card_id == source.card_id;
+        });
+    // A parent_card_id override naming some other parent leaves the source out of that
+    // parent's sibling list, so there is nothing to move left or right of.
+    if (source_it == with_source.end()) {
+      break;
+    }
+    const auto index = static_cast<std::size_t>(source_it - with_source.begin());
+    if (request.intent == CardPlacementIntent::Left) {
+      // Before the previous sibling, which sits at index - 1 once the source is left out.
+      if (index > 0U) at = index - 1U;
+    } else if (index + 1U < with_source.size()) {
+      // After the next sibling, which sits at index once the source is left out.
+      at = index + 1U;
     }
     break;
   }
@@ -240,13 +190,14 @@ CardPlacementResult CardPlacementResolver::resolve(
     } else {
       next_parent = normalize_parent_id(parent_it->second.parent_card_id);
     }
-    next_sort_key = cards_.next_sort_key(project_id, next_parent);
     if (next_parent.has_value()) {
       const auto dest_parent_it = cards_by_id.find(next_parent.value());
       if (dest_parent_it != cards_by_id.end() && !dest_parent_it->second.deleted_at.has_value()) {
         moved_into_title = dest_parent_it->second.title;
       }
     }
+    destination = siblings_for_parent(next_parent, source.card_id);
+    at = destination.size();
     break;
   }
   default:
@@ -256,9 +207,21 @@ CardPlacementResult CardPlacementResolver::resolve(
   }
 
   CardPlacementResult result;
-  result.parent_card_id = next_parent;
-  result.sort_key = next_sort_key.value();
   result.moved_into_title = moved_into_title;
+  if (!at.has_value()) {
+    result.parent_card_id = original_parent;
+    result.sort_key = source.sort_key;
+    return result;
+  }
+  result.parent_card_id = next_parent;
+  for (auto& card :
+       placed_card_changes(std::move(destination), *at, source, next_parent, updated_at)) {
+    if (card.card_id == source.card_id) {
+      result.sort_key = card.sort_key;
+    } else {
+      result.sibling_changes.push_back(std::move(card));
+    }
+  }
   return result;
 }
 

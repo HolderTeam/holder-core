@@ -286,7 +286,9 @@ int holder_card_reference_resolve(
 );
 
 // Resolves a placement intent for card_id within project_id (see CardPlacementResolver for the
-// full algorithm and error vocabulary), then applies it via the existing CardStore::move.
+// full algorithm and error vocabulary) and applies it in one locked operation
+// (CardStore::move_to). When the card's neighbours leave no room, nearby siblings are re-spaced
+// in the same Git commit; only the moved card is reported.
 // request_json: {"intent": "into"|"before"|"after"|"to_start"|"to_end"|"left"|"right"|"up_level",
 // "target_card_id": "..." (required for into/before/after), "parent_card_id": "..."|null
 // (to_start/to_end/left/right only; omitted keeps card_id's current parent, null is the

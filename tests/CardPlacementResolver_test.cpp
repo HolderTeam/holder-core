@@ -107,8 +107,10 @@ TEST_CASE("CardPlacementResolver Into targets a card with no children", "[card][
       into_request("aaaaaaaa-0000-4000-8000-000000000002")
   );
   REQUIRE(result.parent_card_id == "aaaaaaaa-0000-4000-8000-000000000002");
-  REQUIRE(result.sort_key == 0.0);
+  // The first card in an otherwise empty scope takes key 1.
+  REQUIRE(result.sort_key == 1.0);
   REQUIRE(result.moved_into_title == "B");
+  REQUIRE(result.sibling_changes.empty());
 }
 
 TEST_CASE("CardPlacementResolver Into targets a card with children", "[card][placement]") {
@@ -196,7 +198,7 @@ TEST_CASE("CardPlacementResolver Before and After use real siblings", "[card][pl
   REQUIRE(after_y.sort_key == 25.0);
 }
 
-TEST_CASE("CardPlacementResolver Before extrapolates a dense sort-key gap", "[card][placement]") {
+TEST_CASE("CardPlacementResolver Before splits a dense sort-key gap", "[card][placement]") {
   const auto dir = holder::test::make_temp_dir();
   auto db = holder::test::open_db_with_schema(dir / "holder.db");
   create_project(db, "proj-1");
@@ -212,8 +214,11 @@ TEST_CASE("CardPlacementResolver Before extrapolates a dense sort-key gap", "[ca
       "cccccccc-0000-4000-8000-000000000003",
       before_after_request(CardPlacementIntent::Before, "cccccccc-0000-4000-8000-000000000002")
   );
-  // Gap between S1 and S2 is under 0.0001 -- falls back to left - 1.0.
-  REQUIRE(result.sort_key == 9.0);
+  // A small gap is still split while floating point can represent the midpoint, rather than
+  // stepping past a neighbour and landing in the wrong place.
+  REQUIRE(result.sort_key > 10.0);
+  REQUIRE(result.sort_key < 10.00001);
+  REQUIRE(result.sibling_changes.empty());
 }
 
 TEST_CASE("CardPlacementResolver Before with self as target is invalid", "[card][placement]") {
@@ -381,25 +386,23 @@ TEST_CASE("CardPlacementResolver Left/Right move within siblings", "[card][place
   );
   REQUIRE(left_first.sort_key == 10.0);
 
-  // Middle: Left on the middle sibling swaps it ahead of First (First has no sibling to its
-  // own left once Middle is excluded, so this extrapolates to First.sort_key - 1, then splits
-  // the gap): (9 + 10) / 2 == 9.5.
+  // Middle: Left on the middle sibling moves it ahead of First, which has no sibling to its own
+  // left once Middle is excluded, so it takes First.sort_key - 1.
   const auto left_middle = resolver.resolve(
       "proj-1",
       "11111111-0000-4000-8000-000000000002",
       simple_request(CardPlacementIntent::Left)
   );
-  REQUIRE(left_middle.sort_key == 9.5);
+  REQUIRE(left_middle.sort_key == 9.0);
 
-  // Middle: Right on the middle sibling swaps it past Last (Last has no sibling to its own
-  // right once Middle is excluded, so this extrapolates to Last.sort_key + 1, then splits the
-  // gap): (30 + 31) / 2 == 30.5.
+  // Middle: Right on the middle sibling moves it past Last, which has no sibling to its own
+  // right once Middle is excluded, so it takes Last.sort_key + 1.
   const auto right_middle = resolver.resolve(
       "proj-1",
       "11111111-0000-4000-8000-000000000002",
       simple_request(CardPlacementIntent::Right)
   );
-  REQUIRE(right_middle.sort_key == 30.5);
+  REQUIRE(right_middle.sort_key == 31.0);
 
   // Boundary: Right on the last sibling is a no-op.
   const auto right_last = resolver.resolve(
@@ -560,18 +563,20 @@ TEST_CASE(
       resolver.resolve("proj-1", source, simple_request(CardPlacementIntent::ToEnd)).sort_key ==
       21.0
   );
-  // Siblings order as [A, Z], so "after A" sits in a zero-width gap and steps past it (21.0).
-  // Were Z first, A would be last and the result would be the midpoint 20.5.
-  REQUIRE(
-      resolver
-          .resolve("proj-1", source, before_after_request(CardPlacementIntent::After, title_first))
-          .sort_key == 21.0
-  );
-  REQUIRE(
-      resolver
-          .resolve("proj-1", source, before_after_request(CardPlacementIntent::Before, title_last))
-          .sort_key == 19.0
-  );
+  // Siblings order as [A, Z] with no room between them, so "after A" and "before Z" re-space
+  // the tied run: A, the card and Z take 1, 2 and 3, keeping the requested order.
+  for (const auto& request :
+       {before_after_request(CardPlacementIntent::After, title_first),
+        before_after_request(CardPlacementIntent::Before, title_last)}) {
+    const auto between = resolver.resolve("proj-1", source, request, 7);
+    REQUIRE(between.sort_key == 2.0);
+    REQUIRE(between.sibling_changes.size() == 2U);
+    REQUIRE(between.sibling_changes[0].card_id == title_first);
+    REQUIRE(between.sibling_changes[0].sort_key == 1.0);
+    REQUIRE(between.sibling_changes[0].updated_at == 7);
+    REQUIRE(between.sibling_changes[1].card_id == title_last);
+    REQUIRE(between.sibling_changes[1].sort_key == 3.0);
+  }
   REQUIRE_THROWS_WITH(
       resolver
           .resolve("proj-1", source, simple_request(CardPlacementIntent::ToStart, deleted_parent)),
@@ -768,7 +773,7 @@ TEST_CASE(
   for (const auto intent : {CardPlacementIntent::ToStart, CardPlacementIntent::ToEnd}) {
     const auto result = resolver.resolve("proj-1", source, simple_request(intent, empty_parent));
     REQUIRE(result.parent_card_id == empty_parent);
-    REQUIRE(result.sort_key == 0.0);
+    REQUIRE(result.sort_key == 1.0);
   }
 
   // Naming the card's own parent while it is that parent's only child is still a no-op.

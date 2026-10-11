@@ -5,6 +5,7 @@
 
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace holder::card {
 
@@ -39,14 +40,18 @@ struct CardPlacementResult {
   std::optional<std::string> parent_card_id;
   double sort_key = 0.0;
   std::optional<std::string> moved_into_title;
+  // Siblings whose sort keys must change for the card to fit where it was asked to go: when its
+  // neighbours leave no room (tied keys, or a gap exhausted by repeated moves), the smallest
+  // surrounding window is re-spaced. They carry their new sort_key and the updated_at passed to
+  // resolve, and must be written in the same operation as the card (CardStore::move_to does).
+  std::vector<holder::model::Card> sibling_changes;
 };
 
 // Resolves a card-move placement intent -- the algorithm behind holder-daemon's /move route --
-// without applying it: given a live sibling tree, works out the exact {parent, sort_key} a
-// card should land at for one of eight relative-placement intents, but leaves the actual
-// write (holder::card::CardStore::move) to the caller. Ported verbatim from holder-daemon's
-// CardRoutes.cpp so both the daemon route and this library's own C API
-// (holder_card_move_json) share one implementation.
+// without applying it: given a live sibling tree, works out where the card lands for one of
+// eight relative-placement intents, using CardHierarchy's placed_card_changes for the keys.
+// CardStore::move_to resolves and applies a move in one locked operation; prefer it to calling
+// this and writing the result separately.
 class CardPlacementResolver {
  public:
   explicit CardPlacementResolver(CardRepo& cards)
@@ -67,10 +72,12 @@ class CardPlacementResolver {
   //     handled.
   //   "already_at_project_root" -- UpLevel on a card that has no parent.
   //   "missing_target_card_id" -- Into/Before/After without target_card_id.
+  // updated_at stamps sibling_changes.
   CardPlacementResult resolve(
       const std::string& project_id,
       const std::string& card_id,
-      const CardPlacementRequest& request
+      const CardPlacementRequest& request,
+      long long updated_at = 0
   ) const;
 
  private:
