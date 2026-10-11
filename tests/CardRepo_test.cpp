@@ -164,6 +164,42 @@ TEST_CASE(
 }
 
 TEST_CASE(
+    "CardRepo card_id and recent pages keep their cursor conventions",
+    "[cardrepo][collection-pages]"
+) {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  create_project(db, "p");
+  holder::card::CardRepo repo(db);
+  for (const auto& id : {"a", "b", "c"})
+    create_card(repo, id, "p", id);
+  repo.touch_updated("b", 5);
+
+  const auto ids = [](const std::vector<holder::model::Card>& cards) {
+    std::vector<std::string> out;
+    for (const auto& card : cards)
+      out.push_back(card.card_id);
+    return out;
+  };
+  using Ids = std::vector<std::string>;
+  // An empty card_id cursor selects the first page, as no cursor does.
+  CHECK(ids(repo.list_page_by_card_id("p", std::string(), 2)) == Ids{"a", "b"});
+  CHECK(ids(repo.list_page_by_card_id("p", std::nullopt, 2)) == Ids{"a", "b"});
+  CHECK(ids(repo.list_page_by_card_id("p", std::string("b"), 2)) == Ids{"c"});
+
+  // Most recent first, card_id descending among ties.
+  CHECK(ids(repo.list_recent_page("p", std::nullopt, std::nullopt, 10)) == Ids{"b", "c", "a"});
+  CHECK(ids(repo.list_recent_page("p", 1, std::string("c"), 10)) == Ids{"a"});
+  // A card_id without updated_at selects the first page; updated_at needs a card_id.
+  CHECK(ids(repo.list_recent_page("p", std::nullopt, std::string("c"), 1)) == Ids{"b"});
+  CHECK_THROWS_AS(repo.list_recent_page("p", 1, std::nullopt, 10), std::invalid_argument);
+  CHECK_THROWS_AS(repo.list_recent_page("p", 1, std::string(), 10), std::invalid_argument);
+  db.close();
+}
+
+TEST_CASE(
     "CardRepo collection pages combine filters and stable ordering",
     "[cardrepo][collection-pages]"
 ) {
@@ -711,7 +747,8 @@ TEST_CASE("CardRepo methods throw sqlite errors when DB is closed", "[cardrepo]"
   );
   REQUIRE_THROWS_WITH(
       repo.list_recent_page("proj-1", std::nullopt, std::nullopt, 10),
-      Catch::Matchers::ContainsSubstring("prepare list recent cards failed: unknown sqlite error")
+      Catch::Matchers::ContainsSubstring("prepare card collection page failed: unknown sqlite error"
+      )
   );
 }
 
