@@ -9,10 +9,13 @@
 #include "platform/Migrations.h"
 #include "project/ProjectRepo.h"
 
+#include <sqlite3.h>
+
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -181,7 +184,14 @@ TEST_CASE("migrate_to_latest adds UUID4 ID scheme to v4 projects", "[migrations]
           ");"
           "CREATE TABLE cards ("
           "card_id TEXT PRIMARY KEY,"
-          "project_id TEXT NOT NULL"
+          "project_id TEXT NOT NULL,"
+          "parent_card_id TEXT NULL,"
+          "updated_at INTEGER NOT NULL"
+          ");"
+          "CREATE TABLE card_tags ("
+          "project_id TEXT NOT NULL,"
+          "card_id TEXT NOT NULL,"
+          "tag TEXT NOT NULL"
           ");"
           "CREATE TABLE schema_version(version INTEGER NOT NULL);"
           "INSERT INTO schema_version VALUES(4);"
@@ -219,6 +229,55 @@ TEST_CASE("migrate_to_latest adds the project card ID lookup index to v5", "[mig
   ));
   REQUIRE_NOTHROW(db.exec("SELECT card_id FROM cards INDEXED BY idx_cards_project_card_id "
                           "WHERE project_id = 'project' AND card_id >= '';"));
+}
+
+TEST_CASE("migrate_to_latest adds the collection page indexes to v6", "[migrations]") {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  holder::platform::Migrations::ensure_schema(db, find_schema_sql());
+  // Recreate the v6 indexes.
+  db.exec("DROP INDEX idx_cards_project_parent_card_id;"
+          "DROP INDEX idx_cards_project_parent_updated;"
+          "DROP INDEX idx_cards_project_updated;"
+          "CREATE INDEX idx_cards_project_updated ON cards(project_id, updated_at);"
+          "DROP INDEX idx_card_tags_tag;"
+          "CREATE INDEX idx_card_tags_tag ON card_tags(project_id, tag);"
+          "UPDATE schema_version SET version = 6;");
+
+  REQUIRE(holder::platform::Migrations::migrate_to_latest(db));
+  REQUIRE_NOTHROW(holder::platform::Migrations::ensure_schema_version(
+      db,
+      holder::platform::Migrations::latest_schema_version
+  ));
+  const auto columns = [&](const std::string& index) {
+    std::vector<std::string> names;
+    sqlite3_stmt* stmt = nullptr;
+    REQUIRE(
+        sqlite3_prepare_v2(
+            db.handle(),
+            ("SELECT name FROM pragma_index_info('" + index + "') ORDER BY seqno;").c_str(),
+            -1,
+            &stmt,
+            nullptr
+        ) == SQLITE_OK
+    );
+    while (sqlite3_step(stmt) == SQLITE_ROW)
+      names.emplace_back(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0)));
+    sqlite3_finalize(stmt);
+    return names;
+  };
+  using Names = std::vector<std::string>;
+  REQUIRE(columns("idx_cards_project_updated") == Names{"project_id", "updated_at", "card_id"});
+  REQUIRE(
+      columns("idx_cards_project_parent_card_id") ==
+      Names{"project_id", "parent_card_id", "card_id"}
+  );
+  REQUIRE(
+      columns("idx_cards_project_parent_updated") ==
+      Names{"project_id", "parent_card_id", "updated_at", "card_id"}
+  );
+  REQUIRE(columns("idx_card_tags_tag") == Names{"project_id", "tag", "card_id"});
 }
 
 TEST_CASE("migrate_to_latest rejects databases newer than this build", "[migrations]") {

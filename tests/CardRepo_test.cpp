@@ -117,6 +117,53 @@ int sqlite_interrupt_cb(void* data) {
 } // namespace
 
 TEST_CASE(
+    "CardRepo tag-filtered collection pages walk card_id order across pages",
+    "[cardrepo][collection-pages]"
+) {
+  const auto dir = make_temp_dir();
+  holder::platform::Db db;
+  db.open(dir / "holder.db");
+  apply_schema(db);
+  create_project(db, "p");
+  create_project(db, "other");
+  holder::card::CardRepo repo(db);
+  holder::card::TagRepo tags(db);
+  for (const auto& id : {"a", "b", "c", "d", "e", "f", "g"}) {
+    create_card(repo, id, "p", id);
+    // Untagged cards sit between tagged ones; "e" is tagged but then trashed.
+    if (std::string("acegf").find(id) != std::string::npos)
+      tags.set_tags_for_card("p", id, {"work"}, 1);
+  }
+  repo.soft_delete("e", 2, 2);
+  create_card(repo, "bb", "other", "bb");
+  tags.set_tags_for_card("other", "bb", {"work"}, 1);
+  repo.move("g", "a", 0, 3);
+
+  holder::card::CardPageQuery query;
+  query.tag = "work";
+  std::vector<std::string> seen;
+  for (int pages = 0; pages < 10; ++pages) {
+    const auto page = repo.list_collection_page("p", query, 2);
+    for (const auto& card : page)
+      seen.push_back(card.card_id);
+    if (page.size() < 2) break;
+    query.cursor = holder::card::CardPageCursor{page.back().card_id, page.back().updated_at};
+  }
+  CHECK(seen == std::vector<std::string>{"a", "c", "f", "g"});
+
+  query.cursor.reset();
+  query.parent = holder::card::CardPageRoots{};
+  auto page = repo.list_collection_page("p", query, 10);
+  REQUIRE(page.size() == 3);
+  CHECK(page[2].card_id == "f");
+  query.parent = holder::card::CardPageChildrenOf{"a"};
+  page = repo.list_collection_page("p", query, 10);
+  REQUIRE(page.size() == 1);
+  CHECK(page[0].card_id == "g");
+  db.close();
+}
+
+TEST_CASE(
     "CardRepo collection pages combine filters and stable ordering",
     "[cardrepo][collection-pages]"
 ) {

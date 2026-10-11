@@ -1,4 +1,4 @@
--- schema.sql (schema version 6)
+-- schema.sql (schema version 7)
 -- Local-first holder schema: projects, cards, links, milestones, resources, AI threads/messages, and FTS5.
 -- The app/server is responsible for keeping FTS tables in sync (no triggers in v0.1).
 
@@ -43,11 +43,20 @@ CREATE TABLE IF NOT EXISTS cards (
   FOREIGN KEY(parent_card_id) REFERENCES cards(card_id) ON DELETE SET NULL
 );
 
+-- card_id breaks updated_at ties for keyset pagination, so pages need no sort step.
 CREATE INDEX IF NOT EXISTS idx_cards_project_updated
-  ON cards(project_id, updated_at);
+  ON cards(project_id, updated_at, card_id);
 
 CREATE INDEX IF NOT EXISTS idx_cards_project_parent_sort
   ON cards(project_id, parent_card_id, sort_key);
+
+-- Root and children collection pages, in card_id and updated order, without scanning the
+-- whole project for a parent's cards.
+CREATE INDEX IF NOT EXISTS idx_cards_project_parent_card_id
+  ON cards(project_id, parent_card_id, card_id);
+
+CREATE INDEX IF NOT EXISTS idx_cards_project_parent_updated
+  ON cards(project_id, parent_card_id, updated_at, card_id);
 
 CREATE INDEX IF NOT EXISTS idx_cards_project_title
   ON cards(project_id, title);
@@ -103,8 +112,9 @@ CREATE TABLE IF NOT EXISTS card_tags (
   PRIMARY KEY(project_id, card_id, tag)
 );
 
+-- Tag-filtered collection pages walk this in card_id order.
 CREATE INDEX IF NOT EXISTS idx_card_tags_tag
-  ON card_tags(project_id, tag);
+  ON card_tags(project_id, tag, card_id);
 
 CREATE INDEX IF NOT EXISTS idx_card_tags_card
   ON card_tags(project_id, card_id);
@@ -457,7 +467,7 @@ CREATE TABLE IF NOT EXISTS schema_version (
   version INTEGER NOT NULL
 );
 
--- Initialize schema version to 6 if empty
+-- Initialize schema version to 7 if empty
 INSERT INTO schema_version(version)
-SELECT 6
+SELECT 7
 WHERE NOT EXISTS (SELECT 1 FROM schema_version);
