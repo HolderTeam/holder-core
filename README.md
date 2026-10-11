@@ -1,3 +1,5 @@
+> **This repository has moved to [holder](https://github.com/HolderTeam/holder).** Core now lives in [`core/`](https://github.com/HolderTeam/holder/tree/main/core), with its full history. This repository is kept as an archive and is no longer updated.
+
 # holder-core
 
 `holder-core` is Holder's platform-independent storage and domain library.
