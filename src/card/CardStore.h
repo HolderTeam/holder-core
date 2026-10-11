@@ -1,6 +1,7 @@
 #pragma once
 
 #include "card/CardFrontMatter.h"
+#include "card/CardHierarchy.h"
 #include "card/CardPlacementResolver.h"
 #include "card/CardRepo.h"
 #include "card/LinkRepo.h"
@@ -83,6 +84,9 @@ struct CollectionCardPage {
   std::optional<CardPageCursor> next_cursor;
 };
 
+// What trashing a card does with its live children.
+enum class TrashChildren { Promote, TrashSubtree };
+
 struct CardMoveResult {
   holder::model::Card card;
   std::optional<std::string> moved_into_title;
@@ -155,9 +159,23 @@ class CardStore {
       const MilestoneUpdate& update,
       long long updated_at
   );
-  // Promote immediate live children into this card's sibling position, preserving
-  // their descendants. One durable operation and Git commit for every changed card.
-  void trash(const std::string& card_id, long long deleted_at);
+  // Promote (the default): immediate live children take this card's sibling position, keeping
+  // their descendants. TrashSubtree: every live descendant is trashed with the card, keeping its
+  // parent inside Trash; already-trashed descendants keep their own trash time, and live cards
+  // beneath them are found and trashed too. Either way, one durable operation and Git commit.
+  void trash(
+      const std::string& card_id,
+      long long deleted_at,
+      TrashChildren children = TrashChildren::Promote
+  );
+  // Live cards that browsing from the roots cannot reach (their parent is missing or trashed),
+  // and where repair would move them. Reads only the database, so it works on a locked
+  // encrypted project; it changes nothing.
+  HierarchyRepairPlan plan_hierarchy_repair(const std::string& project_id);
+  // Applies the plan above, recomputed under the project lock, in one journalled operation and
+  // Git commit. Idempotent: once applied, a second call finds nothing and writes nothing. Cards
+  // in parent cycles are reported, not moved.
+  HierarchyRepairPlan repair_hierarchy(const std::string& project_id, long long updated_at);
   // Restore only this card, with a reachable parent; promoted children stay put.
   void restore(const std::string& card_id, long long updated_at);
   // Restores the card snapshot at historical_oid through the ordinary CardStore write path.
@@ -223,9 +241,25 @@ class CardStore {
 
  private:
   holder::model::Project require_project(const std::string& project_id) const;
-  // Writes `target` (the card in `current`, possibly moving between the live and trash paths)
-  // and `placements` (other cards whose placement changes) in one journalled operation: one
-  // SQLite transaction and one Git commit, rolled back together on failure.
+  // One card's change: its stored state and what it becomes, possibly moving between the live
+  // and trash paths.
+  struct CardChange {
+    holder::model::Card current;
+    holder::core::ParsedCardFile target;
+  };
+  // A live card whose placement changes, read from its file.
+  CardChange placement_change(
+      const holder::model::Project& project,
+      const holder::model::Card& placed
+  );
+  // Writes every change in one journalled operation: one SQLite transaction and one Git commit,
+  // rolled back together on failure.
+  void apply_card_changes(
+      const holder::model::Project& project,
+      std::vector<CardChange> changes,
+      const std::string& message
+  );
+  // `target` for the card in `current`, plus `placements` (other cards whose placement changes).
   void apply_card_changes(
       const holder::model::Project& project,
       const holder::model::Card& current,

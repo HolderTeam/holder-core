@@ -903,3 +903,181 @@ TEST_CASE("Encrypted re-spacing moves keep content encrypted", "[cardstore][move
   REQUIRE(f.order() == std::vector<std::string>{before_id, child_id, after_id});
   REQUIRE(f.store.get_content(*f.cards.get(after_id)) == "body " + after_id + "\n#keep\n");
 }
+
+namespace {
+// What trash did before children were promoted: the card alone moves to Trash, in its file, Git
+// and SQLite, and its live children keep pointing at it.
+void legacy_trash(Fixture& f, const std::string& id, long long at) {
+  const auto root = std::filesystem::path(f.project.root_path);
+  auto parsed = holder::core::parse_card_file(f.bytes(id));
+  auto card = *f.cards.get(id);
+  card.deleted_at = at;
+  card.updated_at = at;
+  card.rel_path = holder::core::card_trash_rel_path(id);
+  f.fs.create_directories((root / card.rel_path).parent_path());
+  f.git.real.write_file(
+      card.rel_path,
+      holder::core::render_card_front_matter(card, parsed.links, parsed.milestones) + parsed.body
+  );
+  f.git.real.stage_path(card.rel_path);
+  f.fs.remove(root / holder::core::card_rel_path(id));
+  f.git.real.remove_path(holder::core::card_rel_path(id));
+  f.git.real.commit("Legacy delete card " + id);
+  f.cards.soft_delete(id, at, at);
+}
+} // namespace
+
+TEST_CASE(
+    "Repair returns hidden branches to the place their trashed parents held",
+    "[cardstore][repair]"
+) {
+  Fixture f;
+  // Roots: before, parent (trashed, hiding child_a and child_b), after.
+  f.add(before_id, {}, 1);
+  f.add(parent_id, {}, 2);
+  f.add(after_id, {}, 3);
+  f.add(child_a_id, parent_id, 1, "alpha");
+  f.add(child_b_id, parent_id, 2, "beta");
+  f.add(grandchild_id, child_a_id);
+  // Nested: ancestor > child (trashed) > child2 (trashed) > new_child, so new_child returns to
+  // ancestor, where child sat.
+  f.add(ancestor_id, {}, 4);
+  f.add(child1_id, ancestor_id, 1);
+  f.add(child_id, ancestor_id, 2);
+  f.add(child2_id, child_id, 1);
+  f.add(new_child_id, child2_id, 1);
+  legacy_trash(f, parent_id, 5);
+  legacy_trash(f, child2_id, 6);
+  legacy_trash(f, child_id, 7);
+
+  const auto planned = f.store.plan_hierarchy_repair(f.project.project_id);
+  REQUIRE(planned.moved_card_ids == std::vector<std::string>{child_a_id, child_b_id, new_child_id});
+  REQUIRE(planned.cycle_card_ids.empty());
+  // Planning writes nothing.
+  REQUIRE(f.cards.get(child_a_id)->parent_card_id == parent_id);
+
+  const auto head = f.head();
+  const auto repaired = f.store.repair_hierarchy(f.project.project_id, 20);
+  REQUIRE(repaired.moved_card_ids == planned.moved_card_ids);
+  REQUIRE(
+      f.order() ==
+      std::vector<std::string>{before_id, child_a_id, child_b_id, after_id, ancestor_id}
+  );
+  REQUIRE(f.order(ancestor_id) == std::vector<std::string>{child1_id, new_child_id});
+  REQUIRE(f.cards.get(grandchild_id)->parent_card_id == child_a_id);
+  REQUIRE(f.cards.get(grandchild_id)->updated_at == 1);
+  holder::git::GitRepo history;
+  history.open_existing(f.project.root_path);
+  REQUIRE(history.commit_parent_oids(f.head()) == std::vector<std::string>{head});
+  for (const auto& id : {child_a_id, child_b_id, new_child_id}) {
+    const auto file = holder::core::parse_card_file(f.bytes(id));
+    REQUIRE(file.card.parent_card_id == f.cards.get(id)->parent_card_id);
+    REQUIRE(file.body == "body " + std::string(id) + "\n#keep\n");
+  }
+
+  // Idempotent: nothing left to do, nothing written.
+  const auto again = f.store.repair_hierarchy(f.project.project_id, 21);
+  REQUIRE(again.moved_card_ids.empty());
+  REQUIRE(again.placements.empty());
+  REQUIRE(history.commit_parent_oids(f.head()) == std::vector<std::string>{head});
+
+  f.rebuild();
+  REQUIRE(
+      f.order() ==
+      std::vector<std::string>{before_id, child_a_id, child_b_id, after_id, ancestor_id}
+  );
+  REQUIRE(f.order(ancestor_id) == std::vector<std::string>{child1_id, new_child_id});
+}
+
+TEST_CASE(
+    "Repair sends cards with a missing parent to the end of the roots",
+    "[cardstore][repair]"
+) {
+  Fixture f;
+  f.add(before_id, {}, 1);
+  f.add(child_id, {}, 2);
+  f.db.exec(
+      "PRAGMA foreign_keys = OFF; UPDATE cards SET parent_card_id = '" + missing_id +
+      "' WHERE card_id = '" + child_id + "'; PRAGMA foreign_keys = ON;"
+  );
+  const auto repaired = f.store.repair_hierarchy(f.project.project_id, 9);
+  REQUIRE(repaired.moved_card_ids == std::vector<std::string>{child_id});
+  REQUIRE(f.order() == std::vector<std::string>{before_id, child_id});
+  REQUIRE_FALSE(f.cards.get(child_id)->parent_card_id);
+}
+
+TEST_CASE("Repair reports parent cycles and leaves them alone", "[cardstore][repair]") {
+  Fixture f;
+  f.add(child1_id);
+  f.add(child2_id, child1_id);
+  f.cards.move(child1_id, child2_id, 1, 1);
+  const auto head = f.head();
+  const auto plan = f.store.repair_hierarchy(f.project.project_id, 9);
+  REQUIRE(plan.moved_card_ids.empty());
+  REQUIRE(plan.cycle_card_ids == std::vector<std::string>{child1_id, child2_id});
+  REQUIRE(f.head() == head);
+}
+
+TEST_CASE(
+    "Subtree trash takes every live descendant, even beneath trashed ones",
+    "[cardstore][lifecycle][subtree]"
+) {
+  Fixture f;
+  f.add(before_id, {}, 1);
+  f.add(parent_id, {}, 2);
+  f.add(after_id, {}, 3);
+  f.add(child_a_id, parent_id, 1);
+  f.add(child_b_id, parent_id, 2);
+  f.add(grandchild_id, child_a_id);
+  f.add(old_trash_id, parent_id, 3);
+  f.add(new_child_id, old_trash_id);
+  // A card trashed earlier, with a live child left beneath it.
+  legacy_trash(f, old_trash_id, 5);
+  const auto old_trash = f.bytes(old_trash_id, true);
+  const auto head = f.head();
+
+  f.store.trash(parent_id, 10, holder::card::TrashChildren::TrashSubtree);
+
+  REQUIRE(f.order() == std::vector<std::string>{before_id, after_id});
+  for (const auto& id : {parent_id, child_a_id, child_b_id, grandchild_id, new_child_id}) {
+    REQUIRE(f.cards.get(id)->deleted_at == 10);
+    REQUIRE(f.fs.exists(
+        std::filesystem::path(f.project.root_path) / holder::core::card_trash_rel_path(id)
+    ));
+  }
+  // Parents are kept inside Trash; the earlier trash keeps its own time and file.
+  REQUIRE(f.cards.get(grandchild_id)->parent_card_id == child_a_id);
+  REQUIRE(f.cards.get(new_child_id)->parent_card_id == old_trash_id);
+  REQUIRE(f.cards.get(old_trash_id)->deleted_at == 5);
+  REQUIRE(f.bytes(old_trash_id, true) == old_trash);
+  REQUIRE(f.cards.get(before_id)->updated_at == 1);
+  holder::git::GitRepo history;
+  history.open_existing(f.project.root_path);
+  REQUIRE(history.commit_parent_oids(f.head()) == std::vector<std::string>{head});
+  REQUIRE(holder::card::TagRepo(f.db).list_tags_for_card(f.project.project_id, child_a_id).empty());
+
+  f.rebuild();
+  REQUIRE(f.order() == std::vector<std::string>{before_id, after_id});
+  // Restoring the parent first lets a child restored after it reattach.
+  f.store.restore(parent_id, 11);
+  f.store.restore(child_a_id, 12);
+  REQUIRE(f.cards.get(child_a_id)->parent_card_id == parent_id);
+  REQUIRE(f.cards.get(grandchild_id)->deleted_at == 10);
+}
+
+TEST_CASE("A failed subtree trash changes nothing", "[cardstore][lifecycle][subtree]") {
+  Fixture f;
+  f.add(parent_id);
+  f.add(child_id, parent_id);
+  f.add(grandchild_id, child_id);
+  const auto head = f.head();
+  const auto child = f.bytes(child_id);
+  SECTION("a descendant write fails") { f.git.writes_until_failure = 3; }
+  SECTION("commit fails") { f.git.fail_commit = true; }
+  REQUIRE_THROWS(f.store.trash(parent_id, 10, holder::card::TrashChildren::TrashSubtree));
+  for (const auto& id : {parent_id, child_id, grandchild_id})
+    REQUIRE_FALSE(f.cards.get(id)->deleted_at);
+  REQUIRE(f.bytes(child_id) == child);
+  REQUIRE(f.head() == head);
+  REQUIRE_FALSE(holder::card::CardMutation::pending(f.project.root_path));
+}

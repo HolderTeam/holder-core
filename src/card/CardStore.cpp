@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <map>
+#include <set>
 #include <stdexcept>
 #include <utility>
 
@@ -649,6 +650,21 @@ std::optional<holder::model::Milestone> CardStore::update_milestone(
   return updated;
 }
 
+CardStore::CardChange CardStore::placement_change(
+    const holder::model::Project& project,
+    const holder::model::Card& placed
+) {
+  if (placed.rel_path != holder::core::card_rel_path(placed.card_id)) {
+    throw std::runtime_error("card rel_path does not match card_id");
+  }
+  const auto path = git_->repo_dir() / placed.rel_path;
+  if (!fs_->exists(path)) throw std::runtime_error("card content missing");
+  auto parsed = holder::core::parse_card_file(decode_card_blob(project, fs_->read_file(path)));
+  parsed.card = placed;
+  parsed.links = link_repo_.list_outgoing(placed.project_id, placed.card_id);
+  return {placed, std::move(parsed)};
+}
+
 void CardStore::apply_card_changes(
     const holder::model::Project& project,
     const holder::model::Card& current,
@@ -656,40 +672,49 @@ void CardStore::apply_card_changes(
     const std::vector<holder::model::Card>& placements,
     const std::string& message
 ) {
-  const auto live_path = holder::core::card_rel_path(current.card_id);
-  if (current.rel_path != live_path &&
-      !(current.deleted_at &&
-        current.rel_path == holder::core::card_trash_rel_path(current.card_id)))
-    throw std::runtime_error("card rel_path does not match card_id");
-  const auto trash_path = holder::core::card_trash_rel_path(current.card_id);
-  const auto source_path = current.deleted_at ? trash_path : live_path;
-  const auto target_path = target.card.deleted_at ? trash_path : live_path;
-  if (!fs_->exists(git_->repo_dir() / source_path))
-    throw std::runtime_error("card content missing");
-  if (source_path != target_path && fs_->exists(git_->repo_dir() / target_path)) {
-    throw std::runtime_error("conflict: destination card file already exists");
-  }
+  std::vector<CardChange> changes;
+  changes.push_back({current, std::move(target)});
+  for (const auto& card : placements)
+    changes.push_back(placement_change(project, card));
+  apply_card_changes(project, std::move(changes), message);
+}
 
-  std::vector<holder::core::ParsedCardFile> records;
-  target.card.rel_path = live_path;
-  records.push_back(std::move(target));
-  std::vector<std::string> paths{live_path, trash_path};
-  for (const auto& card : placements) {
-    if (card.rel_path != holder::core::card_rel_path(card.card_id)) {
+void CardStore::apply_card_changes(
+    const holder::model::Project& project,
+    std::vector<CardChange> changes,
+    const std::string& message
+) {
+  struct Rename {
+    std::string from;
+    std::string to;
+  };
+  std::vector<Rename> renames;
+  std::set<std::string> path_set;
+  for (auto& change : changes) {
+    const auto& current = change.current;
+    const auto live_path = holder::core::card_rel_path(current.card_id);
+    const auto trash_path = holder::core::card_trash_rel_path(current.card_id);
+    if (current.rel_path != live_path && !(current.deleted_at && current.rel_path == trash_path))
       throw std::runtime_error("card rel_path does not match card_id");
+    const auto source_path = current.deleted_at ? trash_path : live_path;
+    const auto target_path = change.target.card.deleted_at ? trash_path : live_path;
+    if (!fs_->exists(git_->repo_dir() / source_path))
+      throw std::runtime_error("card content missing");
+    if (source_path != target_path) {
+      if (fs_->exists(git_->repo_dir() / target_path))
+        throw std::runtime_error("conflict: destination card file already exists");
+      renames.push_back({source_path, target_path});
     }
-    const auto path = git_->repo_dir() / card.rel_path;
-    if (!fs_->exists(path)) throw std::runtime_error("card content missing");
-    auto parsed = holder::core::parse_card_file(decode_card_blob(project, fs_->read_file(path)));
-    parsed.card = card;
-    parsed.links = link_repo_.list_outgoing(card.project_id, card.card_id);
-    records.push_back(std::move(parsed));
-    paths.push_back(card.rel_path);
+    change.target.card.rel_path = live_path;
+    path_set.insert(live_path);
+    path_set.insert(trash_path);
   }
+  const std::vector<std::string> paths(path_set.begin(), path_set.end());
 
   // Decode and encrypt every affected card before the first file or database write.
   std::vector<std::pair<std::string, std::string>> writes;
-  for (const auto& record : records) {
+  for (const auto& change : changes) {
+    const auto& record = change.target;
     auto durable_card = record.card;
     if (durable_card.deleted_at)
       durable_card.rel_path = holder::core::card_trash_rel_path(durable_card.card_id);
@@ -706,13 +731,15 @@ void CardStore::apply_card_changes(
                                                 : plain
     );
   }
-  std::map<std::string, std::optional<std::string>> changes;
-  if (source_path != target_path) changes[source_path] = std::nullopt;
+  std::map<std::string, std::optional<std::string>> file_changes;
+  for (const auto& rename : renames)
+    file_changes[rename.from] = std::nullopt;
   for (const auto& [path, bytes] : writes)
-    changes[path] = bytes;
-  CardMutation mutation(*fs_, project.root_path, paths, changes);
+    file_changes[path] = bytes;
+  CardMutation mutation(*fs_, project.root_path, paths, file_changes);
   holder::platform::Tx tx(db_);
-  for (const auto& record : records) {
+  for (const auto& change : changes) {
+    const auto& record = change.target;
     const auto& card = record.card;
     card_repo_.restore_snapshot(card);
     link_repo_.delete_links_from(card.project_id, card.card_id);
@@ -734,10 +761,10 @@ void CardStore::apply_card_changes(
   }
   try {
     mutation.begin();
-    if (source_path != target_path) {
-      fs_->create_directories((git_->repo_dir() / target_path).parent_path());
-      fs_->rename(git_->repo_dir() / source_path, git_->repo_dir() / target_path);
-      git_->remove_path(source_path);
+    for (const auto& rename : renames) {
+      fs_->create_directories((git_->repo_dir() / rename.to).parent_path());
+      fs_->rename(git_->repo_dir() / rename.from, git_->repo_dir() / rename.to);
+      git_->remove_path(rename.from);
     }
     std::vector<std::string> staged;
     for (const auto& [path, bytes] : writes) {
@@ -763,7 +790,7 @@ void CardStore::apply_card_changes(
   mutation.finish();
 }
 
-void CardStore::trash(const std::string& card_id, long long deleted_at) {
+void CardStore::trash(const std::string& card_id, long long deleted_at, TrashChildren children) {
   auto card = card_repo_.get(card_id);
   if (!card) throw std::runtime_error("card not found: " + card_id);
   const auto project = require_project(card->project_id);
@@ -775,15 +802,78 @@ void CardStore::trash(const std::string& card_id, long long deleted_at) {
   if (project.git_remote_url.has_value()) git_->set_remote("origin", *project.git_remote_url);
   if (card->rel_path != holder::core::card_rel_path(card_id))
     throw std::runtime_error("card rel_path does not match card_id");
-  const auto source = git_->repo_dir() / card->rel_path;
-  if (!fs_->exists(source)) throw std::runtime_error("card content missing");
-  auto parsed = holder::core::parse_card_file(decode_card_blob(project, fs_->read_file(source)));
-  parsed.card = *card;
-  parsed.card.deleted_at = deleted_at;
-  parsed.card.updated_at = deleted_at;
-  parsed.links = link_repo_.list_outgoing(card->project_id, card_id);
-  const auto placements = promoted_card_children(card_repo_, *card, deleted_at);
-  apply_card_changes(project, *card, std::move(parsed), placements, "Delete card " + card->title);
+  const auto trashed = [&](const holder::model::Card& live) {
+    auto change = placement_change(project, live);
+    change.target.card.deleted_at = deleted_at;
+    change.target.card.updated_at = deleted_at;
+    return change;
+  };
+  if (children == TrashChildren::Promote) {
+    auto change = trashed(*card);
+    const auto placements = promoted_card_children(card_repo_, *card, deleted_at);
+    apply_card_changes(
+        project,
+        *card,
+        std::move(change.target),
+        placements,
+        "Delete card " + card->title
+    );
+    return;
+  }
+
+  // Walk the whole subtree, through already-trashed cards, collecting live descendants.
+  std::map<std::string, std::vector<holder::model::Card>> by_parent;
+  for (auto& c : card_repo_.list_all(project.project_id))
+    if (c.parent_card_id) by_parent[*c.parent_card_id].push_back(std::move(c));
+  std::vector<CardChange> changes{trashed(*card)};
+  std::set<std::string> visited{card_id};
+  std::vector<std::string> pending{card_id};
+  while (!pending.empty()) {
+    const auto parent = pending.back();
+    pending.pop_back();
+    for (const auto& child : by_parent[parent]) {
+      if (!visited.insert(child.card_id).second) continue;
+      pending.push_back(child.card_id);
+      if (!child.deleted_at) changes.push_back(trashed(child));
+    }
+  }
+  const auto descendants = changes.size() - 1;
+  apply_card_changes(
+      project,
+      std::move(changes),
+      descendants == 0 ? "Delete card " + card->title
+                       : "Delete card " + card->title + " and " + std::to_string(descendants) +
+                             (descendants == 1 ? " descendant" : " descendants")
+  );
+}
+
+HierarchyRepairPlan CardStore::plan_hierarchy_repair(const std::string& project_id) {
+  const auto project = require_project(project_id);
+  auto operation = git_->lock_operation(project.root_path);
+  return holder::card::plan_hierarchy_repair(card_repo_, project_id, 0);
+}
+
+HierarchyRepairPlan CardStore::repair_hierarchy(
+    const std::string& project_id,
+    long long updated_at
+) {
+  const auto project = require_project(project_id);
+  auto operation = git_->lock_operation(project.root_path);
+  auto plan = holder::card::plan_hierarchy_repair(card_repo_, project_id, updated_at);
+  if (plan.placements.empty()) return plan;
+  git_->open_or_init(project.root_path);
+  if (project.git_remote_url.has_value()) git_->set_remote("origin", *project.git_remote_url);
+  std::vector<CardChange> changes;
+  for (const auto& card : plan.placements)
+    changes.push_back(placement_change(project, card));
+  const auto moved = plan.moved_card_ids.size();
+  apply_card_changes(
+      project,
+      std::move(changes),
+      "Repair card hierarchy: " + std::to_string(moved) +
+          (moved == 1 ? " hidden card made reachable" : " hidden cards made reachable")
+  );
+  return plan;
 }
 
 void CardStore::restore(const std::string& card_id, long long updated_at) {

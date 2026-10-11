@@ -7869,6 +7869,88 @@ TEST_CASE(
   holder_context_destroy(context);
 }
 
+TEST_CASE("C API trashes a subtree and repairs hidden cards", "[capi]") {
+  const auto data_dir = holder::test::make_temp_dir();
+  seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
+  holder_context* context = nullptr;
+  holder_error* error = nullptr;
+  const auto schema = read_schema_sql();
+  REQUIRE(
+      holder_context_open(data_dir.string().c_str(), schema.c_str(), &context, &error) == HOLDER_OK
+  );
+  const auto create_card = [&](const char* title, const char* parent_card_id) {
+    char* json = nullptr;
+    REQUIRE(
+        holder_card_create(context, "project-1", title, "body", parent_card_id, &json, &error) ==
+        HOLDER_OK
+    );
+    auto card_id = nlohmann::json::parse(json)["card_id"].get<std::string>();
+    holder_string_free(json);
+    return card_id;
+  };
+  const auto live_ids = [&]() {
+    char* json = nullptr;
+    REQUIRE(holder_card_list(context, "project-1", &json, &error) == HOLDER_OK);
+    std::set<std::string> ids;
+    for (const auto& card : nlohmann::json::parse(json))
+      ids.insert(card["card_id"].get<std::string>());
+    holder_string_free(json);
+    return ids;
+  };
+  const auto repair = [&](int apply) {
+    char* json = nullptr;
+    REQUIRE(
+        holder_project_repair_hierarchy_json(context, "project-1", apply, &json, &error) ==
+        HOLDER_OK
+    );
+    auto result = nlohmann::json::parse(json);
+    holder_string_free(json);
+    return result;
+  };
+
+  const auto keep = create_card("Keep", nullptr);
+  const auto parent = create_card("Parent", nullptr);
+  const auto child = create_card("Child", parent.c_str());
+  create_card("Grandchild", child.c_str());
+  REQUIRE(holder_card_delete_subtree(context, parent.c_str(), &error) == HOLDER_OK);
+  REQUIRE(live_ids() == std::set<std::string>{keep});
+  REQUIRE(holder_card_delete_subtree(context, "", &error) == HOLDER_ERROR_INVALID_ARGUMENT);
+  holder_error_destroy(error);
+  error = nullptr;
+
+  // A healthy project has nothing to repair.
+  const auto healthy = repair(1);
+  REQUIRE(healthy["applied"] == false);
+  REQUIRE(healthy["moved"].empty());
+
+  // Hide a live card under a trashed parent, as trash did before children were promoted.
+  const auto hidden_parent = create_card("Hidden parent", nullptr);
+  const auto hidden = create_card("Hidden", hidden_parent.c_str());
+  {
+    holder::platform::Db db;
+    db.open(data_dir / "server" / "holder.db");
+    db.exec("UPDATE cards SET deleted_at = 5 WHERE card_id = '" + hidden_parent + "';");
+  }
+  const auto planned = repair(0);
+  REQUIRE(planned["applied"] == false);
+  REQUIRE(
+      planned["moved"] ==
+      nlohmann::json::array({{{"card_id", hidden}, {"parent_card_id", nullptr}}})
+  );
+  REQUIRE(planned["cycle_card_ids"].empty());
+  const auto applied = repair(1);
+  REQUIRE(applied["applied"] == true);
+  REQUIRE(applied["changed_card_count"] == 1);
+  REQUIRE(repair(1)["applied"] == false);
+  REQUIRE(
+      holder_project_repair_hierarchy_json(context, "", 1, nullptr, &error) ==
+      HOLDER_ERROR_INVALID_ARGUMENT
+  );
+  holder_error_destroy(error);
+
+  holder_context_destroy(context);
+}
+
 TEST_CASE("C API card_move_json applies an explicit parent_card_id", "[capi]") {
   const auto data_dir = holder::test::make_temp_dir();
   seed_git_project(data_dir, "project-1", data_dir / "repo", std::nullopt);
